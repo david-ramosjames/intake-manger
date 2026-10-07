@@ -122,6 +122,324 @@ const QUESTIONS: { q: string; a: string }[] = [
   },
 ];
 
+const ENVS: { service: string; name: string; why: string }[] = [
+  {
+    service: "Intake Manager",
+    name: "NEXT_PUBLIC_SUPABASE_URL",
+    why: "Same Docket Flow Supabase project. Required to sign in and read leads.",
+  },
+  {
+    service: "Intake Manager",
+    name: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    why: "Public key for the signed-in staff session.",
+  },
+  {
+    service: "Intake Manager",
+    name: "SUPABASE_SERVICE_ROLE_KEY",
+    why: "Server only. Slack capture and the queue runner write leads with this.",
+  },
+  {
+    service: "Intake Manager",
+    name: "NEXT_PUBLIC_SITE_URL",
+    why: "Origin for Google sign-in. Local is http://localhost:3002. Add that origin plus /auth/callback in Supabase redirect URLs.",
+  },
+  {
+    service: "Intake Manager",
+    name: "NEXT_PUBLIC_DOCKET_URL",
+    why: "Where the signed-lead promote link goes. Production is https://rjl-docket-flow.vercel.app.",
+  },
+  {
+    service: "Intake Manager",
+    name: "SLACK_BOT_TOKEN",
+    why: "Posts due calls and scheduled notes into #lead-calls.",
+  },
+  {
+    service: "Intake Manager",
+    name: "SLACK_SIGNING_SECRET",
+    why: "Verifies the Slack events request at /api/slack/events.",
+  },
+  {
+    service: "Intake Manager",
+    name: "SLACK_APP_ID",
+    why: "Lets this app ignore its own Slack posts.",
+  },
+  {
+    service: "Intake Manager",
+    name: "SLACK_LEAD_CHANNEL_ID",
+    why: "The leads channel. Use C026G89PPSS.",
+  },
+  {
+    service: "Intake Manager",
+    name: "CRON_SECRET",
+    why: "Bearer token for /api/cron/queues.",
+  },
+  {
+    service: "Intake Manager",
+    name: "CALLRAIL_API_KEY",
+    why: "Optional. Writes the lead’s tags back onto the CallRail call.",
+  },
+  {
+    service: "Intake Manager",
+    name: "CALLRAIL_ACCOUNT_ID",
+    why: "Optional. The CallRail account those tags belong to.",
+  },
+  {
+    service: "Intake Manager",
+    name: "TEXT_SENDING",
+    why: "Leave off. SMS Follow-Up sends the texts. Set live only if that service is no longer texting the same people.",
+  },
+  {
+    service: "Intake Manager",
+    name: "QUO_API_KEY",
+    why: "Only if TEXT_SENDING is live.",
+  },
+  {
+    service: "Intake Manager",
+    name: "QUO_FROM_NUMBER",
+    why: "Only if TEXT_SENDING is live. The Quo number the text is sent from.",
+  },
+  {
+    service: "Quo Router",
+    name: "QUO_API_KEY",
+    why: "Reads calls and summaries. For this firm it can be FIRM_RAMOSJAMES_QUO_API_KEY.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_BOT_TOKEN",
+    why: "Posts into the lead channel. Per-firm prefix is allowed, same as the other Quo Router secrets.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_LEAD_CALLS_CHANNEL_ID",
+    why: "Channel id for #lead-calls.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_LEAD_CALLS_WEBHOOK_URL",
+    why: "Incoming webhook for the lead post.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_MISSED_CALLS_WEBHOOK_URL",
+    why: "Incoming webhook for missed calls.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_HUMAN_CALLS_WEBHOOK_URL",
+    why: "Incoming webhook for human-answered calls.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_SONA_CALLS_WEBHOOK_URL",
+    why: "Incoming webhook for Sona calls.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_TEXT_MESSAGES_WEBHOOK_URL",
+    why: "Incoming webhook for text messages.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_LEGAL_ASSISTANT_WEBHOOK_URL",
+    why: "Incoming webhook for the legal-assistant phone channel.",
+  },
+  {
+    service: "Quo Router",
+    name: "SLACK_LEGAL_ASSISTANT_CHANNEL_ID",
+    why: "Channel id for that legal-assistant phone channel.",
+  },
+  {
+    service: "Quo Router",
+    name: "CASE_DB_URL",
+    why: "Supabase Postgres connection for Docket. This is what writes the lead grade, sentiment, and intake. Same database as LEADS_DATABASE_URL.",
+  },
+  {
+    service: "Quo Router",
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY",
+    why: "One of these. Scores the call and extracts the intake. Set OPENAI_MODEL or ANTHROPIC_MODEL only to override the default.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "DATABASE_URL",
+    why: "Its own Railway Postgres. Not the Docket database.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "LEADS_DATABASE_URL",
+    why: "Docket Postgres connection, same value as Quo Router’s CASE_DB_URL. Without it, texts do not read the lead decision.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "QUO_API_KEY",
+    why: "Sends the texts.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "QUO_WEBHOOK_SECRET",
+    why: "Verifies Quo call and message webhooks. A comma-separated list is allowed.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "SLACK_BOT_TOKEN",
+    why: "Reads #lead-calls and posts the follow-up card.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "SLACK_SIGNING_SECRET",
+    why: "Verifies Slack events.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "SLACK_APP_ID",
+    why: "Optional. Skips the app’s own posts.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "OPENAI_API_KEY or ANTHROPIC_API_KEY",
+    why: "Chooses the text track. LEAD_LLM_PROVIDER picks which one when both are set.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "GOOGLE_CLIENT_ID",
+    why: "Dashboard sign-in.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "GOOGLE_CLIENT_SECRET",
+    why: "Dashboard sign-in.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "PUBLIC_URL",
+    why: "The deployed origin, used for the Google redirect.",
+  },
+  {
+    service: "SMS Follow-Up",
+    name: "BOOTSTRAP_ADMIN_EMAIL",
+    why: "Work Google address allowed into the dashboard on boot.",
+  },
+  {
+    service: "Sign Flow",
+    name: "SIGNFLOW_INTAKE_TOKEN",
+    why: "Shared bearer token. The same value goes in Intake Engine and Site-chat.",
+  },
+  {
+    service: "Sign Flow",
+    name: "DOCUSEAL_API_URL",
+    why: "DocuSeal host that creates the contract.",
+  },
+  {
+    service: "Sign Flow",
+    name: "DOCUSEAL_API_KEY",
+    why: "DocuSeal API key.",
+  },
+  {
+    service: "Sign Flow",
+    name: "DOCUSEAL_WEBHOOK_SECRET",
+    why: "Verifies DocuSeal signing events.",
+  },
+  {
+    service: "Sign Flow",
+    name: "QUO_API_KEY",
+    why: "Sends signing reminders by text.",
+  },
+  {
+    service: "Sign Flow",
+    name: "QUO_FROM_NUMBER",
+    why: "Quo number those reminders come from. QUO_PHONE_NUMBER_ID can be used instead.",
+  },
+  {
+    service: "Sign Flow",
+    name: "SLACK_BOT_TOKEN",
+    why: "Sends a contract from Slack.",
+  },
+  {
+    service: "Sign Flow",
+    name: "SLACK_SIGNING_SECRET",
+    why: "Verifies the Slack request.",
+  },
+  {
+    service: "Sign Flow",
+    name: "CRON_SECRET",
+    why: "Protects the reminder cron.",
+  },
+  {
+    service: "Intake Engine",
+    name: "DATABASE_URL",
+    why: "Its own Railway Postgres for the website journey.",
+  },
+  {
+    service: "Intake Engine",
+    name: "AUTH_SECRET",
+    why: "Signs the admin session.",
+  },
+  {
+    service: "Intake Engine",
+    name: "GOOGLE_CLIENT_ID",
+    why: "Admin sign-in. GOOGLE_CLIENT_SECRET is the pair.",
+  },
+  {
+    service: "Intake Engine",
+    name: "SIGNFLOW_BASE_URL",
+    why: "Sign Flow origin used when the visitor reaches a contract step.",
+  },
+  {
+    service: "Intake Engine",
+    name: "SIGNFLOW_INTAKE_TOKEN",
+    why: "Must match Sign Flow’s SIGNFLOW_INTAKE_TOKEN.",
+  },
+  {
+    service: "Site-chat",
+    name: "DATABASE_URL",
+    why: "Its own Railway Postgres for the chat widget.",
+  },
+  {
+    service: "Site-chat",
+    name: "NEXT_PUBLIC_APP_URL",
+    why: "Public origin of the widget.",
+  },
+  {
+    service: "Site-chat",
+    name: "NEXTAUTH_URL",
+    why: "Admin origin. NEXTAUTH_SECRET signs the session.",
+  },
+  {
+    service: "Site-chat",
+    name: "GOOGLE_CLIENT_ID",
+    why: "Admin sign-in. GOOGLE_CLIENT_SECRET is the pair.",
+  },
+  {
+    service: "Site-chat",
+    name: "SIGNFLOW_BASE_URL",
+    why: "Sign Flow origin for a contract started from chat.",
+  },
+  {
+    service: "Site-chat",
+    name: "SIGNFLOW_INTAKE_TOKEN",
+    why: "Must match Sign Flow’s SIGNFLOW_INTAKE_TOKEN.",
+  },
+  {
+    service: "Docket Flow",
+    name: "NEXT_PUBLIC_SUPABASE_URL",
+    why: "Same Supabase project as Intake Manager.",
+  },
+  {
+    service: "Docket Flow",
+    name: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    why: "Staff session.",
+  },
+  {
+    service: "Docket Flow",
+    name: "SUPABASE_SERVICE_ROLE_KEY",
+    why: "Server writes for intakes and cases.",
+  },
+  {
+    service: "Docket Flow",
+    name: "NEXT_PUBLIC_SITE_URL",
+    why: "Docket’s own origin, not Intake Manager’s.",
+  },
+];
+
 export default function HowItFitsPage() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
@@ -160,6 +478,34 @@ export default function HowItFitsPage() {
             <p className="mt-2 text-sm leading-6 text-slate-700">{item.a}</p>
           </details>
         ))}
+      </div>
+
+      <h2 className="mt-10 text-lg font-semibold tracking-tight">Environment</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">
+        These are the variables the lead path needs. Quo Router accepts the same names with a
+        FIRM_RAMOSJAMES_ prefix. Intake Engine and Site-chat keep CallRail, and Site-chat keeps its
+        Slack webhook, in each app’s settings rather than in the environment. Sign Flow also needs
+        its Firebase and Gmail variables to send mail; those are on that service’s own env example.
+      </p>
+      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2 font-medium">Service</th>
+              <th className="px-3 py-2 font-medium">Variable</th>
+              <th className="px-3 py-2 font-medium">What it is for</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ENVS.map((row) => (
+              <tr key={`${row.service}-${row.name}`} className="border-b border-slate-100 align-top last:border-0">
+                <td className="px-3 py-3 text-slate-500">{row.service}</td>
+                <td className="px-3 py-3 font-mono text-xs text-slate-900">{row.name}</td>
+                <td className="px-3 py-3 text-slate-700">{row.why}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </main>
   );

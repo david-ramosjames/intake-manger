@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
-import { confirmLead, scheduleSlackPost, sendReferral } from "@/lib/ops-actions";
-import { daysOpen, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
+import { confirmLead, savePriority, scheduleSlackPost, sendReferral } from "@/lib/ops-actions";
+import { daysOpen, isPriorityReason, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -114,6 +114,60 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           ) : null}
         </div>
       </div>
+
+      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-semibold text-slate-900">Jon&apos;s list</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Priority leads stay here until they sign, get promoted, or are lost or referred. The next
+          call below is filled from the queue. Write the last step and the next step the way you
+          would in the daily note.
+        </p>
+        <form action={savePriority.bind(null, lead.id)} className="mt-4 grid gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="hidden" name="priority" value="no" />
+            <input type="checkbox" name="priority" value="yes" defaultChecked={lead.priority} />
+            On the priority list
+          </label>
+          <label className="block text-sm">
+            <span className="font-medium text-slate-700">Why it is priority</span>
+            <select
+              name="priority_reason"
+              defaultValue={isPriorityReason(lead.priority_reason) ? lead.priority_reason : ""}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+            >
+              <option value="">Choose one</option>
+              {PRIORITY_REASONS.map((reason) => (
+                <option key={reason} value={reason}>
+                  {PRIORITY_REASON_LABEL[reason]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="font-medium text-slate-700">Last action</span>
+            <textarea
+              name="last_action"
+              defaultValue={lead.last_action ?? ""}
+              rows={2}
+              placeholder="Sent the contract. Waiting on the signature."
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="font-medium text-slate-700">Next action</span>
+            <textarea
+              name="next_action"
+              defaultValue={lead.next_action ?? ""}
+              rows={2}
+              placeholder="Call Thursday if it is still unsigned."
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            />
+          </label>
+          <button type="submit" className="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+            Save priority
+          </button>
+        </form>
+      </section>
 
       {lead.signed_case && !lead.case_id ? (
         <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -287,5 +341,7 @@ function labelFor(eventType: string): string {
   if (eventType === "captured") return "Captured from Slack";
   if (eventType === "referred") return "Referred out";
   if (eventType === "slack_touch") return "Another Slack post on this lead";
+  if (eventType === "priority_set") return "Added to the priority list";
+  if (eventType === "priority_cleared") return "Removed from the priority list";
   return eventType;
 }

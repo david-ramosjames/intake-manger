@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags } from "./callrail";
 import { dispatchDue } from "./dispatch";
 import { stopFollowUp } from "./followup";
+import { isPriorityReason } from "./leads";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
@@ -12,6 +13,34 @@ import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
 function text(formData: FormData, key: string): string | null {
   const value = String(formData.get(key) ?? "").trim();
   return value.length ? value : null;
+}
+
+export async function savePriority(leadId: string, formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const priority = formData.getAll("priority").includes("yes");
+  const reason = text(formData, "priority_reason");
+  if (priority && !isPriorityReason(reason)) {
+    throw new Error("Choose why this lead is on Jon's list.");
+  }
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      priority,
+      priority_reason: priority ? reason : null,
+      last_action: text(formData, "last_action"),
+      next_action: text(formData, "next_action"),
+    })
+    .eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: priority ? "priority_set" : "priority_cleared",
+    actor: email,
+    payload: { reason },
+  });
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
 }
 
 export async function confirmLead(leadId: string) {

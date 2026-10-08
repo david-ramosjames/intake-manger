@@ -74,6 +74,10 @@ export type Lead = {
   confirmed_at: string | null;
   confirmed_by: string | null;
   follow_up: boolean;
+  priority: boolean;
+  priority_reason: PriorityReason | null;
+  last_action: string | null;
+  next_action: string | null;
   slack_channel_id: string | null;
   slack_thread_ts: string | null;
   slack_message_ts: string | null;
@@ -93,6 +97,19 @@ export type LeadEvent = {
 };
 
 export type LeadView = "all" | "open" | "signed" | "promoted" | "pursue" | "needs_info";
+
+export const PRIORITY_REASONS = ["contract_out", "send_contract", "high_potential"] as const;
+export type PriorityReason = (typeof PRIORITY_REASONS)[number];
+
+export const PRIORITY_REASON_LABEL: Record<PriorityReason, string> = {
+  contract_out: "Contract sent, not signed",
+  send_contract: "Ready to send the contract",
+  high_potential: "High potential, not triaged",
+};
+
+export function isPriorityReason(value: string | null | undefined): value is PriorityReason {
+  return value === "contract_out" || value === "send_contract" || value === "high_potential";
+}
 
 export function daysOpen(start: string | null, closedOn: string | null): number | null {
   const from = dayStamp(start);

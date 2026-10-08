@@ -102,7 +102,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
       phone: parsed.phone,
       phone_e164: parsed.phoneE164,
       email: parsed.email,
-      source_type: parsed.arrival === "form" ? "Form" : "Call",
+      source_channel: parsed.arrival === "form" ? "Web form" : "Call",
       lead_status: "New",
       kind: parsed.kind,
       arrival: parsed.arrival,

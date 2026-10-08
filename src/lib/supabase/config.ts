@@ -14,5 +14,12 @@ export function docketBaseUrl(): string {
 }
 
 export function siteUrl(): string {
-  return (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3002").replace(/\/$/, "");
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  if (explicit) return explicit;
+  const vercelHost =
+    process.env.VERCEL_ENV === "production"
+      ? process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL
+      : process.env.VERCEL_URL;
+  if (vercelHost) return `https://${vercelHost}`;
+  return "http://localhost:3002";
 }

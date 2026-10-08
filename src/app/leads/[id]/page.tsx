@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
 import { confirmLead, scheduleSlackPost, sendReferral } from "@/lib/ops-actions";
-import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
+import { daysOpen, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -76,6 +76,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     ? `${docket}/intakes/${encodeURIComponent(lead.intake_call_id)}`
     : null;
   const caseHref = lead.case_id ? `${docket}/cases/${lead.case_id}` : null;
+  const slack = slackMessageUrl(lead);
+  const openFor = daysOpen(lead.lead_date ?? lead.created_at, lead.date_signed ?? lead.signed_at);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
@@ -89,7 +91,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             {LEAD_KIND_LABEL[lead.kind]}
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
             {lead.owner_name ? ` · ${lead.owner_name}` : " · nobody assigned"}
-            {lead.grade ? ` · Grade ${lead.grade}` : ""}
+            {lead.grade ? ` · Grade ${lead.grade}` : " · no grade"}
+            {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}
             {lead.sentiment ? ` · ${LEAD_SENTIMENT_LABEL[lead.sentiment as LeadSentiment]}` : ""}
           </p>
         </div>
@@ -99,14 +102,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               Open in Quo
             </a>
           ) : null}
-          {lead.slack_permalink ? (
-            <a
-              href={lead.slack_permalink}
-              className="font-medium text-slate-900 underline"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Slack thread
+          {slack ? (
+            <a href={slack} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
+              First Slack post
             </a>
           ) : null}
           {intakeHref ? (
@@ -119,7 +117,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
       {lead.signed_case && !lead.case_id ? (
         <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
-          <p className="font-medium text-emerald-950">This lead is signed.</p>
+          <p className="font-medium text-emerald-950">Signed. The client signed.</p>
           <p className="mt-1 text-sm text-emerald-900">
             Review the intake, correct anything that is still wrong, then promote it to a case.
             Promoting does not happen on its own.
@@ -141,7 +139,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
       {lead.case_id ? (
         <section className="mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-          Promoted{lead.case_number ? ` as case ${lead.case_number}` : ""}.{" "}
+          Promoted into Docket{lead.case_number ? ` as case ${lead.case_number}` : ""}.{" "}
           {caseHref ? (
             <a href={caseHref} className="font-medium underline">
               Open the case

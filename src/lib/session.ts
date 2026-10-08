@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
-import { ALLOWED_DOMAIN } from "./supabase/config";
+import { ALLOWED_DOMAIN, isSupabaseConfigured } from "./supabase/config";
 import { createSupabaseServerClient } from "./supabase/server";
 
 export async function requireStaff() {
+  if (!isSupabaseConfigured()) redirect("/login?error=config");
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },

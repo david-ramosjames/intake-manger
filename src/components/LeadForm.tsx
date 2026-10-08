@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
   return (
@@ -52,8 +52,25 @@ export function LeadForm({
       <Field label="Lead name" name="lead_name" defaultValue={lead?.lead_name ?? ""} />
       <Field label="Phone" name="phone" defaultValue={lead?.phone ?? ""} />
       <Field label="Email" name="email" type="email" defaultValue={lead?.email ?? ""} />
-      <Field label="Lead source" name="lead_source" defaultValue={lead?.lead_source ?? ""} />
-      <Field label="Source type" name="source_type" defaultValue={lead?.source_type ?? ""} />
+      <ChannelField value={lead?.source_channel ?? ""} />
+      <Field
+        label="Detail"
+        name="lead_source"
+        defaultValue={lead?.lead_source ?? ""}
+        placeholder="Google, referral"
+      />
+      <Field
+        label="Source note"
+        name="source_note"
+        defaultValue={lead?.source_note ?? ""}
+        placeholder="My friend gave me this number"
+      />
+      <Field
+        label="Source category"
+        name="source_type"
+        defaultValue={lead?.source_type ?? ""}
+        placeholder="Marketing"
+      />
       <Field label="Case type" name="case_type" defaultValue={lead?.case_type ?? ""} />
       <label className="block text-sm">
         <span className="font-medium text-slate-700">Lead status</span>
@@ -77,7 +94,12 @@ export function LeadForm({
         defaultValue={dateValue(lead?.consultation_date)}
       />
       <Tri label="Desired case" name="desired_case" defaultValue={triValue(lead?.desired_case)} />
-      <Tri label="Signed case" name="signed_case" defaultValue={lead?.signed_case ? "yes" : "no"} />
+      <Tri
+        label="Signed"
+        name="signed_case"
+        defaultValue={lead?.signed_case ? "yes" : "no"}
+        hint="Yes when the client signed in Sign Flow. A case loaded into Docket is promoted, and that stays separate."
+      />
       <Field label="Case number" name="case_number" defaultValue={lead?.case_number ?? ""} />
       <Field
         label="Date signed"
@@ -201,11 +223,13 @@ function Field({
   name,
   defaultValue,
   type = "text",
+  placeholder,
 }: {
   label: string;
   name: string;
   defaultValue: string;
   type?: string;
+  placeholder?: string;
 }) {
   return (
     <label className="block text-sm">
@@ -214,13 +238,46 @@ function Field({
         name={name}
         type={type}
         defaultValue={defaultValue}
+        placeholder={placeholder}
         className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
       />
     </label>
   );
 }
 
-function Tri({ label, name, defaultValue }: { label: string; name: string; defaultValue: string }) {
+function ChannelField({ value }: { value: string }) {
+  const options = new Set<string>(SOURCE_CHANNELS);
+  if (value) options.add(value);
+  return (
+    <label className="block text-sm">
+      <span className="font-medium text-slate-700">Source</span>
+      <select
+        name="source_channel"
+        defaultValue={value}
+        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+      >
+        <option value="">Not set</option>
+        {[...options].map((channel) => (
+          <option key={channel} value={channel}>
+            {channel}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function Tri({
+  label,
+  name,
+  defaultValue,
+  hint,
+}: {
+  label: string;
+  name: string;
+  defaultValue: string;
+  hint?: string;
+}) {
   return (
     <label className="block text-sm">
       <span className="font-medium text-slate-700">{label}</span>
@@ -233,6 +290,7 @@ function Tri({ label, name, defaultValue }: { label: string; name: string; defau
         <option value="yes">Yes</option>
         <option value="no">No</option>
       </select>
+      {hint ? <span className="mt-1 block text-xs leading-5 text-slate-500">{hint}</span> : null}
     </label>
   );
 }

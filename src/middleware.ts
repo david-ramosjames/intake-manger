@@ -3,10 +3,20 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC = ["/login", "/auth/callback", "/how-it-fits", "/api/slack/events", "/api/cron/queues"];
 
+function isPublicPath(pathname: string) {
+  return PUBLIC.some((item) => pathname === item || pathname.startsWith(`${item}/`));
+}
+
 export async function middleware(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) return NextResponse.next({ request });
+  if (!url || !anon) {
+    if (isPublicPath(request.nextUrl.pathname)) return NextResponse.next();
+    const login = request.nextUrl.clone();
+    login.pathname = "/login";
+    login.search = "error=config";
+    return NextResponse.redirect(login);
+  }
 
   let response = NextResponse.next({ request: { headers: request.headers } });
   const supabase = createServerClient(url, anon, {
@@ -28,7 +38,7 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   const path = request.nextUrl.pathname;
-  const isPublic = PUBLIC.some((item) => path === item || path.startsWith(`${item}/`));
+  const isPublic = isPublicPath(path);
 
   if (!user && !isPublic) {
     const login = request.nextUrl.clone();

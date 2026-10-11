@@ -1,4 +1,5 @@
 import { dispatchDue } from "@/lib/dispatch";
+import { enrollMissingFollowUps } from "@/lib/followup";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 export const runtime = "nodejs";
@@ -10,8 +11,10 @@ export async function POST(request: Request) {
     return new Response("unauthorized", { status: 401 });
   }
   try {
-    const result = await dispatchDue(createSupabaseServiceClient());
-    return Response.json(result);
+    const supabase = createSupabaseServiceClient();
+    const enrolled = await enrollMissingFollowUps(supabase);
+    const result = await dispatchDue(supabase);
+    return Response.json({ ...result, enrolled });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Queue run failed" },

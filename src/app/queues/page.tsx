@@ -39,8 +39,8 @@ export default async function QueuesPage({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Queues</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Texts send through Quo only when live sending is on. Calls and scheduled Slack notes
-            post into the lead thread for someone to handle.
+            Texts stay with SMS Follow-Up. Calls and scheduled notes post into Slack so someone sees them.
+            A Slack post is the alert. It is not the record that the call was completed.
           </p>
         </div>
         <form action={runDueWork}>

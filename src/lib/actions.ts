@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
+import { displayContact } from "./leads";
 import { toE164 } from "./phone";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
 import { requireStaff } from "./session";
@@ -103,7 +104,7 @@ function fieldsFromForm(formData: FormData) {
     lead_name: text(formData, "lead_name"),
     phone: text(formData, "phone"),
     phone_e164: toE164(text(formData, "phone")),
-    email: text(formData, "email"),
+    email: displayContact(text(formData, "email")),
     lead_source: text(formData, "lead_source"),
     source_type: text(formData, "source_type"),
     source_channel: text(formData, "source_channel"),
@@ -159,7 +160,7 @@ export async function createLead(formData: FormData) {
 
   const { data, error } = await supabase
     .from("leads")
-    .insert({ ...fields, arrival: fields.arrival ?? "manual", ...signedExtras })
+    .insert({ ...fields, arrival: fields.arrival ?? "manual", needs_verification: !fields.lead_name || !fields.phone, ...signedExtras })
     .select("id")
     .single();
   if (error || !data) {
@@ -204,7 +205,34 @@ export async function updateLead(leadId: string, formData: FormData) {
   const before = existing as Lead;
   const fields = fieldsFromForm(formData);
   const changes = changedFields(before, fields);
+  const statusNow = fields.lead_status;
+  const closed =
+    fields.signed_case ||
+    Boolean(before.case_id) ||
+    statusNow === "Lost" ||
+    statusNow === "Referred" ||
+    statusNow === "Promoted";
   if (Object.keys(changes).length === 0) {
+    if (fields.follow_up && !closed) {
+      const { count } = await supabase
+        .from("lead_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("lead_id", leadId);
+      if (!count) {
+        await enrollFollowUp(supabase, {
+          id: leadId,
+          kind: fields.kind,
+          follow_up: true,
+          lead_name: fields.lead_name,
+          case_type: fields.case_type,
+          signed_case: fields.signed_case,
+          case_id: before.case_id,
+          lead_status: statusNow,
+        });
+        revalidatePath(`/leads/${leadId}`);
+        revalidatePath("/queues");
+      }
+    }
     redirect(`/leads/${leadId}`);
   }
 
@@ -233,6 +261,8 @@ export async function updateLead(leadId: string, formData: FormData) {
   }
   patch.confirmed_at = null;
   patch.confirmed_by = null;
+  if (!fields.lead_name || !fields.phone) patch.needs_verification = true;
+  else if (changes.lead_name || changes.phone) patch.needs_verification = false;
 
   const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
   if (error) throw new Error(error.message);

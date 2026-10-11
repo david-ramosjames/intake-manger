@@ -74,6 +74,7 @@ export type Lead = {
   confirmed_at: string | null;
   confirmed_by: string | null;
   follow_up: boolean;
+  needs_verification: boolean;
   priority: boolean;
   priority_reason: PriorityReason | null;
   last_action: string | null;
@@ -96,7 +97,7 @@ export type LeadEvent = {
   created_at: string;
 };
 
-export type LeadView = "all" | "open" | "signed" | "promoted" | "pursue" | "needs_info";
+export type LeadView = "all" | "open" | "signed" | "promoted" | "pursue" | "needs_info" | "verify";
 
 export const PRIORITY_REASONS = ["contract_out", "send_contract", "high_potential"] as const;
 export type PriorityReason = (typeof PRIORITY_REASONS)[number];
@@ -151,6 +152,15 @@ export function isLeadView(value: string | undefined): value is LeadView {
     value === "signed" ||
     value === "promoted" ||
     value === "pursue" ||
-    value === "needs_info"
+    value === "needs_info" ||
+    value === "verify"
   );
+}
+
+const JUNK_CONTACT = /^(null|undefined|none|n\/a|na|-)$/i;
+
+export function displayContact(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed || JUNK_CONTACT.test(trimmed)) return null;
+  return trimmed;
 }

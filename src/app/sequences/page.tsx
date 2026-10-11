@@ -12,9 +12,8 @@ export default async function SequencesPage() {
     <main className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight">Sequences</h1>
       <p className="mt-1 text-sm text-slate-600">
-        One text sequence and one call sequence. Texts run only for a lead we want to sign. Calls
-        run for those leads and for a lead we have already spoken with but are not ready to decide.
-        Use {"{{name}}"} and {"{{case_type}}"} in a text.
+        Calls are queued here. SMS Follow-Up sends the texts, so the text steps on this page are not
+        used and are not sent from Intake Manager. A lead we have already spoken with gets calls only.
       </p>
       {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
       <div className="mt-6 space-y-4">

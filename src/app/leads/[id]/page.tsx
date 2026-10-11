@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
-import { confirmLead, savePriority, scheduleSlackPost, sendReferral } from "@/lib/ops-actions";
+import { confirmLead, mergeIntoLead, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
+import { describeFollowUp } from "@/lib/followup";
 import { daysOpen, isPriorityReason, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -22,7 +23,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .limit(30),
     supabase
       .from("lead_jobs")
-      .select("id, queue, position, due_at, body, status")
+      .select("id, queue, position, due_at, body, status, detail")
       .eq("lead_id", id)
       .order("queue")
       .order("position"),
@@ -50,6 +51,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     due_at: string;
     body: string;
     status: string;
+    detail: string | null;
   }[];
   const posts = (postsResult.data ?? []) as {
     id: string;
@@ -208,6 +210,11 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           These are the spreadsheet fields. A correction here is kept, and it clears the confirmation
           so someone can check it again.
         </p>
+        {lead.needs_verification ? (
+          <p className="mb-4 text-sm text-amber-800">
+            This record needs verification. A name or phone was missing, or a value was filled in from the summary.
+          </p>
+        ) : null}
         {lead.confirmed_at ? (
           <p className="mb-4 text-sm text-emerald-800">
             Confirmed by {lead.confirmed_by} on {new Date(lead.confirmed_at).toLocaleString()}.
@@ -224,26 +231,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Follow-up</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          {lead.kind === "needs_info"
-            ? "This lead was already spoken with. Calls are queued. Texts stay off."
-            : "This is a lead we want to sign. Texts and calls both run from the standard sequence."}
-        </p>
-        <ul className="mt-3 space-y-2 text-sm">
-          {jobs.map((job) => (
-            <li key={job.id} className="rounded-md border border-slate-100 px-3 py-2">
-              <span className="font-medium">{job.queue === "text" ? "Text" : "Call"} {job.position}</span>
-              <span className="text-slate-500">
-                {" "}
-                · {job.status} · {new Date(job.due_at).toLocaleString()}
-              </span>
-              <p className="mt-1 text-slate-700">{job.body}</p>
-            </li>
-          ))}
-          {jobs.length === 0 ? (
-            <li className="text-slate-500">Follow-up has not been started. Turn it on in the record and save.</li>
-          ) : null}
-        </ul>
+        <FollowUpPanel lead={lead} jobs={jobs} />
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
@@ -343,5 +331,58 @@ function labelFor(eventType: string): string {
   if (eventType === "slack_touch") return "Another Slack post on this lead";
   if (eventType === "priority_set") return "Added to the priority list";
   if (eventType === "priority_cleared") return "Removed from the priority list";
+  if (eventType === "enrolled") return "Follow-up steps created";
+  if (eventType === "merged") return "Merged with another lead";
   return eventType;
+}
+
+function FollowUpPanel({
+  lead,
+  jobs,
+}: {
+  lead: Lead;
+  jobs: { id: string; queue: string; position: number; due_at: string; body: string; status: string; detail: string | null }[];
+}) {
+  const described = describeFollowUp(lead, jobs);
+  return (
+    <>
+      <p className="mt-1 text-sm text-slate-600">
+        {lead.kind === "needs_info"
+          ? "This lead was already spoken with. Calls are queued. Texts stay off."
+          : "This is a lead we want to sign. Texts are sent by SMS Follow-Up. Calls are queued here."}
+      </p>
+      <p className="mt-3 text-sm">
+        <span className="font-medium">{described.state}.</span>
+        {described.reason ? <span className="text-slate-600"> {described.reason}</span> : null}
+      </p>
+      {described.nextCall ? (
+        <p className="mt-1 text-sm text-slate-700">Next call: {described.nextCall}</p>
+      ) : null}
+      <p className="mt-1 text-sm text-slate-500">
+        A Slack post tells someone to call. It does not mean the call was completed.
+      </p>
+      {described.state === "Not enrolled" && lead.follow_up ? (
+        <form action={startFollowUp.bind(null, lead.id)} className="mt-3">
+          <button type="submit" className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+            Create the steps
+          </button>
+        </form>
+      ) : null}
+      <ul className="mt-3 space-y-2 text-sm">
+        {jobs
+          .filter((job) => !(job.queue === "text" && job.status === "skipped"))
+          .map((job) => (
+          <li key={job.id} className="rounded-md border border-slate-100 px-3 py-2">
+            <span className="font-medium">{job.queue === "text" ? "Text" : "Call"} {job.position}</span>
+            <span className="text-slate-500">
+              {" "}
+              · {job.status} · {new Date(job.due_at).toLocaleString()}
+            </span>
+            <p className="mt-1 text-slate-700">{job.body}</p>
+            {job.detail ? <p className="mt-1 text-slate-500">{job.detail}</p> : null}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 }

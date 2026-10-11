@@ -16,6 +16,31 @@ export type ParsedSlackLead = {
 };
 
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/;
+const JUNK = /^(null|undefined|none|n\/a|na|-)$/i;
+
+function cleanName(value: string | undefined): string | null {
+  const name = value?.replace(/\s+/g, " ").trim() ?? "";
+  if (name.length < 3 || JUNK.test(name)) return null;
+  if (/^(the|caller|an|employee)$/i.test(name)) return null;
+  if (/ramos|legal assistant/i.test(name)) return null;
+  return name;
+}
+
+export function nameFromSummary(summary: string | null | undefined): string | null {
+  const text = summary?.trim() ?? "";
+  if (!text) return null;
+  const patterns = [
+    /the caller,\s+([A-Za-z][A-Za-z'’. -]{1,60}?),/i,
+    /spoke with\s+([A-Z][A-Za-z'’. -]{1,40})/,
+    /contacted\s+([A-Z][A-Za-z'’. -]{1,40})/,
+  ];
+  for (const pattern of patterns) {
+    const name = cleanName(text.match(pattern)?.[1]);
+    if (name) return name;
+  }
+  if (/from ramos|from rama|legal assistant|intake specialist/i.test(text)) return null;
+  return cleanName(text.match(/^([A-Z][A-Za-z'’. -]{1,40}?)\s+(?:called|is seeking|broke|reported|were injured)/)?.[1]);
+}
 
 function field(text: string, label: string): string | null {
   const match = text.match(new RegExp(`^${label}:\\s*(.+)$`, "im"));
@@ -64,14 +89,16 @@ export function parseSlackLead(text: string): ParsedSlackLead {
 
   const nameFrom = from?.replace(/\(.*\)/, "").replace(/<[^>]+>/g, "").trim() || null;
   const phone = phonesIn(from ?? "") ?? phonesIn(body);
+  const email = body.match(EMAIL)?.[0] ?? null;
+  const named = nameFrom && !/^\+?\d/.test(nameFrom) && !JUNK.test(nameFrom) ? nameFrom : null;
 
   return {
     kind,
     arrival,
-    name: nameFrom && !/^\+?\d/.test(nameFrom) ? nameFrom : null,
+    name: named ?? nameFromSummary(summaryBlock ?? body.slice(0, 500)),
     phone,
     phoneE164: toE164(phone),
-    email: body.match(EMAIL)?.[0] ?? null,
+    email: email && !JUNK.test(email) ? email : null,
     handledBy,
     summary: summaryBlock ? summaryBlock.slice(0, 2000) : body.slice(0, 2000),
     quoLink: quo,

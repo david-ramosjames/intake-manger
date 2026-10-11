@@ -65,7 +65,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
   if (parsed.phoneE164) {
     const { data: openLeads } = await supabase
       .from("leads")
-      .select("id, signed_case, case_id, lead_status, lead_name, email, summary, owner_name, quo_link, callrail_tags")
+      .select("id, signed_case, case_id, lead_status, lead_name, phone, email, summary, owner_name, quo_link, callrail_tags")
       .eq("phone_e164", parsed.phoneE164)
       .order("created_at", { ascending: false })
       .limit(5);
@@ -73,6 +73,10 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
     if (open) {
       const patch: Record<string, unknown> = {};
       if (!open.lead_name && parsed.name) patch.lead_name = parsed.name;
+      if (!open.phone && parsed.phone) {
+        patch.phone = parsed.phone;
+        patch.phone_e164 = parsed.phoneE164;
+      }
       if (!open.email && parsed.email) patch.email = parsed.email;
       if (!open.summary && parsed.summary) patch.summary = parsed.summary;
       if (!open.owner_name && parsed.handledBy) patch.owner_name = parsed.handledBy;
@@ -112,6 +116,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
       quo_link: parsed.quoLink,
       callrail_tags: parsed.tags,
       follow_up: true,
+      needs_verification: !parsed.name || !parsed.phone,
       slack_channel_id: event.channel,
       slack_thread_ts: event.ts,
       slack_message_ts: event.ts,

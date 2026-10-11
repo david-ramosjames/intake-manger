@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags } from "./callrail";
 import { dispatchDue } from "./dispatch";
-import { stopFollowUp } from "./followup";
+import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { isPriorityReason } from "./leads";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -45,10 +45,19 @@ export async function savePriority(leadId: string, formData: FormData) {
 
 export async function confirmLead(leadId: string) {
   const { supabase, email } = await requireStaff();
+  const { data: lead, error: loadError } = await supabase
+    .from("leads")
+    .select("lead_name, phone")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
+  if (!String(lead.lead_name ?? "").trim() || !String(lead.phone ?? "").trim()) {
+    throw new Error("Add a name and a phone before confirming this record.");
+  }
   const now = new Date().toISOString();
   const { error } = await supabase
     .from("leads")
-    .update({ confirmed_at: now, confirmed_by: email })
+    .update({ confirmed_at: now, confirmed_by: email, needs_verification: false })
     .eq("id", leadId);
   if (error) throw new Error(error.message);
   await supabase.from("lead_events").insert({
@@ -57,7 +66,85 @@ export async function confirmLead(leadId: string) {
     actor: email,
     payload: {},
   });
+  revalidatePath("/");
+  revalidatePath("/verify");
   revalidatePath(`/leads/${leadId}`);
+}
+
+export async function startFollowUp(leadId: string) {
+  const { supabase, email } = await requireStaff();
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+  if (!lead.follow_up) throw new Error("Turn follow-up on and save before starting the steps.");
+  await enrollFollowUp(supabase, lead);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "enrolled",
+    actor: email,
+    payload: {},
+  });
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/queues");
+}
+
+export async function mergeIntoLead(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const keeperId = text(formData, "keeper_id");
+  const duplicateId = text(formData, "duplicate_id");
+  if (!keeperId || !duplicateId || keeperId === duplicateId) {
+    throw new Error("Choose the lead to keep and the duplicate to close.");
+  }
+  const { data: rows, error } = await supabase
+    .from("leads")
+    .select("id, phone_e164, lead_name, email, summary, quo_link, owner_name, lead_status")
+    .in("id", [keeperId, duplicateId]);
+  if (error) throw new Error(error.message);
+  const keeper = rows?.find((row) => row.id === keeperId);
+  const duplicate = rows?.find((row) => row.id === duplicateId);
+  if (!keeper || !duplicate) throw new Error("One of those leads is missing.");
+  if (!keeper.phone_e164 || keeper.phone_e164 !== duplicate.phone_e164) {
+    throw new Error("Those leads do not share a phone number.");
+  }
+
+  const patch: Record<string, string> = {};
+  if (!keeper.lead_name && duplicate.lead_name) patch.lead_name = duplicate.lead_name;
+  if (!keeper.email && duplicate.email) patch.email = duplicate.email;
+  if (!keeper.summary && duplicate.summary) patch.summary = duplicate.summary;
+  if (!keeper.quo_link && duplicate.quo_link) patch.quo_link = duplicate.quo_link;
+  if (!keeper.owner_name && duplicate.owner_name) patch.owner_name = duplicate.owner_name;
+  if (Object.keys(patch).length) {
+    const { error: fillError } = await supabase.from("leads").update(patch).eq("id", keeperId);
+    if (fillError) throw new Error(fillError.message);
+  }
+
+  const { error: closeError } = await supabase
+    .from("leads")
+    .update({ lead_status: "Lost", follow_up: false, needs_verification: false })
+    .eq("id", duplicateId);
+  if (closeError) throw new Error(closeError.message);
+  await stopFollowUp(supabase, duplicateId, "Merged into another lead with the same phone.");
+  await supabase.from("lead_events").insert([
+    {
+      lead_id: keeperId,
+      event_type: "merged",
+      actor: email,
+      payload: { duplicate_id: duplicateId },
+    },
+    {
+      lead_id: duplicateId,
+      event_type: "merged",
+      actor: email,
+      payload: { keeper_id: keeperId },
+    },
+  ]);
+  revalidatePath("/verify");
+  revalidatePath("/");
+  revalidatePath(`/leads/${keeperId}`);
+  revalidatePath(`/leads/${duplicateId}`);
 }
 
 export async function scheduleSlackPost(leadId: string, formData: FormData) {
@@ -188,6 +275,8 @@ export async function syncCallrailCatalog() {
 
 export async function runDueWork() {
   await requireStaff();
-  const result = await dispatchDue(createSupabaseServiceClient());
+  const supabase = createSupabaseServiceClient();
+  await enrollMissingFollowUps(supabase);
+  const result = await dispatchDue(supabase);
   redirect(`/queues?texts=${result.texts}&calls=${result.calls}&slack=${result.slack}&failed=${result.failed}`);
 }

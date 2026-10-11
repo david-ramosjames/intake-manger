@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { daysOpen, isLeadView, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { daysOpen, displayContact, isLeadView, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -10,6 +10,7 @@ const VIEWS: { id: LeadView; label: string }[] = [
   { id: "open", label: "Open" },
   { id: "signed", label: "Signed, not promoted" },
   { id: "promoted", label: "Promoted" },
+  { id: "verify", label: "Needs verification" },
 ];
 
 export default async function LeadListPage({
@@ -39,6 +40,8 @@ export default async function LeadListPage({
     query = query.not("case_id", "is", null);
   } else if (view === "pursue" || view === "needs_info") {
     query = query.eq("kind", view);
+  } else if (view === "verify") {
+    query = query.eq("needs_verification", true);
   }
 
   if (q) {
@@ -146,7 +149,7 @@ export default async function LeadListPage({
                     </Link>
                   </td>
                   <td className="px-3 py-2">{lead.phone || "—"}</td>
-                  <td className="px-3 py-2">{lead.email || "—"}</td>
+                  <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
                   <td className="px-3 py-2 font-medium">{lead.grade || "—"}</td>
                   <td className="px-3 py-2">{lead.source_channel || "—"}</td>
                   <td className="px-3 py-2 text-slate-700">

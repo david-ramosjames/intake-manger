@@ -236,11 +236,23 @@ export function listChannel(lead: {
   return lead.source_channel || "—";
 }
 
+function narrativeCaseType(text: string | null | undefined): string | null {
+  const body = text ?? "";
+  if (/\b(fight|assault(?:ed)?|attacked|beaten|beer bottle)\b/i.test(body)) return "Assault";
+  if (/\bdog bite|bitten by (?:a |the )?dog\b/i.test(body)) return "Dog Bite";
+  if (/\b(?:slip(?:ped)? and fall|wet floor)\b/i.test(body)) return "Slip and fall";
+  if (/\b(?:workers?'? compensation|work accident)\b/i.test(body)) return "Work Accident";
+  if (/\b(?:car accident|rear-?ended|other driver)\b/i.test(body)) return "Car accident";
+  return null;
+}
+
 export function listAccident(lead: { case_type: string | null; case_detail?: string | null }): string {
-  const fromPost = webLeadFacts(lead.case_detail).accident;
-  if (fromPost) return fromPost;
   const stored = usableFact(lead.case_type);
   if (stored) return stored;
+  const fromPost = webLeadFacts(lead.case_detail).accident;
+  if (fromPost) return fromPost;
+  const fromNarrative = narrativeCaseType(lead.case_detail);
+  if (fromNarrative) return fromNarrative;
   const fromForm = lead.case_detail?.match(/\*?new lead\*?\s*·\s*([A-Za-z][A-Za-z -]{1,40}?)(?:\s+-|\s+\*|\n|$)/i)?.[1]?.trim();
   if (fromForm && !/^general$/i.test(fromForm)) return fromForm;
   return "—";
@@ -264,9 +276,7 @@ export function leadTitle(lead: {
   const name = usableFact(lead.lead_name) ?? webLeadFacts(lead.case_detail).name;
   if (name && lead.identity_status === "needs_review") return `${name} · identity needs review`;
   if (name) return name;
-  const ending = (lead.phone ?? "").replace(/\D/g, "").slice(-4);
-  if (ending.length === 4) return `Name not captured · phone ending ${ending}`;
-  return "Name not captured";
+  return "Not captured";
 }
 
 export function isLeadView(value: string | undefined): value is LeadView {

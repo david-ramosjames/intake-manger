@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { LeadPanel } from "@/components/LeadPanel";
 import { IdentityMark } from "@/components/IdentityMark";
 import { attachCallrailSources } from "@/lib/callrail";
-import { daysSince, displayContact, isLeadView, leadTitle, listAccident, listChannel, listDetail, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
-import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel, textSequenceLive, type LeadCycle } from "@/lib/next-step";
-import { formatCallWhen, formatChicago } from "@/lib/time";
+import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel } from "@/lib/next-step";
+import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
+import { formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -14,87 +16,94 @@ function lastContacted(days: number | null): string {
   return `${days} days`;
 }
 
-const VIEWS: { id: LeadView; label: string }[] = [
+const QUEUES: { id: QueueId; label: string }[] = [
   { id: "all", label: "All" },
+  { id: "attention", label: "Needs attention" },
+  { id: "fresh", label: "New" },
+  { id: "working", label: "In progress" },
+  { id: "signed", label: "Signed" },
+  { id: "closed", label: "Closed" },
+];
+
+const LEGACY: { id: LeadView; label: string }[] = [
   { id: "pursue", label: "Want to sign" },
   { id: "needs_info", label: "Need more info" },
-  { id: "open", label: "Open" },
-  { id: "signed", label: "Signed, not promoted" },
   { id: "promoted", label: "Promoted" },
   { id: "verify", label: "Needs verification" },
 ];
 
+const LIST_COLUMNS =
+  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, agreement_status, agreement_sent_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+
+type ListLead = Pick<
+  Lead,
+  | "id"
+  | "lead_date"
+  | "created_at"
+  | "lead_name"
+  | "phone"
+  | "email"
+  | "identity_status"
+  | "lead_source"
+  | "source_channel"
+  | "source_note"
+  | "case_type"
+  | "case_detail"
+  | "grade"
+  | "arrival"
+  | "lead_status"
+  | "close_reason"
+  | "agreement_status"
+  | "agreement_sent_at"
+  | "text_sequence_status"
+  | "text_sequence_slug"
+  | "text_next_at"
+  | "summary"
+  | "owner_name"
+  | "kind"
+  | "needs_verification"
+  | "signed_case"
+  | "date_signed"
+  | "signed_at"
+  | "case_id"
+  | "case_number"
+  | "intake_call_id"
+  | "quo_link"
+  | "slack_permalink"
+  | "slack_channel_id"
+  | "slack_message_ts"
+  | "slack_thread_ts"
+>;
+
+function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: string }): string {
+  const params = new URLSearchParams();
+  if (input.queue && input.queue !== "all") params.set("queue", input.queue);
+  if (input.view && input.view !== "all") params.set("view", input.view);
+  if (input.q) params.set("q", input.q);
+  if (input.lead) params.set("lead", input.lead);
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
+}
+
 export default async function LeadListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; view?: string }>;
+  searchParams: Promise<{ q?: string; view?: string; queue?: string; lead?: string }>;
 }) {
   const params = await searchParams;
   const view: LeadView = isLeadView(params.view) ? params.view : "all";
+  const queue: QueueId = isQueue(params.queue) ? params.queue : "all";
   const q = (params.q ?? "").trim();
+  const selectedId = params.lead?.trim() || "";
   const { supabase } = await requireStaff();
   const docket = docketBaseUrl();
 
-  let query = supabase
+  const { data, error } = await supabase
     .from("leads")
-    .select(
-      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, agreement_status, agreement_sent_at, text_sequence_status, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
-    )
+    .select(LIST_COLUMNS)
     .order("lead_date", { ascending: false, nullsFirst: false })
-    .limit(200);
-
-  if (view === "open") {
-    query = query.eq("signed_case", false).is("case_id", null).not("lead_status", "in", "(Lost,Referred)");
-  } else if (view === "signed") {
-    query = query.eq("signed_case", true).is("case_id", null);
-  } else if (view === "promoted") {
-    query = query.not("case_id", "is", null);
-  } else if (view === "pursue" || view === "needs_info") {
-    query = query.eq("kind", view);
-  } else if (view === "verify") {
-    query = query.eq("needs_verification", true);
-  }
-
-  if (q) {
-    const like = `%${q.replace(/[%_]/g, "")}%`;
-    query = query.or(
-      `lead_name.ilike.${like},phone.ilike.${like},email.ilike.${like},case_number.ilike.${like}`,
-    );
-  }
-
-  const { data, error } = await query;
-  const leads = (data ?? []) as Pick<
-    Lead,
-    | "id"
-    | "lead_date"
-    | "created_at"
-    | "lead_name"
-    | "phone"
-    | "email"
-    | "identity_status"
-    | "lead_source"
-    | "source_channel"
-    | "source_note"
-    | "case_type"
-    | "case_detail"
-    | "grade"
-    | "arrival"
-    | "lead_status"
-    | "close_reason"
-    | "agreement_status"
-    | "agreement_sent_at"
-    | "text_sequence_status"
-    | "signed_case"
-    | "date_signed"
-    | "signed_at"
-    | "case_id"
-    | "case_number"
-    | "quo_link"
-    | "slack_permalink"
-    | "slack_channel_id"
-    | "slack_message_ts"
-    | "slack_thread_ts"
-  >[];
+    .limit(300);
+  const leads = (data ?? []) as ListLead[];
 
   await attachCallrailSources(leads, async (id, source) => {
     await supabase.from("leads").update({ lead_source: source }).eq("id", id).is("lead_source", null);
@@ -137,186 +146,302 @@ export default async function LeadListPage({
     }
   }
 
-  function cycleFor(lead: (typeof leads)[number]): LeadCycle {
-    const touches = talked.has(lead.id) ? [{ type: "call", direction: "inbound" }] : [];
-    return leadCycle(lead, touches);
+  const rows = leads.map((lead) => {
+    const cycle = leadCycle(lead, talked.has(lead.id) ? [{ type: "call", direction: "inbound" }] : []);
+    const age = daysSince(lead.lead_date ?? lead.created_at);
+    const outreachAt = lastOutreach.get(lead.id);
+    const outreach = daysSince(outreachAt);
+    const nextAt = nextCall.get(lead.id);
+    const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
+    const waiting = waitingTooLong(cycle, age, outreach, nextAt);
+    const attention = needsAttention({
+      cycle,
+      waiting,
+      identityStatus: lead.identity_status,
+      agreementStatus: lead.agreement_status,
+    });
+    return {
+      lead,
+      cycle,
+      age,
+      outreachAt,
+      outreach,
+      nextAt,
+      tally,
+      waiting,
+      attention,
+      inWindow: age != null && age <= 30,
+      label: leadStatusLabel(lead, cycle),
+      step: nextStepLabel(nextCallPurpose(cycle, tally.calls)),
+      accident: listAccident(lead),
+      priority: leadPriority(lead, cycle),
+    };
+  });
+
+  const windowRows = rows.filter((row) => row.inWindow);
+  const metrics = {
+    fresh: windowRows.filter((row) => row.cycle === "contact").length,
+    attention: windowRows.filter((row) => row.attention).length,
+    working: windowRows.filter((row) => row.cycle === "information" || row.cycle === "signing").length,
+    signed: windowRows.filter((row) => row.cycle === "signed").length,
+    closed: windowRows.filter((row) => row.cycle === "closed").length,
+    total: windowRows.length,
+  };
+  const conversion = metrics.total ? Math.round((metrics.signed / metrics.total) * 100) : 0;
+  const pipeline = [
+    { id: "fresh" as const, label: "New", count: metrics.fresh, className: "bg-amber-400" },
+    { id: "working" as const, label: "In progress", count: metrics.working, className: "bg-sky-500" },
+    { id: "signed" as const, label: "Signed", count: metrics.signed, className: "bg-emerald-500" },
+    { id: "closed" as const, label: "Closed", count: metrics.closed, className: "bg-slate-300" },
+  ];
+
+  const needle = q.toLowerCase();
+  const shown = rows
+    .filter((row) => matchesQueue(queue, row.cycle, row.attention))
+    .filter((row) => matchesLegacy(view, row.lead))
+    .filter((row) => {
+      if (!needle) return true;
+      const lead = row.lead;
+      return [lead.lead_name, lead.phone, lead.email, lead.case_number].some((value) =>
+        (value || "").toLowerCase().includes(needle),
+      );
+    })
+    .sort((a, b) => {
+      const rank = (row: (typeof rows)[number]) => (row.cycle === "closed" ? 3 : row.cycle === "signed" ? 2 : row.waiting ? 0 : 1);
+      const byRank = rank(a) - rank(b);
+      if (byRank) return byRank;
+      const aWait = a.outreach ?? 99;
+      const bWait = b.outreach ?? 99;
+      if (aWait !== bWait) return bWait - aWait;
+      return (b.age ?? 0) - (a.age ?? 0);
+    });
+
+  const selected = rows.find((row) => row.lead.id === selectedId) ?? null;
+  let panelTouches: {
+    id: string;
+    type: string | null;
+    direction: string | null;
+    content: string | null;
+    occurred_at: string | null;
+    quo_link: string | null;
+  }[] = [];
+  if (selected) {
+    const { data: history } = await supabase
+      .from("intake_interactions")
+      .select("id, type, direction, content, occurred_at, quo_link")
+      .eq("lead_id", selected.lead.id)
+      .order("occurred_at", { ascending: false })
+      .limit(8);
+    panelTouches = history ?? [];
   }
 
+  const closeHref = listHref({ queue, view, q });
+
   return (
-    <main className="mx-auto max-w-[1400px] px-4 py-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <main className="mx-auto max-w-7xl px-4 py-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Leads</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Every lead captured from #lead-calls, plus the call intakes already in Docket. Jaymie
-            confirms the spreadsheet fields here. Want to sign is the kind of lead, not a pipeline
-            stage, so a promoted matter can still be in that view. Calls are finished from Queues.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Work queue</h1>
+          <p className="mt-1 text-sm text-slate-600">What to work on next. Counts are the last 30 days.</p>
+        </div>
+        <form action="/" className="flex items-center gap-2">
+          {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
+          {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Name, phone, email, or case number"
+            className="w-64 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          />
+        </form>
+      </div>
+
+      {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
+
+      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Metric href={listHref({ queue: "fresh", q })} active={queue === "fresh"} label="New" value={String(metrics.fresh)} hint="Need to contact" tone="text-amber-700" />
+        <Metric href={listHref({ queue: "attention", q })} active={queue === "attention"} label="Need action" value={String(metrics.attention)} hint="Waiting or blocked" tone="text-red-700" />
+        <Metric href={listHref({ queue: "working", q })} active={queue === "working"} label="Following up" value={String(metrics.working)} hint="In conversation or signing" tone="text-sky-700" />
+        <Metric href={listHref({ queue: "signed", q })} active={queue === "signed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{conversion}%</p>
+          <p className="mt-1 text-xs text-slate-500">Signed of {metrics.total} in 30 days</p>
+        </div>
+      </section>
+
+      <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <span className="font-medium uppercase tracking-wide">Intake pipeline</span>
+          <span>Last 30 days</span>
+        </div>
+        <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100">
+          {pipeline.map((part) =>
+            part.count ? (
+              <Link
+                key={part.id}
+                href={listHref({ queue: part.id, q })}
+                title={`${part.label}: ${part.count}`}
+                className={part.className}
+                style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
+              />
+            ) : null,
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600">
+          {pipeline.map((part) => (
+            <Link key={part.id} href={listHref({ queue: part.id, q })} className="hover:text-slate-900">
+              {part.label} ({part.count})
+            </Link>
+          ))}
         </div>
       </div>
 
-      <form className="mt-6 flex flex-wrap items-center gap-2" action="/">
-        {VIEWS.map((item) => (
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {QUEUES.map((item) => (
           <Link
             key={item.id}
-            href={q ? `/?view=${item.id}&q=${encodeURIComponent(q)}` : `/?view=${item.id}`}
+            href={listHref({ queue: item.id, view, q })}
             className={`rounded-full px-3 py-1 text-sm ${
-              view === item.id ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+              queue === item.id ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
           >
             {item.label}
           </Link>
         ))}
-        <input type="hidden" name="view" value={view} />
-        <input
-          name="q"
-          defaultValue={q}
-          placeholder="Name, phone, email, or case number"
-          className="ml-auto w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm sm:w-64"
-        />
-      </form>
+      </div>
 
-      {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
-
-      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="w-full min-w-[1100px] text-left text-sm">
-          <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-3 py-2 font-medium">Date</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium" title="Days since this lead first arrived">
-                Age
-              </th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium" title="Days since the last call or text we sent">
-                Last contacted
-              </th>
-              <th className="px-3 py-2 font-medium">Name</th>
-              <th className="px-3 py-2 font-medium">Phone</th>
-              <th className="px-3 py-2 font-medium">Email</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Status</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Priority</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Calls</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Texts</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Sequence</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Next call</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Next step</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Channel</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Detail</th>
-              <th className="px-3 py-2 font-medium">Accident</th>
-              <th className="px-3 py-2 font-medium">Signed</th>
-              <th className="px-3 py-2 font-medium">Promoted</th>
-              <th className="px-3 py-2 font-medium">Quo</th>
-              <th className="px-3 py-2 font-medium">Slack</th>
-            </tr>
-          </thead>
-          <tbody>
-            {leads.map((lead) => {
-              const age = daysSince(lead.lead_date ?? lead.created_at);
-              const outreachAt = lastOutreach.get(lead.id);
-              const outreach = daysSince(outreachAt);
-              const slack = slackMessageUrl(lead);
-              const cycle = cycleFor(lead);
-              const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
-              const purpose = nextCallPurpose(cycle, tally.calls);
-              const channel = listChannel(lead);
-              const detail = listDetail(lead);
-              const note = lead.source_note?.trim() ?? "";
-              const detailText = note && detail !== "—" ? `${detail} · ${note}` : note || detail;
-              return (
-                <tr key={lead.id} className="border-b border-slate-100 whitespace-nowrap last:border-0">
-                  <td className="px-3 py-2 text-slate-500">{lead.lead_date ?? "—"}</td>
-                  <td className="px-3 py-2 tabular-nums text-slate-700" title={lead.lead_date ?? undefined}>
-                    {age ?? "—"}
-                  </td>
-                  <td
-                    className="whitespace-nowrap px-3 py-2 tabular-nums"
-                    title={outreachAt ? `Last contacted ${formatChicago(outreachAt)}` : "No call or text sent yet"}
+      <div className={`mt-4 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <table className="w-full text-left text-sm">
+            <thead className="sticky top-0 border-b border-slate-200 bg-white text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3 font-medium">Lead</th>
+                <th className="px-4 py-3 font-medium">Stage</th>
+                <th className="px-4 py-3 font-medium">Next step</th>
+                <th className="px-4 py-3 font-medium">Last contacted</th>
+                <th className="px-4 py-3 font-medium">Automation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((row) => {
+                const automation = automationLine(row.lead);
+                const when = receivedLabel(row.age);
+                const open = listHref({ queue, view, q, lead: row.lead.id });
+                return (
+                  <tr
+                    key={row.lead.id}
+                    className={`border-b border-slate-100 last:border-0 ${
+                      row.lead.id === selectedId ? "bg-slate-50" : "hover:bg-slate-50"
+                    } ${row.waiting ? "shadow-[inset_3px_0_0_0_#f59e0b]" : ""}`}
                   >
-                    {lastContacted(outreach)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className="inline-flex items-center gap-1">
-                      <Link href={`/leads/${lead.id}`} className="font-medium text-slate-900 hover:underline">
-                        {leadTitle(lead)}
+                    <td className="px-4 py-3">
+                      <Link href={open} className="inline-flex items-center gap-1 font-medium text-slate-900 hover:underline">
+                        {leadTitle(row.lead)}
+                        <IdentityMark status={row.lead.identity_status} />
                       </Link>
-                      <IdentityMark status={lead.identity_status} />
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">{lead.phone || "—"}</td>
-                  <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
-                  <td className="px-3 py-2">{leadStatusLabel(lead, cycle)}</td>
-                  <td className="px-3 py-2 font-medium">{leadPriority(lead, cycle) || "—"}</td>
-                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.calls}</td>
-                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.texts}</td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    {textSequenceLive(lead.text_sequence_status) ? "Live" : "Off"}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">{formatCallWhen(nextCall.get(lead.id))}</td>
-                  <td className="whitespace-nowrap px-3 py-2" title={purpose ?? undefined}>
-                    {nextStepLabel(purpose)}
-                  </td>
-                  <td className="max-w-[12rem] px-3 py-2">
-                    <div className="truncate" title={channel}>
-                      {channel}
-                    </div>
-                  </td>
-                  <td className="max-w-[12rem] px-3 py-2 text-slate-700">
-                    <div className="truncate" title={detailText}>
-                      {detailText}
-                    </div>
-                  </td>
-                  <td className="max-w-[14rem] px-3 py-2">
-                    <div className="truncate" title={listAccident(lead)}>
-                      {listAccident(lead)}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    {lead.signed_case ? <span className="font-medium text-emerald-800">Yes</span> : "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {lead.case_id ? (
-                      <a
-                        href={`${docket}/cases/${lead.case_id}`}
-                        className="font-medium text-slate-900 underline"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {lead.case_number || "Yes"}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    {lead.quo_link ? (
-                      <a href={lead.quo_link} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
-                        Quo
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    {slack ? (
-                      <a href={slack} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
-                        Post
-                      </a>
-                    ) : (
-                      "—"
-                    )}
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {row.accident !== "—" ? row.accident : "Accident not captured"}
+                        {when ? ` · ${when}` : ""}
+                        {row.priority ? ` · ${row.priority}` : ""}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${stageClass(row.label)}`}>
+                        {row.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{row.step}</td>
+                    <td className="px-4 py-3 text-slate-700" title={row.outreachAt}>
+                      {lastContacted(row.outreach)}
+                    </td>
+                    <td className={`px-4 py-3 ${automation.bad ? "font-medium text-red-700" : "text-slate-600"}`}>
+                      {automation.label}
+                    </td>
+                  </tr>
+                );
+              })}
+              {shown.length === 0 && !error ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                    Nothing in this queue.
                   </td>
                 </tr>
-              );
-            })}
-            {leads.length === 0 && !error ? (
-              <tr>
-                <td colSpan={20} className="px-3 py-8 text-center text-slate-500">
-                  No leads in this view.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {selected ? (
+          <LeadPanel
+            lead={selected.lead}
+            cycle={selected.cycle}
+            accident={selected.accident}
+            age={selected.age}
+            step={selected.step}
+            calls={selected.tally.calls}
+            texts={selected.tally.texts}
+            lastLabel={lastContacted(selected.outreach)}
+            nextCallLabel={formatCallWhen(selected.nextAt)}
+            touches={panelTouches}
+            slack={slackMessageUrl(selected.lead)}
+            intakeHref={
+              selected.lead.intake_call_id
+                ? `${docket}/intakes/${encodeURIComponent(selected.lead.intake_call_id)}`
+                : null
+            }
+            caseHref={selected.lead.case_id ? `${docket}/cases/${selected.lead.case_id}` : null}
+            closeHref={closeHref}
+          />
+        ) : null}
       </div>
+
+      <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
+        <span>Also</span>
+        {LEGACY.map((item) => (
+          <Link key={item.id} href={listHref({ view: item.id, q })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
+            {item.label}
+          </Link>
+        ))}
+        {view !== "all" ? (
+          <Link href={listHref({ queue, q })} className="hover:text-slate-900">
+            Clear that filter
+          </Link>
+        ) : null}
+      </p>
     </main>
+  );
+}
+
+function matchesLegacy(view: LeadView, lead: ListLead): boolean {
+  if (view === "pursue" || view === "needs_info") return lead.kind === view;
+  if (view === "open") return !lead.signed_case && !lead.case_id && lead.lead_status !== "Lost" && lead.lead_status !== "Referred";
+  if (view === "signed") return lead.signed_case && !lead.case_id;
+  if (view === "promoted") return Boolean(lead.case_id);
+  if (view === "verify") return lead.needs_verification;
+  return true;
+}
+
+function Metric({
+  href,
+  active,
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  href: string;
+  active: boolean;
+  label: string;
+  value: string;
+  hint: string;
+  tone: string;
+}) {
+  return (
+    <Link href={href} className={`rounded-xl border bg-white px-4 py-3 ${active ? "border-slate-900" : "border-slate-200 hover:border-slate-300"}`}>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
+    </Link>
   );
 }

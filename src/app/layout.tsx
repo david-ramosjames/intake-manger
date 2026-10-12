@@ -30,7 +30,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html lang="en" className={`${geist.variable} h-full`}>
       <body className="min-h-full">
         <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
             <Link href="/" className="text-sm font-semibold tracking-tight">
               Intake
             </Link>

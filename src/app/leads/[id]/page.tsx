@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { IdentityMark } from "@/components/IdentityMark";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
 import { confirmLead, resolveIdentity, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
@@ -7,7 +8,7 @@ import { CallWork } from "@/components/CallWork";
 import { callOutcomeLabel } from "@/lib/calls";
 import { describeFollowUp } from "@/lib/followup";
 import { formatChicago } from "@/lib/time";
-import { daysOpen, isPriorityReason, leadTitle, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
+import { daysOpen, isPriorityReason, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { CYCLE_LABEL, leadCycle, leadNeed, leadPriority } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
@@ -112,13 +113,16 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       </Link>
       <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{leadTitle(lead)}</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+            {leadTitle(lead)}
+            <IdentityMark status={lead.identity_status} />
+          </h1>
           <p className="mt-1 text-sm text-slate-600">
             {CYCLE_LABEL[cycle]}
             {priority ? ` · Priority ${priority}` : ""}
             {` · ${LEAD_KIND_LABEL[lead.kind]}`}
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
-            {lead.case_type ? ` · ${lead.case_type}` : ""}
+            {listAccident(lead) !== "—" ? ` · ${listAccident(lead)}` : ""}
             {lead.owner_name ? ` · handled by ${lead.owner_name}` : " · nobody assigned"}
             {lead.grade ? ` · Grade ${lead.grade}` : " · no grade"}
             {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}

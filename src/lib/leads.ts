@@ -1,3 +1,5 @@
+import { chicagoDay } from "@/lib/time";
+
 export const LEAD_STATUSES = [
   "New",
   "Working",
@@ -133,6 +135,16 @@ export function daysOpen(start: string | null, closedOn: string | null): number 
   return Math.max(0, Math.round((end - from) / 86_400_000));
 }
 
+/** Days since the lead first arrived. A date-only value is that calendar day. A timestamp uses Chicago. */
+export function daysSince(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const day = value.trim().length <= 10 ? value.slice(0, 10) : chicagoDay(value);
+  const from = dayStamp(day);
+  const today = dayStamp(chicagoDay(new Date()));
+  if (from == null || today == null) return null;
+  return Math.max(0, Math.round((today - from) / 86_400_000));
+}
+
 function dayStamp(value: string | null): number | null {
   if (!value) return null;
   const [year, month, day] = value.slice(0, 10).split("-").map(Number);
@@ -208,7 +220,7 @@ export function webLeadFacts(text: string | null | undefined): {
   const sourceRaw = body.match(/(?:^|\n)Source:\s*([^·\n]+)/i)?.[1] ?? "";
   return {
     name: labeledAnswer(body, "full name|client name|name") ?? usableFact(heading),
-    accident: labeledAnswer(body, "what type of accident[^:\\n]*|type of accident|case type|tipo de accidente"),
+    accident: accidentAnswer(body),
     source: usableFact(sourceRaw) ? prettySource(usableFact(sourceRaw) as string) : null,
   };
 }
@@ -236,6 +248,24 @@ export function listChannel(lead: {
   return lead.source_channel || "—";
 }
 
+function accidentAnswer(text: string | null | undefined): string | null {
+  for (const raw of (text ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!/(?:what|qu[eé])\s+type of accident|tipo de accidente|type of accident|case type/i.test(line)) continue;
+    const answer = line.match(/(?:—|–|:)\s*\*?\s*([^*\n]+?)\s*\*?\s*$/)?.[1];
+    const usable = usableAccident(answer);
+    if (usable) return usable;
+  }
+  return null;
+}
+
+function usableAccident(value: string | null | undefined): string | null {
+  const text = usableFact(value);
+  if (!text || /^(otro|otra)$/i.test(text)) return null;
+  if (/[?•—–]|when did|were you|responsible for|did the accident occur/i.test(text)) return null;
+  return text;
+}
+
 function narrativeCaseType(text: string | null | undefined): string | null {
   const body = text ?? "";
   if (/\b(fight|assault(?:ed)?|attacked|beaten|beer bottle)\b/i.test(body)) return "Assault";
@@ -247,7 +277,7 @@ function narrativeCaseType(text: string | null | undefined): string | null {
 }
 
 export function listAccident(lead: { case_type: string | null; case_detail?: string | null }): string {
-  const stored = usableFact(lead.case_type);
+  const stored = usableAccident(lead.case_type);
   if (stored) return stored;
   const fromPost = webLeadFacts(lead.case_detail).accident;
   if (fromPost) return fromPost;
@@ -267,14 +297,28 @@ export function listDetail(lead: {
   return usableFact(lead.lead_source) ?? "—";
 }
 
+function displayName(raw: string, phone: string | null): string {
+  let name = raw
+    .replace(/<[^|>]*\|([^>]+)>/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s*\(returning lead\)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (digits.length >= 10) {
+    name = name.replace(new RegExp(`\\s*[-–—]?\\s*\\+?${digits}\\b`), " ").replace(/\s+/g, " ").trim();
+  }
+  return name.replace(/\s*[-–—]\s*$/, "").trim();
+}
+
 export function leadTitle(lead: {
   lead_name: string | null;
   phone: string | null;
   identity_status?: string | null;
   case_detail?: string | null;
 }): string {
-  const name = usableFact(lead.lead_name) ?? webLeadFacts(lead.case_detail).name;
-  if (name && lead.identity_status === "needs_review") return `${name} · identity needs review`;
+  const stored = lead.lead_name?.trim() ? displayName(lead.lead_name, lead.phone) : "";
+  const name = usableFact(stored) ?? webLeadFacts(lead.case_detail).name;
   if (name) return name;
   return "Not captured";
 }

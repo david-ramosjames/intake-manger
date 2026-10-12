@@ -1,8 +1,9 @@
 import Link from "next/link";
+import { IdentityMark } from "@/components/IdentityMark";
 import { attachCallrailSources } from "@/lib/callrail";
-import { daysOpen, displayContact, isLeadView, leadTitle, listAccident, listChannel, listDetail, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { daysSince, displayContact, isLeadView, leadTitle, listAccident, listChannel, listDetail, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { CYCLE_LABEL, leadCycle, leadPriority, nextCallPurpose, nextStepLabel, textSequenceLive, type LeadCycle } from "@/lib/next-step";
-import { formatCallWhen } from "@/lib/time";
+import { formatCallWhen, formatChicago } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -94,10 +95,16 @@ export default async function LeadListPage({
   const talked = new Set<string>();
   const contact = new Map<string, { calls: number; texts: number }>();
   const nextCall = new Map<string, string>();
+  const lastOutreach = new Map<string, string>();
   const ids = leads.map((lead) => lead.id);
   if (ids.length) {
     const [{ data: touches }, { data: calls }] = await Promise.all([
-      supabase.from("intake_interactions").select("lead_id, type, direction").in("lead_id", ids).limit(5000),
+      supabase
+        .from("intake_interactions")
+        .select("lead_id, type, direction, occurred_at")
+        .in("lead_id", ids)
+        .order("occurred_at", { ascending: false })
+        .limit(5000),
       supabase.from("lead_jobs").select("lead_id, due_at, status, queue").in("lead_id", ids).eq("queue", "call").eq("status", "pending"),
     ]);
     for (const touch of touches ?? []) {
@@ -110,6 +117,10 @@ export default async function LeadListPage({
       contact.set(touch.lead_id, tally);
       const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
       if (reached) talked.add(touch.lead_id);
+      if (direction === "outbound" && (type === "call" || type === "text") && touch.occurred_at) {
+        const current = lastOutreach.get(touch.lead_id);
+        if (!current || touch.occurred_at > current) lastOutreach.set(touch.lead_id, touch.occurred_at);
+      }
     }
     for (const job of calls ?? []) {
       if (!job.lead_id || !job.due_at) continue;
@@ -164,7 +175,9 @@ export default async function LeadListPage({
           <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-3 py-2 font-medium">Date</th>
-              <th className="px-3 py-2 font-medium">Days</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium" title="Days since this lead first arrived">
+                Age
+              </th>
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium">Phone</th>
               <th className="px-3 py-2 font-medium">Email</th>
@@ -172,6 +185,9 @@ export default async function LeadListPage({
               <th className="whitespace-nowrap px-3 py-2 font-medium">Priority</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Calls</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Texts</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium" title="Days since the last call or text we sent">
+                Outreach
+              </th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Sequence</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Next call</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Next step</th>
@@ -186,10 +202,9 @@ export default async function LeadListPage({
           </thead>
           <tbody>
             {leads.map((lead) => {
-              const openFor = daysOpen(
-                lead.lead_date ?? lead.created_at,
-                lead.date_signed ?? lead.signed_at,
-              );
+              const age = daysSince(lead.lead_date ?? lead.created_at);
+              const outreachAt = lastOutreach.get(lead.id);
+              const outreach = daysSince(outreachAt);
               const slack = slackMessageUrl(lead);
               const cycle = cycleFor(lead);
               const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
@@ -201,11 +216,16 @@ export default async function LeadListPage({
               return (
                 <tr key={lead.id} className="border-b border-slate-100 whitespace-nowrap last:border-0">
                   <td className="px-3 py-2 text-slate-500">{lead.lead_date ?? "—"}</td>
-                  <td className="px-3 py-2 tabular-nums text-slate-700">{openFor ?? "—"}</td>
+                  <td className="px-3 py-2 tabular-nums text-slate-700" title={lead.lead_date ?? undefined}>
+                    {age ?? "—"}
+                  </td>
                   <td className="px-3 py-2">
-                    <Link href={`/leads/${lead.id}`} className="font-medium text-slate-900 hover:underline">
-                      {leadTitle(lead)}
-                    </Link>
+                    <span className="inline-flex items-center gap-1">
+                      <Link href={`/leads/${lead.id}`} className="font-medium text-slate-900 hover:underline">
+                        {leadTitle(lead)}
+                      </Link>
+                      <IdentityMark status={lead.identity_status} />
+                    </span>
                   </td>
                   <td className="px-3 py-2">{lead.phone || "—"}</td>
                   <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
@@ -213,6 +233,12 @@ export default async function LeadListPage({
                   <td className="px-3 py-2 font-medium">{leadPriority(lead, cycle) || "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.calls}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.texts}</td>
+                  <td
+                    className="whitespace-nowrap px-3 py-2 tabular-nums"
+                    title={outreachAt ? `Last outreach ${formatChicago(outreachAt)}` : "No call or text sent yet"}
+                  >
+                    {outreach ?? "—"}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2">
                     {textSequenceLive(lead.text_sequence_status) ? "Live" : "Off"}
                   </td>
@@ -230,7 +256,11 @@ export default async function LeadListPage({
                       {detailText}
                     </div>
                   </td>
-                  <td className="px-3 py-2">{listAccident(lead)}</td>
+                  <td className="max-w-[14rem] px-3 py-2">
+                    <div className="truncate" title={listAccident(lead)}>
+                      {listAccident(lead)}
+                    </div>
+                  </td>
                   <td className="px-3 py-2">
                     {lead.signed_case ? <span className="font-medium text-emerald-800">Yes</span> : "—"}
                   </td>
@@ -271,7 +301,7 @@ export default async function LeadListPage({
             })}
             {leads.length === 0 && !error ? (
               <tr>
-                <td colSpan={19} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={20} className="px-3 py-8 text-center text-slate-500">
                   No leads in this view.
                 </td>
               </tr>

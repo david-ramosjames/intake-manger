@@ -159,6 +159,60 @@ export function slackMessageUrl(lead: {
   return `https://ramosjames.slack.com/archives/${channel}/p${ts.replace(".", "")}`;
 }
 
+const EMPTY_FACT = /^(other|n\/a|na|none|unknown|yes|no|-|null|undefined)$/i;
+
+function cleanFact(value: string): string {
+  return value
+    .replace(/<[^|>]*\|([^>]+)>/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function usableFact(value: string | null | undefined): string | null {
+  const text = cleanFact(value ?? "");
+  if (!text || EMPTY_FACT.test(text)) return null;
+  return text;
+}
+
+function labeledAnswer(text: string, label: string): string | null {
+  const pattern = new RegExp(
+    `(?:^|\\n)\\s*(?:[•\\-*]\\s*)*\\*?\\s*(?:${label})\\s*:?\\s*\\*?\\s*:?\\s*([^\\n]+)`,
+    "i",
+  );
+  return usableFact(text.match(pattern)?.[1]);
+}
+
+function prettySource(raw: string): string {
+  return raw
+    .split("/")
+    .map((part) => {
+      const token = part.trim();
+      if (/^cpc$/i.test(token)) return "cpc";
+      if (/^(gmb|cpm|seo)$/i.test(token)) return token.toUpperCase();
+      return token.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+    })
+    .join(" / ");
+}
+
+export function webLeadFacts(text: string | null | undefined): {
+  name: string | null;
+  accident: string | null;
+  source: string | null;
+} {
+  const body = text ?? "";
+  const heading = body.match(
+    /(?:^|\n)\*((?!New lead|Contract path|More details|Details)[A-Z][A-Za-z.'’\-]+(?:\s+[A-Z][A-Za-z.'’\-]+){1,3})\*\s*(?=\n|$)/,
+  )?.[1];
+  const sourceRaw = body.match(/(?:^|\n)Source:\s*([^·\n]+)/i)?.[1] ?? "";
+  return {
+    name: labeledAnswer(body, "full name|client name|name") ?? usableFact(heading),
+    accident: labeledAnswer(body, "what type of accident[^:\\n]*|type of accident|case type|tipo de accidente"),
+    source: usableFact(sourceRaw) ? prettySource(usableFact(sourceRaw) as string) : null,
+  };
+}
+
 function callrailTracker(text: string): string | null {
   const match = text.match(/To:\s*\*(?:<[^|>]*\|)?\s*([^*<>\n]+?)\s*>?\s*\*/i);
   const name = match?.[1]?.replace(/\s+/g, " ").trim();
@@ -171,29 +225,43 @@ export function listChannel(lead: {
   case_detail?: string | null;
 }): string {
   const text = lead.case_detail ?? "";
+  const web = webLeadFacts(text);
+  if (web.source && /intake engine|new lead/i.test(text)) return "Landing page";
   if (/callrail\.com/i.test(text)) return callrailTracker(text) ?? "CallRail";
   if (/meta form/i.test(text)) return "Meta";
   if (/tiktok/i.test(text)) return "TikTok";
   if (/facebook lead/i.test(text)) return "Facebook";
   if (/whatsapp/i.test(text)) return "WhatsApp";
-  if (/intake engine|new lead\s*·/i.test(text)) return "Website";
+  if (/intake engine|new lead\s*·/i.test(text)) return "Landing page";
   return lead.source_channel || "—";
 }
 
 export function listAccident(lead: { case_type: string | null; case_detail?: string | null }): string {
-  const stored = lead.case_type?.trim();
+  const fromPost = webLeadFacts(lead.case_detail).accident;
+  if (fromPost) return fromPost;
+  const stored = usableFact(lead.case_type);
   if (stored) return stored;
   const fromForm = lead.case_detail?.match(/\*?new lead\*?\s*·\s*([A-Za-z][A-Za-z -]{1,40}?)(?:\s+-|\s+\*|\n|$)/i)?.[1]?.trim();
   if (fromForm && !/^general$/i.test(fromForm)) return fromForm;
   return "—";
 }
 
+export function listDetail(lead: {
+  lead_source: string | null;
+  case_detail?: string | null;
+}): string {
+  const fromPost = webLeadFacts(lead.case_detail).source;
+  if (fromPost) return fromPost;
+  return usableFact(lead.lead_source) ?? "—";
+}
+
 export function leadTitle(lead: {
   lead_name: string | null;
   phone: string | null;
   identity_status?: string | null;
+  case_detail?: string | null;
 }): string {
-  const name = lead.lead_name?.trim() ?? "";
+  const name = usableFact(lead.lead_name) ?? webLeadFacts(lead.case_detail).name;
   if (name && lead.identity_status === "needs_review") return `${name} · identity needs review`;
   if (name) return name;
   const ending = (lead.phone ?? "").replace(/\D/g, "").slice(-4);

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { daysOpen, displayContact, isLeadView, leadTitle, listAccident, listChannel, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { attachCallrailSources } from "@/lib/callrail";
+import { daysOpen, displayContact, isLeadView, leadTitle, listAccident, listChannel, listDetail, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -79,6 +80,10 @@ export default async function LeadListPage({
     | "slack_thread_ts"
   >[];
 
+  await attachCallrailSources(leads, async (id, source) => {
+    await supabase.from("leads").update({ lead_source: source }).eq("id", id).is("lead_source", null);
+  });
+
   return (
     <main className="mx-auto max-w-[1400px] px-4 py-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -126,8 +131,8 @@ export default async function LeadListPage({
               <th className="px-3 py-2 font-medium">Email</th>
               <th className="px-3 py-2 font-medium">Grade</th>
               <th className="px-3 py-2 font-medium">Channel</th>
-              <th className="px-3 py-2 font-medium">Accident</th>
               <th className="px-3 py-2 font-medium">Detail</th>
+              <th className="px-3 py-2 font-medium">Accident</th>
               <th className="px-3 py-2 font-medium">Signed</th>
               <th className="px-3 py-2 font-medium">Promoted</th>
               <th className="px-3 py-2 font-medium">Quo</th>
@@ -154,11 +159,11 @@ export default async function LeadListPage({
                   <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
                   <td className="px-3 py-2 font-medium">{lead.grade || "—"}</td>
                   <td className="px-3 py-2">{listChannel(lead)}</td>
-                  <td className="px-3 py-2">{listAccident(lead)}</td>
                   <td className="px-3 py-2 text-slate-700">
-                    <div>{lead.lead_source || "—"}</div>
+                    <div>{listDetail(lead)}</div>
                     {lead.source_note ? <div className="text-xs text-slate-500">{lead.source_note}</div> : null}
                   </td>
+                  <td className="px-3 py-2">{listAccident(lead)}</td>
                   <td className="px-3 py-2">
                     {lead.signed_case ? <span className="font-medium text-emerald-800">Yes</span> : "—"}
                   </td>

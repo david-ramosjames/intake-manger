@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { attachCallrailSources } from "@/lib/callrail";
 import { daysOpen, displayContact, isLeadView, leadTitle, listAccident, listChannel, listDetail, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
-import { CYCLE_LABEL, leadCycle, leadPriority, nextCallPurpose, textSequenceLive, type LeadCycle } from "@/lib/next-step";
+import { CYCLE_LABEL, leadCycle, leadPriority, nextCallPurpose, nextStepLabel, textSequenceLive, type LeadCycle } from "@/lib/next-step";
 import { formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -168,11 +168,15 @@ export default async function LeadListPage({
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium">Phone</th>
               <th className="px-3 py-2 font-medium">Email</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Priority</th>
-              <th className="px-3 py-2 font-medium">Contact</th>
-              <th className="px-3 py-2 font-medium">Channel</th>
-              <th className="px-3 py-2 font-medium">Detail</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Status</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Priority</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Calls</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Texts</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Sequence</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Next call</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Next step</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Channel</th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium">Detail</th>
               <th className="px-3 py-2 font-medium">Accident</th>
               <th className="px-3 py-2 font-medium">Signed</th>
               <th className="px-3 py-2 font-medium">Promoted</th>
@@ -187,8 +191,15 @@ export default async function LeadListPage({
                 lead.date_signed ?? lead.signed_at,
               );
               const slack = slackMessageUrl(lead);
+              const cycle = cycleFor(lead);
+              const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
+              const purpose = nextCallPurpose(cycle, tally.calls);
+              const channel = listChannel(lead);
+              const detail = listDetail(lead);
+              const note = lead.source_note?.trim() ?? "";
+              const detailText = note && detail !== "—" ? `${detail} · ${note}` : note || detail;
               return (
-                <tr key={lead.id} className="border-b border-slate-100 align-top last:border-0">
+                <tr key={lead.id} className="border-b border-slate-100 whitespace-nowrap last:border-0">
                   <td className="px-3 py-2 text-slate-500">{lead.lead_date ?? "—"}</td>
                   <td className="px-3 py-2 tabular-nums text-slate-700">{openFor ?? "—"}</td>
                   <td className="px-3 py-2">
@@ -198,30 +209,26 @@ export default async function LeadListPage({
                   </td>
                   <td className="px-3 py-2">{lead.phone || "—"}</td>
                   <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
-                  <td className="px-3 py-2">{CYCLE_LABEL[cycleFor(lead)]}</td>
-                  <td className="px-3 py-2 font-medium">{leadPriority(lead, cycleFor(lead)) || "—"}</td>
-                  <td className="px-3 py-2 text-slate-700">
-                    {(() => {
-                      const cycle = cycleFor(lead);
-                      const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
-                      const purpose = nextCallPurpose(cycle, tally.calls);
-                      return (
-                        <div>
-                          <div>
-                            {tally.calls} {tally.calls === 1 ? "call" : "calls"} · {tally.texts}{" "}
-                            {tally.texts === 1 ? "text" : "texts"}
-                          </div>
-                          <div>{formatCallWhen(nextCall.get(lead.id))}</div>
-                          {purpose ? <div>{purpose}</div> : null}
-                          <div className="text-slate-500">{textSequenceLive(lead.text_sequence_status) ? "Texts live" : "Texts not live"}</div>
-                        </div>
-                      );
-                    })()}
+                  <td className="px-3 py-2">{CYCLE_LABEL[cycle]}</td>
+                  <td className="px-3 py-2 font-medium">{leadPriority(lead, cycle) || "—"}</td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.calls}</td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.texts}</td>
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {textSequenceLive(lead.text_sequence_status) ? "Live" : "Off"}
                   </td>
-                  <td className="px-3 py-2">{listChannel(lead)}</td>
-                  <td className="px-3 py-2 text-slate-700">
-                    <div>{listDetail(lead)}</div>
-                    {lead.source_note ? <div className="text-xs text-slate-500">{lead.source_note}</div> : null}
+                  <td className="whitespace-nowrap px-3 py-2">{formatCallWhen(nextCall.get(lead.id))}</td>
+                  <td className="whitespace-nowrap px-3 py-2" title={purpose ?? undefined}>
+                    {nextStepLabel(purpose)}
+                  </td>
+                  <td className="max-w-[12rem] px-3 py-2">
+                    <div className="truncate" title={channel}>
+                      {channel}
+                    </div>
+                  </td>
+                  <td className="max-w-[12rem] px-3 py-2 text-slate-700">
+                    <div className="truncate" title={detailText}>
+                      {detailText}
+                    </div>
                   </td>
                   <td className="px-3 py-2">{listAccident(lead)}</td>
                   <td className="px-3 py-2">
@@ -264,7 +271,7 @@ export default async function LeadListPage({
             })}
             {leads.length === 0 && !error ? (
               <tr>
-                <td colSpan={13} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={19} className="px-3 py-8 text-center text-slate-500">
                   No leads in this view.
                 </td>
               </tr>

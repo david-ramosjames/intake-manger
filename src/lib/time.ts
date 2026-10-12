@@ -16,9 +16,9 @@ export function formatChicago(value: string | null | undefined): string {
 }
 
 export function formatCallWhen(value: string | null | undefined): string {
-  if (!value) return "No call scheduled";
+  if (!value) return "No call";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No call scheduled";
+  if (Number.isNaN(date.getTime())) return "No call";
   const time = new Intl.DateTimeFormat("en-US", {
     timeZone: ZONE,
     hour: "numeric",
@@ -26,15 +26,16 @@ export function formatCallWhen(value: string | null | undefined): string {
   }).format(date);
   const day = chicagoDay(date);
   const today = chicagoDay(new Date());
-  if (day === today) return `Today at ${time}`;
-  if (day === shiftDay(today, 1)) return `Tomorrow at ${time}`;
-  const weekday = new Intl.DateTimeFormat("en-US", {
+  if (day === today) return `Today ${time}`;
+  if (day === shiftDay(today, 1)) return `Tomorrow ${time}`;
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: ZONE,
     weekday: "short",
     month: "short",
     day: "numeric",
-  }).format(date);
-  return `${weekday} at ${time}`;
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${pick("weekday")} ${pick("month")} ${pick("day")} ${time}`;
 }
 
 function shiftDay(day: string, days: number): string {

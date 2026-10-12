@@ -76,6 +76,19 @@ export function nextCallPurpose(cycle: LeadCycle, calls: number): string | null 
   return calls > 0 ? "Call again to capture their details" : "Call to capture their details";
 }
 
+const NEXT_STEP_LABEL: Record<string, string> = {
+  "Call to capture their details": "Capture details",
+  "Call again to capture their details": "Capture details",
+  "Call again to gather more information": "Gather information",
+  "Call to establish the contract": "Establish contract",
+  "Call again to establish the contract": "Establish contract",
+};
+
+export function nextStepLabel(purpose: string | null): string {
+  if (!purpose) return "—";
+  return NEXT_STEP_LABEL[purpose] ?? "—";
+}
+
 export function textSequenceLive(status: string | null | undefined): boolean {
   return (status || "").toLowerCase() === "active";
 }

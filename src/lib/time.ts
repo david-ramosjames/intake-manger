@@ -15,6 +15,34 @@ export function formatChicago(value: string | null | undefined): string {
   }).format(date);
 }
 
+export function formatCallWhen(value: string | null | undefined): string {
+  if (!value) return "No call scheduled";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No call scheduled";
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  const day = chicagoDay(date);
+  const today = chicagoDay(new Date());
+  if (day === today) return `Today at ${time}`;
+  if (day === shiftDay(today, 1)) return `Tomorrow at ${time}`;
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: ZONE,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+  return `${weekday} at ${time}`;
+}
+
+function shiftDay(day: string, days: number): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, date + days));
+  return next.toISOString().slice(0, 10);
+}
+
 export function chicagoDay(value: string | Date): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: ZONE,

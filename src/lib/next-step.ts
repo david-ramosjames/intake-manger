@@ -61,11 +61,23 @@ function injuryStrength(lead: CycleLead): "strong" | "possible" | "weak" {
 
 export function leadPriority(lead: CycleLead, cycle: LeadCycle): "High" | "Medium" | "Low" | null {
   if (cycle === "signed" || cycle === "closed") return null;
+  if (cycle === "contact") return "High";
   const strength = injuryStrength(lead);
   if (strength === "strong") return "High";
   if (cycle === "signing") return strength === "weak" ? "Medium" : "High";
   if (strength === "possible") return "Medium";
   return "Low";
+}
+
+export function nextCallPurpose(cycle: LeadCycle, calls: number): string | null {
+  if (cycle === "signed" || cycle === "closed") return null;
+  if (cycle === "signing") return calls > 0 ? "Call again to establish the contract" : "Call to establish the contract";
+  if (cycle === "information") return "Call again to gather more information";
+  return calls > 0 ? "Call again to capture their details" : "Call to capture their details";
+}
+
+export function textSequenceLive(status: string | null | undefined): boolean {
+  return (status || "").toLowerCase() === "active";
 }
 
 export function talkedWithClient(touches: ClientTouch[]): boolean {

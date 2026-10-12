@@ -52,7 +52,9 @@ export default async function SequencesPage() {
         <h2 className="text-sm font-semibold">CallRail tags</h2>
         <p className="mt-1 text-sm text-slate-600">
           Tags saved on a lead use these names. When a lead has a CallRail call id, saving the tags
-          writes them back to that call.
+          writes them back to that call. Pull reads the CallRail tags API. Intake Engine and
+          Site-chat already store the account key in their own settings, and this app cannot read
+          those. Set CALLRAIL_API_KEY and CALLRAIL_ACCOUNT_ID on Intake Manager, then pull.
         </p>
         <form action={syncCallrailCatalog} className="mt-3">
           <button type="submit" className="rounded-md border border-slate-300 px-3 py-1.5 text-sm">

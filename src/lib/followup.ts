@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LeadKind } from "./leads";
-import { formatChicago } from "./time";
+import { formatChicago, snapToWorkHours } from "./time";
 
 type LeadBits = {
   id: string;
@@ -38,7 +38,7 @@ export async function enrollFollowUp(supabase: SupabaseClient, lead: LeadBits) {
     lead_id: lead.id,
     queue: step.queue as string,
     position: step.position as number,
-    due_at: new Date(now + Number(step.delay_minutes) * 60_000).toISOString(),
+    due_at: snapToWorkHours(new Date(now + Number(step.delay_minutes) * 60_000).toISOString()),
     body: renderStep(String(step.body), lead),
   }));
   if (!rows.length) return;

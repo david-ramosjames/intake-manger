@@ -75,6 +75,17 @@ export type Lead = {
   confirmed_by: string | null;
   follow_up: boolean;
   needs_verification: boolean;
+  identity_status: "ok" | "needs_review" | "confirmed";
+  identity_evidence: string | null;
+  agreement_status: string | null;
+  agreement_sent_at: string | null;
+  agreement_last_reminder_at: string | null;
+  agreement_next_reminder_at: string | null;
+  agreement_reminder_count: number | null;
+  agreement_signing_url: string | null;
+  text_sequence_slug: string | null;
+  text_sequence_status: string | null;
+  text_next_at: string | null;
   priority: boolean;
   priority_reason: PriorityReason | null;
   last_action: string | null;
@@ -143,6 +154,19 @@ export function slackMessageUrl(lead: {
   const ts = lead.slack_message_ts || lead.slack_thread_ts;
   if (!channel || !ts) return null;
   return `https://slack.com/archives/${channel}/p${ts.replace(".", "")}`;
+}
+
+export function leadTitle(lead: {
+  lead_name: string | null;
+  phone: string | null;
+  identity_status?: string | null;
+}): string {
+  const name = lead.lead_name?.trim() ?? "";
+  if (name && lead.identity_status === "needs_review") return `${name} · identity needs review`;
+  if (name) return name;
+  const ending = (lead.phone ?? "").replace(/\D/g, "").slice(-4);
+  if (ending.length === 4) return `Name not captured · phone ending ${ending}`;
+  return "Name not captured";
 }
 
 export function isLeadView(value: string | undefined): value is LeadView {

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags } from "./callrail";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
+import { loadStaff, matchStaff } from "./identity";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { isPriorityReason } from "./leads";
 import { chicagoLocalToIso } from "./time";
@@ -273,6 +274,59 @@ export async function syncCallrailCatalog() {
     if (error) throw new Error(error.message);
   }
   revalidatePath("/sequences");
+}
+
+export async function resolveIdentity(leadId: string, formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const decision = text(formData, "decision");
+  const clientName = text(formData, "client_name");
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("id, lead_name, email")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+
+  if (decision === "replace") {
+    if (!clientName) throw new Error("Enter the client’s name before saving it.");
+    const staff = await loadStaff(supabase);
+    const matched = matchStaff(clientName, staff);
+    if (matched) {
+      throw new Error(`${clientName} is ${matched.name} in the staff directory. Enter the prospective client, or keep the current name.`);
+    }
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({
+        lead_name: clientName,
+        identity_status: "confirmed",
+        identity_evidence: null,
+      })
+      .eq("id", leadId);
+    if (updateError) throw new Error(updateError.message);
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "identity_corrected",
+      actor: email,
+      payload: { from: lead.lead_name, to: clientName },
+    });
+  } else if (decision === "keep") {
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({ identity_status: "confirmed" })
+      .eq("id", leadId);
+    if (updateError) throw new Error(updateError.message);
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "identity_kept",
+      actor: email,
+      payload: { lead_name: lead.lead_name },
+    });
+  } else {
+    throw new Error("Choose whether to keep the name or replace it.");
+  }
+  revalidatePath("/verify");
+  revalidatePath("/");
+  revalidatePath(`/leads/${leadId}`);
 }
 
 export async function claimCall(formData: FormData) {

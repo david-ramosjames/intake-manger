@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   daysOpen,
+  leadTitle,
   PRIORITY_REASON_LABEL,
   PRIORITY_REASONS,
   slackMessageUrl,
@@ -122,7 +123,7 @@ export default async function PriorityPage() {
                   <li key={lead.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <Link href={`/leads/${lead.id}`} className="text-base font-medium text-slate-900 hover:underline">
-                        {lead.lead_name || "Unnamed lead"}
+                        {leadTitle(lead)}
                       </Link>
                       <p className="text-xs text-slate-500">
                         {lead.grade ? `Grade ${lead.grade}` : "No grade"}

@@ -2,12 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
-import { confirmLead, mergeIntoLead, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
+import { confirmLead, resolveIdentity, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
 import { CallWork } from "@/components/CallWork";
 import { callOutcomeLabel } from "@/lib/calls";
 import { describeFollowUp } from "@/lib/followup";
 import { formatChicago } from "@/lib/time";
-import { daysOpen, isPriorityReason, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
+import { daysOpen, isPriorityReason, leadTitle, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
+import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -16,7 +17,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, attemptsResult] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, attemptsResult, staff] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -43,6 +44,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .eq("lead_id", id)
       .order("attempted_at", { ascending: false })
       .limit(20),
+    loadStaff(supabase),
   ]);
 
   if (error) {
@@ -100,7 +102,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       </Link>
       <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{lead.lead_name || "Unnamed lead"}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{leadTitle(lead)}</h1>
           <p className="mt-1 text-sm text-slate-600">
             {LEAD_KIND_LABEL[lead.kind]}
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
@@ -251,7 +253,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             </button>
           </form>
         )}
-        <LeadForm lead={lead} action={updateLead.bind(null, lead.id)} />
+        {(lead.identity_status === "needs_review" || (!lead.lead_name?.trim() && suggestClientName(lead.summary, staff))) ? (
+          <IdentityReview lead={lead} staff={staff} />
+        ) : null}
+        <LeadForm lead={lead} staff={staff} action={updateLead.bind(null, lead.id)} />
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
@@ -280,8 +285,17 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               <input name="due_at" type="datetime-local" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
             </label>
             <label className="text-sm">
-              <span className="font-medium text-slate-700">Slack member id to mention</span>
-              <input name="mention" placeholder="U…" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+              <span className="font-medium text-slate-700">Mention</span>
+              <select name="mention" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="">
+                <option value="">No mention</option>
+                {staff
+                  .filter((person) => person.slackUserId)
+                  .map((person) => (
+                    <option key={person.slackUserId} value={person.slackUserId!}>
+                      {person.name}
+                    </option>
+                  ))}
+              </select>
             </label>
           </div>
           <button type="submit" className="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
@@ -365,7 +379,82 @@ function labelFor(eventType: string): string {
   if (eventType === "merged") return "Merged with another lead";
   if (eventType === "call_claimed") return "Call claimed";
   if (eventType === "call_outcome") return "Call outcome recorded";
+  if (eventType === "identity_corrected") return "Client name corrected";
+  if (eventType === "identity_kept") return "Name kept after identity review";
+  if (eventType === "identity_flagged") return "Name flagged against the staff directory";
+  if (eventType === "agreement_sent") return "Contract sent";
+  if (eventType === "agreement_reminder") return "Contract reminder sent";
+  if (eventType === "agreement_signed") return "Contract signed in Sign Flow";
   return eventType;
+}
+
+function Signals({ lead }: { lead: Lead }) {
+  const reminders = lead.agreement_reminder_count ?? 0;
+  const waiting = lead.agreement_status === "sent" || lead.agreement_status === "viewed";
+  return (
+    <div className="mt-3 space-y-1 text-sm text-slate-700">
+      {lead.agreement_sent_at ? (
+        <p>
+          Contract {lead.agreement_status || "sent"} {formatChicago(lead.agreement_sent_at)}.
+          {" "}
+          {reminders === 0 ? "No reminders sent." : `${reminders} reminder${reminders === 1 ? "" : "s"} sent.`}
+          {lead.agreement_last_reminder_at ? ` Last reminder ${formatChicago(lead.agreement_last_reminder_at)}.` : ""}
+          {lead.agreement_next_reminder_at
+            ? ` Next reminder ${formatChicago(lead.agreement_next_reminder_at)}.`
+            : waiting
+              ? " No upcoming reminder."
+              : ""}
+        </p>
+      ) : (
+        <p className="text-slate-500">No contract send recorded from Sign Flow.</p>
+      )}
+      {lead.text_sequence_status ? (
+        <p>
+          SMS sequence {lead.text_sequence_slug || "follow-up"} is {lead.text_sequence_status.replaceAll("_", " ")}.
+          {lead.text_next_at ? ` Next text ${formatChicago(lead.text_next_at)}.` : ""}
+        </p>
+      ) : (
+        <p className="text-slate-500">No SMS sequence recorded for this number.</p>
+      )}
+    </div>
+  );
+}
+
+function IdentityReview({ lead, staff }: { lead: Lead; staff: StaffPerson[] }) {
+  const suggestion = suggestClientName(lead.summary, staff);
+  return (
+    <form action={resolveIdentity.bind(null, lead.id)} className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3">
+      <p className="text-sm font-medium text-amber-950">
+        {lead.identity_status === "needs_review" ? "Client identity needs review" : "Name awaiting confirmation"}
+      </p>
+      {lead.identity_evidence ? <p className="mt-1 text-sm text-amber-950">{lead.identity_evidence}</p> : null}
+      {suggestion ? <p className="mt-2 text-sm text-amber-950">Suggested name: {suggestion}</p> : null}
+      <p className="mt-2 text-sm text-amber-950">
+        The current name stays until you save a different one. This does not merge or close the matter.
+      </p>
+      <label className="mt-3 block text-sm">
+        <span className="font-medium text-slate-800">Client name</span>
+        <input
+          name="client_name"
+          defaultValue={suggestion ?? ""}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+        />
+      </label>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="submit"
+          name="decision"
+          value="replace"
+          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+        >
+          Save this client name
+        </button>
+        <button type="submit" name="decision" value="keep" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
+          The current name is the client
+        </button>
+      </div>
+    </form>
+  );
 }
 
 function FollowUpPanel({
@@ -403,6 +492,7 @@ function FollowUpPanel({
       {described.nextCall ? (
         <p className="mt-1 text-sm text-slate-700">Next call: {described.nextCall}</p>
       ) : null}
+      <Signals lead={lead} />
       <p className="mt-1 text-sm text-slate-500">
         A Slack post tells someone to call. It does not mean the call was completed.
       </p>
@@ -444,6 +534,10 @@ function FollowUpPanel({
             ))}
           </ul>
         </div>
+      ) : lead.quo_link ? (
+        <p className="mt-4 text-sm text-slate-500">
+          No attempt recorded here. Quo history is not synced, so this does not mean nobody called.
+        </p>
       ) : null}
     </>
   );

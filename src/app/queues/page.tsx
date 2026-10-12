@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CallWork } from "@/components/CallWork";
 import { callOutcomeLabel } from "@/lib/calls";
+import { leadTitle } from "@/lib/leads";
 import { runDueWork } from "@/lib/ops-actions";
 import { requireStaff } from "@/lib/session";
 import { chicagoDay, formatChicago } from "@/lib/time";
@@ -27,6 +28,7 @@ type LeadBits = {
   case_type: string | null;
   summary: string | null;
   quo_link: string | null;
+  identity_status: string | null;
 };
 
 type JobRow = {
@@ -66,7 +68,7 @@ export default async function QueuesPage({
     supabase
       .from("lead_jobs")
       .select(
-        "id, lead_id, position, due_at, body, status, detail, assigned_email, outcome, notified_at, leads(id, lead_name, phone, case_type, summary, quo_link)",
+        "id, lead_id, position, due_at, body, status, detail, assigned_email, outcome, notified_at, leads(id, lead_name, phone, case_type, summary, quo_link, identity_status)",
       )
       .eq("queue", "call")
       .in("status", ["pending", "failed"])
@@ -169,7 +171,11 @@ export default async function QueuesPage({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <Link href={`/leads/${job.lead_id}`} className="font-medium text-slate-900 underline">
-                    {lead?.lead_name || "Unnamed lead"}
+                    {leadTitle({
+                      lead_name: lead?.lead_name ?? null,
+                      phone: lead?.phone ?? null,
+                      identity_status: lead?.identity_status,
+                    })}
                   </Link>
                   <span className="text-slate-500">
                     {" "}
@@ -200,7 +206,11 @@ export default async function QueuesPage({
                   {attempt.note ? ` — ${attempt.note}` : ""}
                 </p>
               ) : (
-                <p className="mt-2 text-slate-500">No attempt recorded yet.</p>
+                <p className="mt-2 text-slate-500">
+                {lead?.quo_link
+                  ? "No attempt recorded here. Quo history is not synced, so this does not mean nobody called."
+                  : "No attempt recorded yet."}
+              </p>
               )}
               {job.detail && job.status === "failed" ? <p className="mt-1 text-red-700">{job.detail}</p> : null}
               <CallWork jobId={job.id} assignedEmail={job.assigned_email} viewerEmail={email} />

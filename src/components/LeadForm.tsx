@@ -25,9 +25,11 @@ function triValue(value: boolean | null | undefined): string {
 export function LeadForm({
   lead,
   action,
+  staff = [],
 }: {
   lead?: Lead;
   action: (formData: FormData) => Promise<void>;
+  staff?: { name: string }[];
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,7 +137,24 @@ export function LeadForm({
           ))}
         </select>
       </label>
-      <Field label="Handled by" name="owner_name" defaultValue={lead?.owner_name ?? ""} />
+      <label className="text-sm sm:col-span-1">
+        <span className="font-medium text-slate-700">Handled by</span>
+        <select
+          name="owner_name"
+          defaultValue={lead?.owner_name ?? ""}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+        >
+          <option value="">Unassigned</option>
+          {staff.map((person) => (
+            <option key={person.name} value={person.name}>
+              {person.name}
+            </option>
+          ))}
+          {lead?.owner_name && !staff.some((person) => person.name === lead.owner_name) ? (
+            <option value={lead.owner_name}>{lead.owner_name}</option>
+          ) : null}
+        </select>
+      </label>
       <label className="block text-sm">
         <span className="font-medium text-slate-700">What this lead is</span>
         <select

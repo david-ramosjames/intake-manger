@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { daysOpen, displayContact, isLeadView, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { daysOpen, displayContact, isLeadView, leadTitle, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -27,7 +27,7 @@ export default async function LeadListPage({
   let query = supabase
     .from("leads")
     .select(
-      "id, lead_date, created_at, lead_name, phone, email, lead_source, source_channel, source_note, lead_status, grade, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
+      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, lead_status, grade, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
     )
     .order("lead_date", { ascending: false, nullsFirst: false })
     .limit(200);
@@ -60,6 +60,7 @@ export default async function LeadListPage({
     | "lead_name"
     | "phone"
     | "email"
+    | "identity_status"
     | "lead_source"
     | "source_channel"
     | "source_note"
@@ -145,7 +146,7 @@ export default async function LeadListPage({
                   <td className="px-3 py-2 tabular-nums text-slate-700">{openFor ?? "—"}</td>
                   <td className="px-3 py-2">
                     <Link href={`/leads/${lead.id}`} className="font-medium text-slate-900 hover:underline">
-                      {lead.lead_name || "Unnamed lead"}
+                      {leadTitle(lead)}
                     </Link>
                   </td>
                   <td className="px-3 py-2">{lead.phone || "—"}</td>

@@ -24,12 +24,12 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   },
   {
     capability: "Automated SMS follow-up",
-    owner: "SMS Follow-Up sends the text sequence. It reads the lead decision before it starts, and skips a lead that needs more info, is signed, or has follow-up turned off.",
-    here: "The decision is follow-up on or off, and the kind of lead. This app's own text queue stays off so it does not send a second copy.",
+    owner: "SMS Follow-Up sends the text sequence. It reads the lead decision before it starts, and skips a lead that needs more info, is signed, or has follow-up turned off. It writes the sequence name, status, and next text time back onto the lead.",
+    here: "The decision is follow-up on or off, and the kind of lead. This app's own text queue stays off so it does not send a second copy. The lead shows the sequence SMS Follow-Up reported.",
   },
   {
     capability: "Contract sending and follow-up",
-    owner: "Sign Flow sends the contract and the signing reminders. SMS Follow-Up stops when Slack says the contract was sent.",
+    owner: "Sign Flow sends the contract and the signing reminders, and writes the send time, reminder count, last reminder, and next reminder onto the lead. A completed contract marks that lead signed.",
     here: "Signed on the lead means the client signed. Promote in Docket is a later step and does not happen on its own.",
   },
   {
@@ -70,7 +70,7 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   {
     capability: "Marketing attribution and ROI",
     owner: "CallRail holds the call tags. Intake Engine and Site-chat forward form fills to CallRail.",
-    here: "Lead source, source type, and CallRail tags are fields on the lead. Tags write back to CallRail when the call id and API key are set. There is no ROI report here.",
+    here: "Lead source, source type, and CallRail tags are fields on the lead. The tag list is pulled from the CallRail API once CALLRAIL_API_KEY and CALLRAIL_ACCOUNT_ID are set here. Intake Engine and Site-chat keep that key in their own settings, so this app does not read it from them. There is no ROI report here.",
   },
   {
     capability: "Intake conversion analytics",
@@ -177,12 +177,22 @@ const ENVS: { service: string; name: string; why: string }[] = [
   {
     service: "Intake Manager",
     name: "CALLRAIL_API_KEY",
-    why: "Optional. Writes the lead’s tags back onto the CallRail call.",
+    why: "Pulls the tag catalog and writes a lead’s tags back onto its CallRail call. Same account key Intake Engine and Site-chat already store.",
   },
   {
     service: "Intake Manager",
     name: "CALLRAIL_ACCOUNT_ID",
-    why: "Optional. The CallRail account those tags belong to.",
+    why: "The CallRail account for that key. Required together with CALLRAIL_API_KEY.",
+  },
+  {
+    service: "Sign Flow",
+    name: "LEADS_SUPABASE_URL",
+    why: "Docket project URL. Sign Flow writes contract sent, reminders, and signed onto the lead. Leave unset and those signals stay in Firebase only.",
+  },
+  {
+    service: "Sign Flow",
+    name: "LEADS_SUPABASE_SERVICE_ROLE_KEY",
+    why: "Service role for that same project. Server only. Never a NEXT_PUBLIC variable.",
   },
   {
     service: "Intake Manager",

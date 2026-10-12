@@ -1,9 +1,11 @@
 import { LeadForm } from "@/components/LeadForm";
 import { createLead } from "@/lib/actions";
+import { loadStaff } from "@/lib/identity";
 import { requireStaff } from "@/lib/session";
 
 export default async function NewLeadPage() {
-  await requireStaff();
+  const { supabase } = await requireStaff();
+  const staff = await loadStaff(supabase);
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight">Add a lead</h1>
@@ -12,7 +14,7 @@ export default async function NewLeadPage() {
         field later.
       </p>
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <LeadForm action={createLead} />
+        <LeadForm action={createLead} staff={staff} />
       </div>
     </main>
   );

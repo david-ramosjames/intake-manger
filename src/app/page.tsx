@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { attachCallrailSources } from "@/lib/callrail";
 import { daysOpen, displayContact, isLeadView, leadTitle, listAccident, listChannel, listDetail, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { CYCLE_LABEL, leadCycle, leadPriority, type LeadCycle } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -28,7 +29,7 @@ export default async function LeadListPage({
   let query = supabase
     .from("leads")
     .select(
-      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
+      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, agreement_status, agreement_sent_at, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
     )
     .order("lead_date", { ascending: false, nullsFirst: false })
     .limit(200);
@@ -68,6 +69,10 @@ export default async function LeadListPage({
     | "case_type"
     | "case_detail"
     | "grade"
+    | "arrival"
+    | "lead_status"
+    | "agreement_status"
+    | "agreement_sent_at"
     | "signed_case"
     | "date_signed"
     | "signed_at"
@@ -83,6 +88,27 @@ export default async function LeadListPage({
   await attachCallrailSources(leads, async (id, source) => {
     await supabase.from("leads").update({ lead_source: source }).eq("id", id).is("lead_source", null);
   });
+
+  const talked = new Set<string>();
+  const ids = leads.map((lead) => lead.id);
+  if (ids.length) {
+    const { data: touches } = await supabase
+      .from("intake_interactions")
+      .select("lead_id, type, direction")
+      .in("lead_id", ids)
+      .limit(5000);
+    for (const touch of touches ?? []) {
+      const type = String(touch.type || "").toLowerCase();
+      const direction = String(touch.direction || "").toLowerCase();
+      const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
+      if (reached && touch.lead_id) talked.add(touch.lead_id);
+    }
+  }
+
+  function cycleFor(lead: (typeof leads)[number]): LeadCycle {
+    const touches = talked.has(lead.id) ? [{ type: "call", direction: "inbound" }] : [];
+    return leadCycle(lead, touches);
+  }
 
   return (
     <main className="mx-auto max-w-[1400px] px-4 py-8">
@@ -129,7 +155,8 @@ export default async function LeadListPage({
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium">Phone</th>
               <th className="px-3 py-2 font-medium">Email</th>
-              <th className="px-3 py-2 font-medium">Grade</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Priority</th>
               <th className="px-3 py-2 font-medium">Channel</th>
               <th className="px-3 py-2 font-medium">Detail</th>
               <th className="px-3 py-2 font-medium">Accident</th>
@@ -157,7 +184,8 @@ export default async function LeadListPage({
                   </td>
                   <td className="px-3 py-2">{lead.phone || "—"}</td>
                   <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
-                  <td className="px-3 py-2 font-medium">{lead.grade || "—"}</td>
+                  <td className="px-3 py-2">{CYCLE_LABEL[cycleFor(lead)]}</td>
+                  <td className="px-3 py-2 font-medium">{leadPriority(lead, cycleFor(lead)) || "—"}</td>
                   <td className="px-3 py-2">{listChannel(lead)}</td>
                   <td className="px-3 py-2 text-slate-700">
                     <div>{listDetail(lead)}</div>

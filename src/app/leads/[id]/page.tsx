@@ -9,7 +9,7 @@ import { describeFollowUp } from "@/lib/followup";
 import { formatChicago } from "@/lib/time";
 import { daysOpen, isPriorityReason, leadTitle, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
-import { leadNeed } from "@/lib/next-step";
+import { CYCLE_LABEL, leadCycle, leadNeed, leadPriority } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -101,6 +101,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const caseHref = lead.case_id ? `${docket}/cases/${lead.case_id}` : null;
   const slack = slackMessageUrl(lead);
   const openFor = daysOpen(lead.lead_date ?? lead.created_at, lead.date_signed ?? lead.signed_at);
+  const touches = (historyResult.data ?? []) as { type: string | null; direction: string | null }[];
+  const cycle = leadCycle(lead, touches);
+  const priority = leadPriority(lead, cycle);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
@@ -111,7 +114,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{leadTitle(lead)}</h1>
           <p className="mt-1 text-sm text-slate-600">
-            {LEAD_KIND_LABEL[lead.kind]}
+            {CYCLE_LABEL[cycle]}
+            {priority ? ` · Priority ${priority}` : ""}
+            {` · ${LEAD_KIND_LABEL[lead.kind]}`}
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
             {lead.case_type ? ` · ${lead.case_type}` : ""}
             {lead.owner_name ? ` · handled by ${lead.owner_name}` : " · nobody assigned"}
@@ -119,10 +124,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}
             {lead.sentiment ? ` · ${LEAD_SENTIMENT_LABEL[lead.sentiment as LeadSentiment]}` : ""}
           </p>
-          <LeadNeed
-            lead={lead}
-            touches={(historyResult.data ?? []) as { type: string | null; direction: string | null }[]}
-          />
+          <LeadNeed lead={lead} touches={touches} />
           {(() => {
             const next = jobs
               .filter((job) => job.queue === "call" && job.status === "pending")

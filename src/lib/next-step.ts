@@ -7,6 +7,67 @@ export type ClientTouch = {
 
 const SIGNING = new Set(["sent", "viewed"]);
 
+export type LeadCycle = "contact" | "information" | "signing" | "signed" | "closed";
+
+export const CYCLE_LABEL: Record<LeadCycle, string> = {
+  contact: "Need to contact",
+  information: "Need more information",
+  signing: "Finish signing",
+  signed: "Signed",
+  closed: "Closed",
+};
+
+type CycleLead = {
+  signed_case?: boolean | null;
+  lead_status?: string | null;
+  agreement_status?: string | null;
+  agreement_sent_at?: string | null;
+  arrival?: string | null;
+  grade?: string | null;
+  case_type?: string | null;
+  case_detail?: string | null;
+};
+
+function contractIsOut(lead: CycleLead): boolean {
+  const status = lead.agreement_status || "";
+  if (["signed", "completed", "cancelled", "expired", "failed"].includes(status)) return false;
+  return SIGNING.has(status) || Boolean(lead.agreement_sent_at);
+}
+
+function reachedClient(lead: CycleLead, touches: ClientTouch[]): boolean {
+  if (talkedWithClient(touches)) return true;
+  return lead.arrival === "human_call" || lead.arrival === "qualified_call" || lead.arrival === "sona";
+}
+
+export function leadCycle(lead: CycleLead, touches: ClientTouch[] = []): LeadCycle {
+  if (lead.signed_case || lead.lead_status === "Signed" || lead.agreement_status === "signed" || lead.agreement_status === "completed") {
+    return "signed";
+  }
+  if (lead.lead_status === "Lost") return "closed";
+  if (contractIsOut(lead)) return "signing";
+  if (!reachedClient(lead, touches)) return "contact";
+  return "information";
+}
+
+function injuryStrength(lead: CycleLead): "strong" | "possible" | "weak" {
+  if (lead.grade === "A") return "strong";
+  if (lead.grade === "B") return "possible";
+  if (lead.grade === "C") return "weak";
+  const text = `${lead.case_type ?? ""} ${lead.case_detail ?? ""}`;
+  if (/\b(car|truck|motor|motorcycle|pedestrian|rideshare|18-wheeler|auto)\b/i.test(text)) return "strong";
+  if (/\b(assault|dog|slip|work|premises|bicycle)\b/i.test(text)) return "possible";
+  return "weak";
+}
+
+export function leadPriority(lead: CycleLead, cycle: LeadCycle): "High" | "Medium" | "Low" | null {
+  if (cycle === "signed" || cycle === "closed") return null;
+  const strength = injuryStrength(lead);
+  if (strength === "strong") return "High";
+  if (cycle === "signing") return strength === "weak" ? "Medium" : "High";
+  if (strength === "possible") return "Medium";
+  return "Low";
+}
+
 export function talkedWithClient(touches: ClientTouch[]): boolean {
   return touches.some((touch) => {
     const type = (touch.type || "").toLowerCase();
@@ -19,41 +80,22 @@ export function talkedWithClient(touches: ClientTouch[]): boolean {
 
 export function leadNeed(lead: Lead, touches: ClientTouch[]): { title: string; detail: string } | null {
   if (lead.case_id || lead.lead_status === "Promoted") return null;
-  if (lead.signed_case || lead.lead_status === "Signed") return null;
-
-  const status = lead.agreement_status || "";
-  const contractOut = SIGNING.has(status) || (Boolean(lead.agreement_sent_at) && !["signed", "completed", "cancelled", "expired", "failed"].includes(status));
-  if (contractOut) {
+  const cycle = leadCycle(lead, touches);
+  if (cycle === "signed" || cycle === "closed") return null;
+  if (cycle === "signing") {
     return {
-      title: "Finish signing the contract",
+      title: "Finish signing",
       detail: "The contract has been sent. The next step is the signature.",
     };
   }
-
-  const formLead = lead.arrival === "form" || lead.source_channel === "Web form";
-  if (formLead && !talkedWithClient(touches)) {
+  if (cycle === "contact") {
     return {
-      title: "Contact this web form first",
-      detail: "They submitted a form. Talk to them before deciding whether to send the contract or keep gathering information.",
+      title: "Need to contact",
+      detail: "A call or text that they have not answered still counts as not in contact. Reach them before sending a contract.",
     };
   }
-
-  if (lead.kind === "needs_info" || lead.sequence === "needs_info") {
-    return {
-      title: "Still gathering information",
-      detail: "There is a conversation, and this lead still needs more before a contract.",
-    };
-  }
-
-  if (lead.kind === "pursue" || lead.sequence === "want_to_sign") {
-    return {
-      title: "Send the contract",
-      detail: "The conversation is far enough along to send the contract.",
-    };
-  }
-
   return {
-    title: "Still gathering information",
-    detail: "Use the conversation to decide whether this is ready for a contract.",
+    title: "Need more information",
+    detail: "There is a conversation, and this lead still needs more before a contract.",
   };
 }

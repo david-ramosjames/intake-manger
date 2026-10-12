@@ -11,6 +11,7 @@ import { formatChicago } from "@/lib/time";
 import { daysOpen, isPriorityReason, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { leadCycle, leadNeed, leadPriority, leadStatusLabel } from "@/lib/next-step";
+import { qualifiedLine } from "@/lib/tags";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -124,6 +125,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
             {listAccident(lead) !== "—" ? ` · ${listAccident(lead)}` : ""}
             {lead.owner_name ? ` · handled by ${lead.owner_name}` : " · nobody assigned"}
+            {` · ${qualifiedLine(lead.callrail_tags ?? [], lead.decline_reason)}`}
             {lead.grade ? ` · Grade ${lead.grade}` : " · no grade"}
             {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}
             {lead.sentiment ? ` · ${LEAD_SENTIMENT_LABEL[lead.sentiment as LeadSentiment]}` : ""}
@@ -177,9 +179,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Jon&apos;s list</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Priority leads stay here until they sign, get promoted, or are lost or referred. The next
-          call below is filled from the queue. Write the last step and the next step the way you
-          would in the daily note.
+          Highest priority is a contract already sent, a lead we know should get a contract, or a
+          strong lead we have not finished — a good web form we have not reached, or one that may
+          need a drop letter. Write the last step and the next step the way you would in the daily note.
         </p>
         <form action={savePriority.bind(null, lead.id)} className="mt-4 grid gap-3">
           <label className="flex items-center gap-2 text-sm">
@@ -469,6 +471,7 @@ function labelFor(eventType: string): string {
   if (eventType === "captured") return "Captured from Slack";
   if (eventType === "referred") return "Referred out";
   if (eventType === "not_a_lead") return "Marked not a lead";
+  if (eventType === "callrail_tags") return "Tags saved";
   if (eventType === "slack_touch") return "Another Slack post on this lead";
   if (eventType === "priority_set") return "Added to the priority list";
   if (eventType === "priority_cleared") return "Removed from the priority list";

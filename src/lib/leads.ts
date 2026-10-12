@@ -75,6 +75,7 @@ export type Lead = {
   sequence: string | null;
   arrival: LeadArrival | null;
   callrail_tags: string[];
+  decline_reason: string | null;
   confirmed_at: string | null;
   confirmed_by: string | null;
   follow_up: boolean;
@@ -122,6 +123,12 @@ export const PRIORITY_REASON_LABEL: Record<PriorityReason, string> = {
   contract_out: "Contract sent, not signed",
   send_contract: "Ready to send the contract",
   high_potential: "High potential, not triaged",
+};
+
+export const PRIORITY_REASON_SHORT: Record<PriorityReason, string> = {
+  contract_out: "Contract out",
+  send_contract: "Send contract",
+  high_potential: "High potential",
 };
 
 export function isPriorityReason(value: string | null | undefined): value is PriorityReason {

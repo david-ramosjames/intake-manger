@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
 import { displayContact } from "./leads";
+import { tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
 import { requireStaff } from "./session";
@@ -35,6 +36,8 @@ const EDITABLE = [
   "kind",
   "arrival",
   "callrail_tags",
+  "qualified",
+  "decline_reason",
   "follow_up",
 ] as const;
 
@@ -86,19 +89,19 @@ function arrivalFromForm(formData: FormData): LeadArrival | null {
   return null;
 }
 
-function tagsFromForm(formData: FormData): string[] {
-  return [
-    ...new Set(
-      String(formData.get("callrail_tags") ?? "")
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-    ),
-  ];
+function tagsFromForm(formData: FormData, signed: boolean) {
+  const coverage = ["CVR DESIRED", "CVR SIGNED"].filter((tag) => String(formData.get(tag) ?? "") === "yes");
+  return tagsFromSelection({
+    qualified: String(formData.get("qualified_tag") ?? ""),
+    coverage,
+    decline: String(formData.get("decline_tag") ?? ""),
+    signed,
+  });
 }
 
 function fieldsFromForm(formData: FormData) {
   const signed = String(formData.get("signed_case") ?? "") === "yes";
+  const tagged = tagsFromForm(formData, signed);
   return {
     lead_date: dateOrNull(formData, "lead_date"),
     lead_name: text(formData, "lead_name"),
@@ -125,7 +128,9 @@ function fieldsFromForm(formData: FormData) {
     owner_name: text(formData, "owner_name"),
     kind: kindFromForm(formData),
     arrival: arrivalFromForm(formData),
-    callrail_tags: tagsFromForm(formData),
+    callrail_tags: tagged.tags,
+    qualified: tagged.qualified,
+    decline_reason: tagged.decline_reason,
     follow_up: String(formData.get("follow_up") ?? "") === "yes",
   };
 }

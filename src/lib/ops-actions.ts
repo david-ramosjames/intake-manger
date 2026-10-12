@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { callrailConfigured, fetchCallrailTags } from "./callrail";
+import { callrailConfigured, fetchCallrailTags, pushCallrailTags } from "./callrail";
+import { tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
@@ -293,6 +294,61 @@ export async function saveSequenceStep(formData: FormData) {
     .eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/sequences");
+}
+
+export async function saveLeadTags(leadId: string, formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const { data: before, error } = await supabase
+    .from("leads")
+    .select("id, signed_case, callrail_call_id, callrail_tags, qualified, decline_reason")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !before) throw new Error(error?.message ?? "Lead not found");
+
+  const signed = Boolean(before.signed_case);
+  const coverage = ["CVR DESIRED", "CVR SIGNED"].filter((tag) => String(formData.get(tag) ?? "") === "yes");
+  const tagged = tagsFromSelection({
+    qualified: String(formData.get("qualified_tag") ?? ""),
+    coverage,
+    decline: String(formData.get("decline_tag") ?? ""),
+    signed,
+  });
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      callrail_tags: tagged.tags,
+      qualified: tagged.qualified,
+      decline_reason: tagged.decline_reason,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "callrail_tags",
+    actor: email,
+    payload: {
+      from: before.callrail_tags ?? [],
+      to: tagged.tags,
+      decline_reason: tagged.decline_reason,
+    },
+  });
+
+  if (callrailConfigured() && before.callrail_call_id) {
+    try {
+      await pushCallrailTags(before.callrail_call_id, tagged.tags);
+    } catch (err) {
+      await supabase.from("lead_events").insert({
+        lead_id: leadId,
+        event_type: "callrail_tags",
+        actor: email,
+        payload: { error: err instanceof Error ? err.message : "CallRail did not take the tags." },
+      });
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath(`/leads/${leadId}`);
 }
 
 export async function syncCallrailCatalog() {

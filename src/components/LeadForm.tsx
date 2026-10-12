@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { LeadTagFields } from "@/components/LeadTagFields";
 import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
@@ -183,15 +184,13 @@ export function LeadForm({
           ))}
         </select>
       </label>
-      <label className="block text-sm sm:col-span-2">
-        <span className="font-medium text-slate-700">CallRail tags</span>
-        <input
-          name="callrail_tags"
-          defaultValue={(lead?.callrail_tags ?? []).join(", ")}
-          placeholder="Same names as in CallRail, separated by commas"
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+      <div className="sm:col-span-2">
+        <LeadTagFields
+          tags={lead?.callrail_tags ?? []}
+          declineReason={lead?.decline_reason ?? null}
+          signed={Boolean(lead?.signed_case)}
         />
-      </label>
+      </div>
       <label className="flex items-center gap-2 text-sm sm:col-span-2">
         <input type="checkbox" name="follow_up" value="yes" defaultChecked={lead ? lead.follow_up : true} />
         <span>Run the follow-up sequence. Want-to-sign leads get texts and calls. Need-more-info leads get calls only.</span>

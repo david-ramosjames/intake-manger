@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
+import { LeadTagFields } from "@/components/LeadTagFields";
+import { saveLeadTags } from "@/lib/ops-actions";
 import { formatChicago } from "@/lib/time";
 
 export type QueueRow = {
@@ -15,6 +17,10 @@ export type QueueRow = {
   label: string;
   stageClassName: string;
   step: string;
+  tags: string[];
+  declineReason: string | null;
+  qualifiedLabel: string;
+  signed: boolean;
   lastLabel: string;
   waiting: boolean;
   automationLabel: string;
@@ -59,8 +65,11 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
           <thead className="sticky top-0 border-b border-slate-200 bg-white text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3 font-medium">Lead</th>
+              <th className="px-4 py-3 font-medium">Grade</th>
+              <th className="px-4 py-3 font-medium">Priority</th>
               <th className="px-4 py-3 font-medium">Stage</th>
               <th className="px-4 py-3 font-medium">Next step</th>
+              <th className="px-4 py-3 font-medium">Qualified</th>
               <th className="px-4 py-3 font-medium">Last contacted</th>
               <th className="px-4 py-3 font-medium">Automation</th>
               <th className="px-4 py-3 font-medium">Links</th>
@@ -86,8 +95,15 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   <p className="mt-0.5 text-xs text-slate-500">
                     {row.accident !== "—" ? row.accident : "Accident not captured"}
                     {row.when ? ` · ${row.when}` : ""}
-                    {row.priority ? ` · ${row.priority}` : ""}
                   </p>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${gradeClass(row.grade)}`}>
+                    {row.grade ?? "—"}
+                  </span>
+                </td>
+                <td className={`px-4 py-3 ${row.priority === "High" || row.priority === "Contract out" || row.priority === "Send contract" || row.priority === "High potential" ? "font-medium text-slate-900" : "text-slate-500"}`}>
+                  {row.priority ?? "—"}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${row.stageClassName}`}>
@@ -95,6 +111,9 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   </span>
                 </td>
                 <td className="px-4 py-3 text-slate-700">{row.step}</td>
+                <td className={`px-4 py-3 ${row.qualifiedLabel === "Not tagged" ? "text-amber-700" : "text-slate-700"}`}>
+                  {row.qualifiedLabel}
+                </td>
                 <td className="px-4 py-3 text-slate-700">{row.lastLabel}</td>
                 <td className={`px-4 py-3 ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
                   {row.automationLabel}
@@ -106,7 +125,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
                   Nothing in this queue.
                 </td>
               </tr>
@@ -199,7 +218,8 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           {row.phone || "No phone"}
           {row.email ? ` · ${row.email}` : ""}
           {row.owner ? ` · ${row.owner}` : ""}
-          {row.grade ? ` · Grade ${row.grade}` : ""}
+          {row.grade ? ` · Grade ${row.grade}` : " · No grade"}
+          {row.priority ? ` · ${row.priority}` : ""}
         </p>
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
@@ -207,6 +227,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
             {row.summary?.trim() || "No call summary yet. Quo writes one after the conversation."}
           </p>
         </section>
+        <TagEditor row={row} />
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next</h3>
           <dl className="mt-2 space-y-1 text-sm text-slate-700">
@@ -284,6 +305,49 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
       </div>
     </aside>
   );
+}
+
+function TagEditor({ row }: { row: QueueRow }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(formData: FormData) {
+    setPending(true);
+    setError(null);
+    try {
+      await saveLeadTags(row.id, formData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save tags");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form action={onSubmit} className="rounded-lg border border-slate-200 p-3">
+      <LeadTagFields
+        key={`${row.id}:${row.tags.join("|")}:${row.signed ? "signed" : "open"}`}
+        tags={row.tags}
+        declineReason={row.declineReason}
+        signed={row.signed}
+      />
+      {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
+      <button
+        type="submit"
+        disabled={pending}
+        className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+      >
+        {pending ? "Saving…" : "Save tags"}
+      </button>
+    </form>
+  );
+}
+
+function gradeClass(grade: string | null): string {
+  if (grade === "A") return "bg-emerald-50 text-emerald-800";
+  if (grade === "B") return "bg-sky-50 text-sky-800";
+  if (grade === "C") return "bg-slate-100 text-slate-600";
+  return "bg-slate-50 text-slate-400";
 }
 
 function contractLabel(row: QueueRow): { label: string; bad: boolean } {

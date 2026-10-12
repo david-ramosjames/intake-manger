@@ -1,12 +1,71 @@
 import Link from "next/link";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
-import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
-import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel } from "@/lib/next-step";
+import { daysSince, isLeadView, leadTitle, listAccident, PRIORITY_REASON_SHORT, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel, priorityBucket } from "@/lib/next-step";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
+import { qualifiedSummary } from "@/lib/tags";
 import { formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
+
+type HistoryTouch = {
+  lead_id: string | null;
+  phone: string | null;
+  type: string | null;
+  direction: string | null;
+  occurred_at: string | null;
+};
+
+function phoneKey(value: string | null | undefined): string {
+  const digits = (value ?? "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : "";
+}
+
+function countsAsContact(type: string): boolean {
+  return type === "call" || type === "sona_call" || type === "text" || type === "voicemail";
+}
+
+async function loadTouches(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  ids: string[],
+): Promise<HistoryTouch[]> {
+  const rows: HistoryTouch[] = [];
+  const page = 1000;
+  for (let from = 0; from < 20000; from += page) {
+    const { data } = await supabase
+      .from("intake_interactions")
+      .select("lead_id, phone, type, direction, occurred_at")
+      .in("lead_id", ids)
+      .order("occurred_at", { ascending: false })
+      .range(from, from + page - 1);
+    const batch = (data ?? []) as HistoryTouch[];
+    rows.push(...batch);
+    if (batch.length < page) break;
+  }
+  return rows;
+}
+
+async function loadTouchesByPhone(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  phones: string[],
+): Promise<HistoryTouch[]> {
+  if (!phones.length) return [];
+  const rows: HistoryTouch[] = [];
+  const page = 1000;
+  for (let from = 0; from < 20000; from += page) {
+    const { data } = await supabase
+      .from("intake_interactions")
+      .select("lead_id, phone, type, direction, occurred_at")
+      .in("phone", phones)
+      .order("occurred_at", { ascending: false })
+      .range(from, from + page - 1);
+    const batch = (data ?? []) as HistoryTouch[];
+    rows.push(...batch);
+    if (batch.length < page) break;
+  }
+  return rows;
+}
 
 function displayPhone(phone: string | null): string | null {
   const value = phone?.trim() ?? "";
@@ -38,7 +97,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, agreement_status, agreement_sent_at, agreement_signing_url, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, agreement_status, agreement_sent_at, agreement_signing_url, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -58,6 +117,9 @@ type ListLead = Pick<
   | "arrival"
   | "lead_status"
   | "close_reason"
+  | "priority_reason"
+  | "callrail_tags"
+  | "decline_reason"
   | "agreement_status"
   | "agreement_sent_at"
   | "agreement_signing_url"
@@ -120,29 +182,49 @@ export default async function LeadListPage({
   const nextCall = new Map<string, string>();
   const lastOutreach = new Map<string, string>();
   const ids = leads.map((lead) => lead.id);
+  const idSet = new Set(ids);
+  const idsByPhone = new Map<string, string[]>();
+  for (const lead of leads) {
+    const key = phoneKey(lead.phone);
+    if (!key) continue;
+    const list = idsByPhone.get(key) ?? [];
+    list.push(lead.id);
+    idsByPhone.set(key, list);
+  }
   if (ids.length) {
-    const [{ data: touches }, { data: calls }] = await Promise.all([
-      supabase
-        .from("intake_interactions")
-        .select("lead_id, type, direction, occurred_at")
-        .in("lead_id", ids)
-        .order("occurred_at", { ascending: false })
-        .limit(5000),
+    const [{ data: calls }, touches] = await Promise.all([
       supabase.from("lead_jobs").select("lead_id, due_at, status, queue").in("lead_id", ids).eq("queue", "call").eq("status", "pending"),
+      loadTouches(supabase, ids),
     ]);
-    for (const touch of touches ?? []) {
-      if (!touch.lead_id) continue;
+    for (const touch of touches) {
       const type = String(touch.type || "").toLowerCase();
       const direction = String(touch.direction || "").toLowerCase();
-      const tally = contact.get(touch.lead_id) ?? { calls: 0, texts: 0 };
-      if (type === "call" || type === "sona_call" || type === "missed_call") tally.calls += 1;
-      if (type === "text") tally.texts += 1;
-      contact.set(touch.lead_id, tally);
-      const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
-      if (reached) talked.add(touch.lead_id);
-      if (direction === "outbound" && (type === "call" || type === "text") && touch.occurred_at) {
-        const current = lastOutreach.get(touch.lead_id);
-        if (!current || touch.occurred_at > current) lastOutreach.set(touch.lead_id, touch.occurred_at);
+      const owners = new Set<string>();
+      if (touch.lead_id && idSet.has(touch.lead_id)) owners.add(touch.lead_id);
+      for (const id of idsByPhone.get(phoneKey(touch.phone)) ?? []) owners.add(id);
+      for (const leadId of owners) {
+        const tally = contact.get(leadId) ?? { calls: 0, texts: 0 };
+        if (type === "call" || type === "sona_call" || type === "missed_call") tally.calls += 1;
+        if (type === "text") tally.texts += 1;
+        contact.set(leadId, tally);
+        const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
+        if (reached) talked.add(leadId);
+        if (touch.occurred_at && countsAsContact(type)) {
+          const current = lastOutreach.get(leadId);
+          if (!current || touch.occurred_at > current) lastOutreach.set(leadId, touch.occurred_at);
+        }
+      }
+    }
+    const missingPhones = [...idsByPhone.keys()].filter((phone) =>
+      (idsByPhone.get(phone) ?? []).some((id) => !lastOutreach.has(id)),
+    );
+    for (const touch of await loadTouchesByPhone(supabase, missingPhones)) {
+      if (touch.lead_id && idSet.has(touch.lead_id)) continue;
+      const type = String(touch.type || "").toLowerCase();
+      if (!touch.occurred_at || !countsAsContact(type)) continue;
+      for (const leadId of idsByPhone.get(phoneKey(touch.phone)) ?? []) {
+        const current = lastOutreach.get(leadId);
+        if (!current || touch.occurred_at > current) lastOutreach.set(leadId, touch.occurred_at);
       }
     }
     for (const job of calls ?? []) {
@@ -181,6 +263,7 @@ export default async function LeadListPage({
       step: nextStepLabel(nextCallPurpose(cycle, tally.calls)),
       accident: listAccident(lead),
       priority: leadPriority(lead, cycle),
+      bucket: priorityBucket(lead, cycle),
     };
   });
 
@@ -230,10 +313,14 @@ export default async function LeadListPage({
       identityStatus: row.lead.identity_status,
       accident: row.accident,
       when: receivedLabel(row.age),
-      priority: row.priority,
+      priority: row.bucket ? PRIORITY_REASON_SHORT[row.bucket] : row.priority,
       label: row.label,
       stageClassName: stageClass(row.label),
       step: row.step,
+      tags: row.lead.callrail_tags ?? [],
+      declineReason: row.lead.decline_reason,
+      qualifiedLabel: qualifiedSummary(row.lead.callrail_tags ?? [], row.lead.decline_reason),
+      signed: row.lead.signed_case || ["signed", "completed"].includes((row.lead.agreement_status || "").toLowerCase()),
       lastLabel: lastContacted(row.outreach),
       waiting: row.waiting,
       automationLabel: automation.label,
@@ -319,6 +406,12 @@ export default async function LeadListPage({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Link
+          href="/priority"
+          className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-900 ring-1 ring-slate-200"
+        >
+          Priority
+        </Link>
         {QUEUES.map((item) => (
           <Link
             key={item.id}

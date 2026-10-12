@@ -69,6 +69,7 @@ export type Lead = {
   summary: string | null;
   owner_name: string | null;
   kind: LeadKind;
+  sequence: string | null;
   arrival: LeadArrival | null;
   callrail_tags: string[];
   confirmed_at: string | null;

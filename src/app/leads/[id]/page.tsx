@@ -9,6 +9,7 @@ import { describeFollowUp } from "@/lib/followup";
 import { formatChicago } from "@/lib/time";
 import { daysOpen, isPriorityReason, leadTitle, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
+import { leadNeed } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -17,7 +18,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, attemptsResult, staff] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, attemptsResult, staff, historyResult] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -45,6 +46,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .order("attempted_at", { ascending: false })
       .limit(20),
     loadStaff(supabase),
+    supabase
+      .from("intake_interactions")
+      .select("id, type, direction, content, transcript, quo_link, occurred_at")
+      .eq("lead_id", id)
+      .order("occurred_at", { ascending: false })
+      .limit(30),
   ]);
 
   if (error) {
@@ -112,6 +119,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}
             {lead.sentiment ? ` · ${LEAD_SENTIMENT_LABEL[lead.sentiment as LeadSentiment]}` : ""}
           </p>
+          <LeadNeed
+            lead={lead}
+            touches={(historyResult.data ?? []) as { type: string | null; direction: string | null }[]}
+          />
           {(() => {
             const next = jobs
               .filter((job) => job.queue === "call" && job.status === "pending")
@@ -259,6 +270,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <LeadForm lead={lead} staff={staff} action={updateLead.bind(null, lead.id)} />
       </section>
 
+      <Conversation history={(historyResult.data ?? []) as HistoryRow[]} error={historyResult.error?.message ?? null} />
+
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Follow-up</h2>
         <FollowUpPanel
@@ -360,6 +373,70 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       </section>
     </main>
   );
+}
+
+type HistoryRow = {
+  id: string;
+  type: string | null;
+  direction: string | null;
+  content: string | null;
+  transcript: string | null;
+  quo_link: string | null;
+  occurred_at: string | null;
+};
+
+function LeadNeed({ lead, touches }: { lead: Lead; touches: { type: string | null; direction: string | null }[] }) {
+  const need = leadNeed(lead, touches);
+  if (!need) return null;
+  return (
+    <p className="mt-2 text-sm text-slate-800">
+      <span className="font-medium">{need.title}.</span> {need.detail}
+    </p>
+  );
+}
+
+function Conversation({ history, error }: { history: HistoryRow[]; error: string | null }) {
+  return (
+    <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+      <h2 className="text-sm font-semibold text-slate-900">Conversation</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        Calls and texts from Quo, including the texts SMS Follow-Up sends. New facts keep filling the intake until the case is promoted.
+      </p>
+      {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
+      <ul className="mt-3 space-y-2">
+        {history.map((row) => (
+          <li key={row.id} className="rounded-md border border-slate-100 px-3 py-2 text-sm">
+            <p className="text-slate-500">
+              {row.occurred_at ? formatChicago(row.occurred_at) : "Time not recorded"}
+              {" · "}
+              {row.direction || "unknown"} {row.type || "message"}
+              {row.quo_link ? (
+                <>
+                  {" · "}
+                  <a href={row.quo_link} className="underline" target="_blank" rel="noreferrer">
+                    Quo
+                  </a>
+                </>
+              ) : null}
+            </p>
+            {row.content ? <p className="mt-1 whitespace-pre-wrap text-slate-800">{snippet(row.content)}</p> : null}
+            {row.transcript ? (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-slate-600">Transcript</summary>
+                <p className="mt-1 whitespace-pre-wrap text-slate-700">{snippet(row.transcript, 4000)}</p>
+              </details>
+            ) : null}
+          </li>
+        ))}
+        {history.length === 0 && !error ? <li className="text-sm text-slate-500">No calls or texts stored for this lead yet.</li> : null}
+      </ul>
+    </section>
+  );
+}
+
+function snippet(value: string, max = 500): string {
+  const text = value.trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 function labelFor(eventType: string): string {
@@ -536,7 +613,7 @@ function FollowUpPanel({
         </div>
       ) : lead.quo_link ? (
         <p className="mt-4 text-sm text-slate-500">
-          No attempt recorded here. Quo history is not synced, so this does not mean nobody called.
+          No outcome recorded here. Calls and texts from Quo are in the conversation above.
         </p>
       ) : null}
     </>

@@ -14,8 +14,8 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   },
   {
     capability: "AI intake extraction",
-    owner: "Quo Router reads the call summary and fills the Docket intake for a qualified personal-injury call.",
-    here: "Intake Manager links to that intake. It does not extract the call.",
+    owner: "Quo Router reads the call or text and fills empty fields on the Docket intake. It keeps doing that until the case is promoted. Every call and text is also stored on the client history.",
+    here: "Intake Manager shows that history and the next step. It does not extract the call.",
   },
   {
     capability: "AI lead summaries",

@@ -7,6 +7,13 @@ import { formatCallWhen, formatChicago } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
+function lastContacted(days: number | null): string {
+  if (days == null) return "Never";
+  if (days === 0) return "Today";
+  if (days === 1) return "1 day";
+  return `${days} days`;
+}
+
 const VIEWS: { id: LeadView; label: string }[] = [
   { id: "all", label: "All" },
   { id: "pursue", label: "Want to sign" },
@@ -178,6 +185,9 @@ export default async function LeadListPage({
               <th className="whitespace-nowrap px-3 py-2 font-medium" title="Days since this lead first arrived">
                 Age
               </th>
+              <th className="whitespace-nowrap px-3 py-2 font-medium" title="Days since the last call or text we sent">
+                Last contacted
+              </th>
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium">Phone</th>
               <th className="px-3 py-2 font-medium">Email</th>
@@ -185,9 +195,6 @@ export default async function LeadListPage({
               <th className="whitespace-nowrap px-3 py-2 font-medium">Priority</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Calls</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Texts</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium" title="Days since the last call or text we sent">
-                Outreach
-              </th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Sequence</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Next call</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Next step</th>
@@ -219,6 +226,12 @@ export default async function LeadListPage({
                   <td className="px-3 py-2 tabular-nums text-slate-700" title={lead.lead_date ?? undefined}>
                     {age ?? "—"}
                   </td>
+                  <td
+                    className="whitespace-nowrap px-3 py-2 tabular-nums"
+                    title={outreachAt ? `Last contacted ${formatChicago(outreachAt)}` : "No call or text sent yet"}
+                  >
+                    {lastContacted(outreach)}
+                  </td>
                   <td className="px-3 py-2">
                     <span className="inline-flex items-center gap-1">
                       <Link href={`/leads/${lead.id}`} className="font-medium text-slate-900 hover:underline">
@@ -233,12 +246,6 @@ export default async function LeadListPage({
                   <td className="px-3 py-2 font-medium">{leadPriority(lead, cycle) || "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.calls}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.texts}</td>
-                  <td
-                    className="whitespace-nowrap px-3 py-2 tabular-nums"
-                    title={outreachAt ? `Last outreach ${formatChicago(outreachAt)}` : "No call or text sent yet"}
-                  >
-                    {outreach ?? "—"}
-                  </td>
                   <td className="whitespace-nowrap px-3 py-2">
                     {textSequenceLive(lead.text_sequence_status) ? "Live" : "Off"}
                   </td>

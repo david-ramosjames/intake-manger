@@ -259,6 +259,9 @@ export async function updateLead(leadId: string, formData: FormData) {
   if (before.sentiment !== fields.sentiment || before.sentiment_reason !== fields.sentiment_reason) {
     patch.sentiment_source = "staff";
   }
+  if (statusNow !== "Lost" && before.close_reason) {
+    patch.close_reason = null;
+  }
   patch.confirmed_at = null;
   patch.confirmed_by = null;
   if (!fields.lead_name || !fields.phone) patch.needs_verification = true;

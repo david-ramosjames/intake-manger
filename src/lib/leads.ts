@@ -81,6 +81,7 @@ export type Lead = {
   needs_verification: boolean;
   identity_status: "ok" | "needs_review" | "confirmed";
   identity_evidence: string | null;
+  close_reason: "not_a_lead" | null;
   agreement_status: string | null;
   agreement_sent_at: string | null;
   agreement_last_reminder_at: string | null;

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { attachCallrailSources } from "@/lib/callrail";
 import { daysSince, displayContact, isLeadView, leadTitle, listAccident, listChannel, listDetail, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
-import { CYCLE_LABEL, leadCycle, leadPriority, nextCallPurpose, nextStepLabel, textSequenceLive, type LeadCycle } from "@/lib/next-step";
+import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel, textSequenceLive, type LeadCycle } from "@/lib/next-step";
 import { formatCallWhen, formatChicago } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -38,7 +38,7 @@ export default async function LeadListPage({
   let query = supabase
     .from("leads")
     .select(
-      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, agreement_status, agreement_sent_at, text_sequence_status, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
+      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, agreement_status, agreement_sent_at, text_sequence_status, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
     )
     .order("lead_date", { ascending: false, nullsFirst: false })
     .limit(200);
@@ -80,6 +80,7 @@ export default async function LeadListPage({
     | "grade"
     | "arrival"
     | "lead_status"
+    | "close_reason"
     | "agreement_status"
     | "agreement_sent_at"
     | "text_sequence_status"
@@ -242,7 +243,7 @@ export default async function LeadListPage({
                   </td>
                   <td className="px-3 py-2">{lead.phone || "—"}</td>
                   <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
-                  <td className="px-3 py-2">{CYCLE_LABEL[cycle]}</td>
+                  <td className="px-3 py-2">{leadStatusLabel(lead, cycle)}</td>
                   <td className="px-3 py-2 font-medium">{leadPriority(lead, cycle) || "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.calls}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{tally.texts}</td>

@@ -17,6 +17,11 @@ export const CYCLE_LABEL: Record<LeadCycle, string> = {
   closed: "Closed",
 };
 
+export function leadStatusLabel(lead: { close_reason?: string | null }, cycle: LeadCycle): string {
+  if (lead.close_reason === "not_a_lead") return "Not a lead";
+  return CYCLE_LABEL[cycle];
+}
+
 type CycleLead = {
   signed_case?: boolean | null;
   lead_status?: string | null;
@@ -26,6 +31,7 @@ type CycleLead = {
   grade?: string | null;
   case_type?: string | null;
   case_detail?: string | null;
+  close_reason?: string | null;
 };
 
 function contractIsOut(lead: CycleLead): boolean {

@@ -3,14 +3,14 @@ import { notFound } from "next/navigation";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
-import { confirmLead, resolveIdentity, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
+import { confirmLead, markNotALead, resolveIdentity, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
 import { CallWork } from "@/components/CallWork";
 import { callOutcomeLabel } from "@/lib/calls";
 import { describeFollowUp } from "@/lib/followup";
 import { formatChicago } from "@/lib/time";
 import { daysOpen, isPriorityReason, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
-import { CYCLE_LABEL, leadCycle, leadNeed, leadPriority } from "@/lib/next-step";
+import { leadCycle, leadNeed, leadPriority, leadStatusLabel } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -118,7 +118,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <IdentityMark status={lead.identity_status} />
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            {CYCLE_LABEL[cycle]}
+            {leadStatusLabel(lead, cycle)}
             {priority ? ` · Priority ${priority}` : ""}
             {` · ${LEAD_KIND_LABEL[lead.kind]}`}
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
@@ -160,6 +160,19 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           ) : null}
         </div>
       </div>
+
+      {lead.signed_case || lead.case_id || lead.lead_status === "Signed" || lead.lead_status === "Promoted" ? null : lead.close_reason === "not_a_lead" ? (
+        <p className="mt-4 text-sm text-slate-600">Not a lead. Calls and texts are off.</p>
+      ) : (
+        <form action={markNotALead.bind(null, lead.id)} className="mt-4">
+          <button type="submit" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800">
+            Not a lead
+          </button>
+          <p className="mt-1 text-sm text-slate-500">
+            Closes the lead and stops calls and texts. Use this when the call was never a personal-injury matter.
+          </p>
+        </form>
+      )}
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Jon&apos;s list</h2>
@@ -455,6 +468,7 @@ function labelFor(eventType: string): string {
   if (eventType === "confirmed") return "Record confirmed";
   if (eventType === "captured") return "Captured from Slack";
   if (eventType === "referred") return "Referred out";
+  if (eventType === "not_a_lead") return "Marked not a lead";
   if (eventType === "slack_touch") return "Another Slack post on this lead";
   if (eventType === "priority_set") return "Added to the priority list";
   if (eventType === "priority_cleared") return "Removed from the priority list";

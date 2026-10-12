@@ -169,6 +169,40 @@ export async function scheduleSlackPost(leadId: string, formData: FormData) {
   revalidatePath("/queues");
 }
 
+export async function markNotALead(leadId: string) {
+  const { supabase, email } = await requireStaff();
+  const { data, error } = await supabase
+    .from("leads")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !data) throw new Error(error?.message ?? "Lead not found");
+  if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
+    throw new Error("A signed or promoted matter stays open.");
+  }
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      lead_status: "Lost",
+      follow_up: false,
+      sequence: "stop",
+      close_reason: "not_a_lead",
+      text_sequence_status: data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  await stopFollowUp(supabase, leadId, "Not a lead");
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "not_a_lead",
+    actor: email,
+    payload: { reason: "Staff marked this as not a lead." },
+  });
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/");
+  revalidatePath("/queues");
+}
+
 export async function sendReferral(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { daysOpen, displayContact, isLeadView, leadTitle, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { daysOpen, displayContact, isLeadView, leadTitle, listAccident, listChannel, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -27,7 +27,7 @@ export default async function LeadListPage({
   let query = supabase
     .from("leads")
     .select(
-      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, lead_status, grade, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
+      "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, signed_case, date_signed, signed_at, case_id, case_number, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts",
     )
     .order("lead_date", { ascending: false, nullsFirst: false })
     .limit(200);
@@ -64,7 +64,8 @@ export default async function LeadListPage({
     | "lead_source"
     | "source_channel"
     | "source_note"
-    | "lead_status"
+    | "case_type"
+    | "case_detail"
     | "grade"
     | "signed_case"
     | "date_signed"
@@ -124,9 +125,9 @@ export default async function LeadListPage({
               <th className="px-3 py-2 font-medium">Phone</th>
               <th className="px-3 py-2 font-medium">Email</th>
               <th className="px-3 py-2 font-medium">Grade</th>
-              <th className="px-3 py-2 font-medium">Source</th>
+              <th className="px-3 py-2 font-medium">Channel</th>
+              <th className="px-3 py-2 font-medium">Accident</th>
               <th className="px-3 py-2 font-medium">Detail</th>
-              <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Signed</th>
               <th className="px-3 py-2 font-medium">Promoted</th>
               <th className="px-3 py-2 font-medium">Quo</th>
@@ -152,12 +153,12 @@ export default async function LeadListPage({
                   <td className="px-3 py-2">{lead.phone || "—"}</td>
                   <td className="px-3 py-2">{displayContact(lead.email) || "—"}</td>
                   <td className="px-3 py-2 font-medium">{lead.grade || "—"}</td>
-                  <td className="px-3 py-2">{lead.source_channel || "—"}</td>
+                  <td className="px-3 py-2">{listChannel(lead)}</td>
+                  <td className="px-3 py-2">{listAccident(lead)}</td>
                   <td className="px-3 py-2 text-slate-700">
                     <div>{lead.lead_source || "—"}</div>
                     {lead.source_note ? <div className="text-xs text-slate-500">{lead.source_note}</div> : null}
                   </td>
-                  <td className="px-3 py-2">{lead.lead_status}</td>
                   <td className="px-3 py-2">
                     {lead.signed_case ? <span className="font-medium text-emerald-800">Yes</span> : "—"}
                   </td>

@@ -47,6 +47,7 @@ export type Lead = {
   source_channel: string | null;
   source_note: string | null;
   case_type: string | null;
+  case_detail: string | null;
   lead_status: string;
   consultation: string | null;
   consultation_date: string | null;
@@ -154,7 +155,37 @@ export function slackMessageUrl(lead: {
   const channel = lead.slack_channel_id;
   const ts = lead.slack_message_ts || lead.slack_thread_ts;
   if (!channel || !ts) return null;
-  return `https://slack.com/archives/${channel}/p${ts.replace(".", "")}`;
+  // A bare slack.com link opens whichever workspace is active. These posts are in Ramos James.
+  return `https://ramosjames.slack.com/archives/${channel}/p${ts.replace(".", "")}`;
+}
+
+function callrailTracker(text: string): string | null {
+  const match = text.match(/To:\s*\*(?:<[^|>]*\|)?\s*([^*<>\n]+?)\s*>?\s*\*/i);
+  const name = match?.[1]?.replace(/\s+/g, " ").trim();
+  if (!name || name.length > 80) return null;
+  return name;
+}
+
+export function listChannel(lead: {
+  source_channel: string | null;
+  case_detail?: string | null;
+}): string {
+  const text = lead.case_detail ?? "";
+  if (/callrail\.com/i.test(text)) return callrailTracker(text) ?? "CallRail";
+  if (/meta form/i.test(text)) return "Meta";
+  if (/tiktok/i.test(text)) return "TikTok";
+  if (/facebook lead/i.test(text)) return "Facebook";
+  if (/whatsapp/i.test(text)) return "WhatsApp";
+  if (/intake engine|new lead\s*·/i.test(text)) return "Website";
+  return lead.source_channel || "—";
+}
+
+export function listAccident(lead: { case_type: string | null; case_detail?: string | null }): string {
+  const stored = lead.case_type?.trim();
+  if (stored) return stored;
+  const fromForm = lead.case_detail?.match(/\*?new lead\*?\s*·\s*([A-Za-z][A-Za-z -]{1,40}?)(?:\s+-|\s+\*|\n|$)/i)?.[1]?.trim();
+  if (fromForm && !/^general$/i.test(fromForm)) return fromForm;
+  return "—";
 }
 
 export function leadTitle(lead: {

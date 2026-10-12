@@ -30,7 +30,7 @@ export function needsAttention(input: {
   if (input.cycle === "signed" || input.cycle === "closed") return false;
   if (input.waiting) return true;
   if (input.identityStatus === "needs_review") return true;
-  return ["failed", "cancelled", "expired"].includes(input.agreementStatus || "");
+  return (input.agreementStatus || "").toLowerCase() === "failed";
 }
 
 export function matchesQueue(queue: QueueId, cycle: LeadCycle, attention: boolean): boolean {
@@ -51,21 +51,19 @@ export function stageClass(label: string): string {
 }
 
 export function automationLine(lead: {
-  quo_link: string | null;
-  summary?: string | null;
   text_sequence_status: string | null;
   text_next_at?: string | null;
   agreement_status: string | null;
+  agreement_sent_at?: string | null;
 }): { label: string; bad: boolean } {
   const agreement = (lead.agreement_status || "").toLowerCase();
-  if (["failed", "cancelled", "expired"].includes(agreement)) {
-    return { label: "Contract failed", bad: true };
-  }
-  if (agreement === "sent" || agreement === "viewed") return { label: "Contract out", bad: false };
+  if (agreement === "failed") return { label: "Contract failed", bad: true };
   if (agreement === "signed" || agreement === "completed") return { label: "Contract signed", bad: false };
+  if (agreement === "sent" || agreement === "viewed" || lead.agreement_sent_at) {
+    return { label: "Contract sent", bad: false };
+  }
   if ((lead.text_sequence_status || "").toLowerCase() === "active") {
     return { label: lead.text_next_at ? "Text scheduled" : "Texts live", bad: false };
   }
-  if (lead.quo_link || lead.summary) return { label: "Quo synced", bad: false };
-  return { label: "Not started", bad: false };
+  return { label: "—", bad: false };
 }

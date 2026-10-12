@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { LeadPanel } from "@/components/LeadPanel";
-import { IdentityMark } from "@/components/IdentityMark";
+import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
 import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel } from "@/lib/next-step";
@@ -8,6 +7,12 @@ import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, s
 import { formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
+
+function displayPhone(phone: string | null): string | null {
+  const value = phone?.trim() ?? "";
+  if (!value || /^(null|undefined)$/i.test(value)) return null;
+  return value;
+}
 
 function lastContacted(days: number | null): string {
   if (days == null) return "Never";
@@ -33,7 +38,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, agreement_status, agreement_sent_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, agreement_status, agreement_sent_at, agreement_signing_url, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -55,6 +60,7 @@ type ListLead = Pick<
   | "close_reason"
   | "agreement_status"
   | "agreement_sent_at"
+  | "agreement_signing_url"
   | "text_sequence_status"
   | "text_sequence_slug"
   | "text_next_at"
@@ -216,26 +222,41 @@ export default async function LeadListPage({
       return (b.age ?? 0) - (a.age ?? 0);
     });
 
-  const selected = rows.find((row) => row.lead.id === selectedId) ?? null;
-  let panelTouches: {
-    id: string;
-    type: string | null;
-    direction: string | null;
-    content: string | null;
-    occurred_at: string | null;
-    quo_link: string | null;
-  }[] = [];
-  if (selected) {
-    const { data: history } = await supabase
-      .from("intake_interactions")
-      .select("id, type, direction, content, occurred_at, quo_link")
-      .eq("lead_id", selected.lead.id)
-      .order("occurred_at", { ascending: false })
-      .limit(8);
-    panelTouches = history ?? [];
-  }
-
-  const closeHref = listHref({ queue, view, q });
+  const queueRows: QueueRow[] = shown.map((row) => {
+    const automation = automationLine(row.lead);
+    return {
+      id: row.lead.id,
+      title: leadTitle(row.lead),
+      identityStatus: row.lead.identity_status,
+      accident: row.accident,
+      when: receivedLabel(row.age),
+      priority: row.priority,
+      label: row.label,
+      stageClassName: stageClass(row.label),
+      step: row.step,
+      lastLabel: lastContacted(row.outreach),
+      waiting: row.waiting,
+      automationLabel: automation.label,
+      automationBad: automation.bad,
+      quoUrl: row.lead.quo_link,
+      slackUrl: slackMessageUrl(row.lead),
+      phone: displayPhone(row.lead.phone),
+      email: row.lead.email,
+      summary: row.lead.summary,
+      owner: row.lead.owner_name,
+      grade: row.lead.grade,
+      textsLive: (row.lead.text_sequence_status || "").toLowerCase() === "active",
+      textNext: row.lead.text_next_at,
+      agreementStatus: row.lead.agreement_status,
+      agreementSent: row.lead.agreement_sent_at,
+      signingUrl: row.lead.agreement_signing_url,
+      intakeHref: row.lead.intake_call_id ? `${docket}/intakes/${encodeURIComponent(row.lead.intake_call_id)}` : null,
+      caseHref: row.lead.case_id ? `${docket}/cases/${row.lead.case_id}` : null,
+      calls: row.tally.calls,
+      texts: row.tally.texts,
+      nextCallLabel: formatCallWhen(row.nextAt),
+    };
+  });
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
@@ -311,90 +332,7 @@ export default async function LeadListPage({
         ))}
       </div>
 
-      <div className={`mt-4 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 border-b border-slate-200 bg-white text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3 font-medium">Lead</th>
-                <th className="px-4 py-3 font-medium">Stage</th>
-                <th className="px-4 py-3 font-medium">Next step</th>
-                <th className="px-4 py-3 font-medium">Last contacted</th>
-                <th className="px-4 py-3 font-medium">Automation</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((row) => {
-                const automation = automationLine(row.lead);
-                const when = receivedLabel(row.age);
-                const open = listHref({ queue, view, q, lead: row.lead.id });
-                return (
-                  <tr
-                    key={row.lead.id}
-                    className={`border-b border-slate-100 last:border-0 ${
-                      row.lead.id === selectedId ? "bg-slate-50" : "hover:bg-slate-50"
-                    } ${row.waiting ? "shadow-[inset_3px_0_0_0_#f59e0b]" : ""}`}
-                  >
-                    <td className="px-4 py-3">
-                      <Link href={open} className="inline-flex items-center gap-1 font-medium text-slate-900 hover:underline">
-                        {leadTitle(row.lead)}
-                        <IdentityMark status={row.lead.identity_status} />
-                      </Link>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {row.accident !== "—" ? row.accident : "Accident not captured"}
-                        {when ? ` · ${when}` : ""}
-                        {row.priority ? ` · ${row.priority}` : ""}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${stageClass(row.label)}`}>
-                        {row.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{row.step}</td>
-                    <td className="px-4 py-3 text-slate-700" title={row.outreachAt}>
-                      {lastContacted(row.outreach)}
-                    </td>
-                    <td className={`px-4 py-3 ${automation.bad ? "font-medium text-red-700" : "text-slate-600"}`}>
-                      {automation.label}
-                    </td>
-                  </tr>
-                );
-              })}
-              {shown.length === 0 && !error ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
-                    Nothing in this queue.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        {selected ? (
-          <LeadPanel
-            lead={selected.lead}
-            cycle={selected.cycle}
-            accident={selected.accident}
-            age={selected.age}
-            step={selected.step}
-            calls={selected.tally.calls}
-            texts={selected.tally.texts}
-            lastLabel={lastContacted(selected.outreach)}
-            nextCallLabel={formatCallWhen(selected.nextAt)}
-            touches={panelTouches}
-            slack={slackMessageUrl(selected.lead)}
-            intakeHref={
-              selected.lead.intake_call_id
-                ? `${docket}/intakes/${encodeURIComponent(selected.lead.intake_call_id)}`
-                : null
-            }
-            caseHref={selected.lead.case_id ? `${docket}/cases/${selected.lead.case_id}` : null}
-            closeHref={closeHref}
-          />
-        ) : null}
-      </div>
+      <WorkQueue rows={queueRows} initialId={selectedId} />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>

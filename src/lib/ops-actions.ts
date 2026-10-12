@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags } from "./callrail";
 import { dispatchDue } from "./dispatch";
+import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { isPriorityReason } from "./leads";
+import { chicagoLocalToIso } from "./time";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
@@ -271,6 +273,113 @@ export async function syncCallrailCatalog() {
     if (error) throw new Error(error.message);
   }
   revalidatePath("/sequences");
+}
+
+export async function claimCall(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const jobId = text(formData, "job_id");
+  if (!jobId) throw new Error("Choose a call to claim.");
+  const { data: job, error } = await supabase
+    .from("lead_jobs")
+    .select("id, lead_id, queue, status, assigned_email")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error || !job) throw new Error(error?.message ?? "That call is not on the queue.");
+  if (job.queue !== "call") throw new Error("Only calls can be claimed.");
+  if (job.status !== "pending" && job.status !== "failed") throw new Error("That call is already finished.");
+  const { error: updateError } = await supabase
+    .from("lead_jobs")
+    .update({ assigned_email: email })
+    .eq("id", jobId);
+  if (updateError) throw new Error(updateError.message);
+  await supabase.from("lead_events").insert({
+    lead_id: job.lead_id,
+    event_type: "call_claimed",
+    actor: email,
+    payload: { job_id: jobId },
+  });
+  revalidatePath("/queues");
+  revalidatePath(`/leads/${job.lead_id}`);
+}
+
+export async function recordCallOutcome(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const jobId = text(formData, "job_id");
+  const outcome = text(formData, "outcome");
+  const note = text(formData, "note");
+  if (!jobId || !isCallOutcome(outcome)) throw new Error("Choose what happened on the call.");
+  const { data: job, error } = await supabase
+    .from("lead_jobs")
+    .select("id, lead_id, queue, status")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error || !job) throw new Error(error?.message ?? "That call is not on the queue.");
+  if (job.queue !== "call") throw new Error("That step is not a call.");
+  if (job.status !== "pending" && job.status !== "failed") throw new Error("That call is already finished.");
+
+  const callbackRaw = text(formData, "callback_at");
+  const nextDue = outcome === "callback" ? chicagoLocalToIso(callbackRaw ?? "") : null;
+  const now = new Date().toISOString();
+  const label = callOutcomeLabel(outcome);
+  const stopRest = formData.get("stop_rest") === "yes" || outcome === "wrong_number" || outcome === "not_interested";
+
+  const { error: attemptError } = await supabase.from("call_attempts").insert({
+    lead_id: job.lead_id,
+    job_id: jobId,
+    outcome,
+    note,
+    actor: email,
+    attempted_at: now,
+    next_due_at: nextDue,
+  });
+  if (attemptError) throw new Error(attemptError.message);
+
+  if (outcome === "callback") {
+    const { error: moveError } = await supabase
+      .from("lead_jobs")
+      .update({
+        due_at: nextDue,
+        status: "pending",
+        outcome: "callback",
+        outcome_note: note,
+        assigned_email: email,
+        detail: `Callback ${label.toLowerCase()} set by ${email}.`,
+      })
+      .eq("id", jobId);
+    if (moveError) throw new Error(moveError.message);
+  } else {
+    const { error: doneError } = await supabase
+      .from("lead_jobs")
+      .update({
+        status: "completed",
+        outcome,
+        outcome_note: note,
+        completed_at: now,
+        completed_by: email,
+        assigned_email: email,
+        detail: `${label} recorded by ${email}.`,
+      })
+      .eq("id", jobId);
+    if (doneError) throw new Error(doneError.message);
+  }
+
+  if (stopRest && outcome !== "callback") {
+    await stopFollowUp(supabase, job.lead_id, `${label}. Remaining calls were stopped.`);
+  }
+
+  await supabase
+    .from("leads")
+    .update({ last_action: note ? `${label}. ${note}` : label })
+    .eq("id", job.lead_id);
+  await supabase.from("lead_events").insert({
+    lead_id: job.lead_id,
+    event_type: "call_outcome",
+    actor: email,
+    payload: { job_id: jobId, outcome, note, next_due_at: nextDue, stopped: stopRest },
+  });
+  revalidatePath("/queues");
+  revalidatePath(`/leads/${job.lead_id}`);
+  revalidatePath("/priority");
 }
 
 export async function runDueWork() {

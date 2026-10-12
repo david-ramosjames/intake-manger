@@ -40,12 +40,12 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   {
     capability: "Human call queue",
     owner: "A person dials. The outbound caller is a separate service and is not placing these calls.",
-    here: "The call sequence creates the due calls and posts them to Slack as an alert.",
+    here: "The call sequence creates the due calls. Slack gets an alert. The call stays open until someone records the outcome on Queues.",
   },
   {
     capability: "Intake tasks and accountability",
-    owner: "Slack notifies the person. The call is completed on the lead, not in the thread.",
-    here: "A due call posts to Slack. That post does not mean the call happened. Recording the outcome on the lead is the next piece of work.",
+    owner: "Slack notifies the person. The call is completed in Intake Manager.",
+    here: "Queues is where someone claims a call, opens Quo, and records answered, no answer, voicemail, or a callback.",
   },
   {
     capability: "Lead ownership and activity history",
@@ -107,7 +107,7 @@ const QUESTIONS: { q: string; a: string }[] = [
   },
   {
     q: "Who places the follow-up calls?",
-    a: "A person does. When a call step is due, Intake Manager posts an alert in the lead’s Slack thread. That alert is not a completed call. The outbound caller can take the dialing later. It is not doing it now.",
+    a: "A person does. When a call step is due, Intake Manager posts an alert in the lead’s Slack thread. The call stays on Queues until that person records the outcome. The outbound caller can take the dialing later. It is not doing it now.",
   },
   {
     q: "What happens when the client signs?",

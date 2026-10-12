@@ -84,8 +84,8 @@ export default async function LeadListPage({
           <h1 className="text-2xl font-semibold tracking-tight">Leads</h1>
           <p className="mt-1 text-sm text-slate-600">
             Every lead captured from #lead-calls, plus the call intakes already in Docket. Jaymie
-            confirms the spreadsheet fields here. Want-to-sign leads get the text sequence. A lead
-            you have already spoken with gets calls only.
+            confirms the spreadsheet fields here. Want to sign is the kind of lead, not a pipeline
+            stage, so a promoted matter can still be in that view. Calls are finished from Queues.
           </p>
         </div>
       </div>

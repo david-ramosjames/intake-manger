@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LeadKind } from "./leads";
+import { formatChicago } from "./time";
 
 type LeadBits = {
   id: string;
@@ -101,9 +102,7 @@ export function describeFollowUp(
   const nextCall = [...pending]
     .filter((job) => job.queue === "call")
     .sort((a, b) => a.due_at.localeCompare(b.due_at))[0];
-  const nextCallLabel = nextCall
-    ? `${new Date(nextCall.due_at).toLocaleString()} — ${nextCall.body}`
-    : null;
+  const nextCallLabel = nextCall ? `${formatChicago(nextCall.due_at)} — ${nextCall.body}` : null;
 
   if (failed) {
     return {

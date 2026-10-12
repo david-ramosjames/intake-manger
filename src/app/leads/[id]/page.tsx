@@ -3,17 +3,20 @@ import { notFound } from "next/navigation";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
 import { confirmLead, mergeIntoLead, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
+import { CallWork } from "@/components/CallWork";
+import { callOutcomeLabel } from "@/lib/calls";
 import { describeFollowUp } from "@/lib/followup";
+import { formatChicago } from "@/lib/time";
 import { daysOpen, isPriorityReason, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireStaff();
+  const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, attemptsResult] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -23,7 +26,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .limit(30),
     supabase
       .from("lead_jobs")
-      .select("id, queue, position, due_at, body, status, detail")
+      .select("id, queue, position, due_at, body, status, detail, assigned_email, outcome, notified_at")
       .eq("lead_id", id)
       .order("queue")
       .order("position"),
@@ -34,6 +37,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .order("due_at", { ascending: false })
       .limit(10),
     supabase.from("referral_destinations").select("id, name, phone, case_types").eq("active", true).order("name"),
+    supabase
+      .from("call_attempts")
+      .select("id, job_id, outcome, note, actor, attempted_at")
+      .eq("lead_id", id)
+      .order("attempted_at", { ascending: false })
+      .limit(20),
   ]);
 
   if (error) {
@@ -52,6 +61,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     body: string;
     status: string;
     detail: string | null;
+    assigned_email: string | null;
+    outcome: string | null;
+    notified_at: string | null;
   }[];
   const posts = (postsResult.data ?? []) as {
     id: string;
@@ -92,11 +104,24 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <p className="mt-1 text-sm text-slate-600">
             {LEAD_KIND_LABEL[lead.kind]}
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
-            {lead.owner_name ? ` · ${lead.owner_name}` : " · nobody assigned"}
+            {lead.case_type ? ` · ${lead.case_type}` : ""}
+            {lead.owner_name ? ` · handled by ${lead.owner_name}` : " · nobody assigned"}
             {lead.grade ? ` · Grade ${lead.grade}` : " · no grade"}
             {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}
             {lead.sentiment ? ` · ${LEAD_SENTIMENT_LABEL[lead.sentiment as LeadSentiment]}` : ""}
           </p>
+          {(() => {
+            const next = jobs
+              .filter((job) => job.queue === "call" && job.status === "pending")
+              .sort((a, b) => a.due_at.localeCompare(b.due_at))[0];
+            if (!next) return null;
+            return (
+              <p className="mt-1 text-sm text-slate-800">
+                Next call {formatChicago(next.due_at)}
+                {next.assigned_email ? ` · ${next.assigned_email}` : " · unassigned"}
+              </p>
+            );
+          })()}
         </div>
         <div className="flex flex-wrap gap-3 text-sm">
           {lead.quo_link ? (
@@ -231,7 +256,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Follow-up</h2>
-        <FollowUpPanel lead={lead} jobs={jobs} />
+        <FollowUpPanel
+          lead={lead}
+          jobs={jobs}
+          viewerEmail={email}
+          attempts={(attemptsResult.data ?? []) as { id: string; job_id: string | null; outcome: string; note: string | null; actor: string | null; attempted_at: string }[]}
+        />
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
@@ -333,15 +363,30 @@ function labelFor(eventType: string): string {
   if (eventType === "priority_cleared") return "Removed from the priority list";
   if (eventType === "enrolled") return "Follow-up steps created";
   if (eventType === "merged") return "Merged with another lead";
+  if (eventType === "call_claimed") return "Call claimed";
+  if (eventType === "call_outcome") return "Call outcome recorded";
   return eventType;
 }
 
 function FollowUpPanel({
   lead,
   jobs,
+  viewerEmail,
+  attempts,
 }: {
   lead: Lead;
-  jobs: { id: string; queue: string; position: number; due_at: string; body: string; status: string; detail: string | null }[];
+  jobs: {
+    id: string;
+    queue: string;
+    position: number;
+    due_at: string;
+    body: string;
+    status: string;
+    detail: string | null;
+    assigned_email: string | null;
+  }[];
+  viewerEmail: string;
+  attempts: { id: string; outcome: string; note: string | null; actor: string | null; attempted_at: string }[];
 }) {
   const described = describeFollowUp(lead, jobs);
   return (
@@ -376,13 +421,30 @@ function FollowUpPanel({
             <span className="font-medium">{job.queue === "text" ? "Text" : "Call"} {job.position}</span>
             <span className="text-slate-500">
               {" "}
-              · {job.status} · {new Date(job.due_at).toLocaleString()}
+              · {job.status} · {formatChicago(job.due_at)}
             </span>
             <p className="mt-1 text-slate-700">{job.body}</p>
             {job.detail ? <p className="mt-1 text-slate-500">{job.detail}</p> : null}
+            {job.queue === "call" && (job.status === "pending" || job.status === "failed") ? (
+              <CallWork jobId={job.id} assignedEmail={job.assigned_email} viewerEmail={viewerEmail} />
+            ) : null}
           </li>
         ))}
       </ul>
+      {attempts.length ? (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-slate-900">Call attempts</h3>
+          <ul className="mt-2 space-y-1 text-sm text-slate-700">
+            {attempts.map((attempt) => (
+              <li key={attempt.id}>
+                {formatChicago(attempt.attempted_at)} · {callOutcomeLabel(attempt.outcome)}
+                {attempt.actor ? ` · ${attempt.actor}` : ""}
+                {attempt.note ? ` — ${attempt.note}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -87,12 +87,13 @@ export async function dispatchDue(supabase: SupabaseClient) {
     }
 
     if (job.queue === "call") {
+      if (job.notified_at) continue;
       const channel = lead.slack_channel_id || LEAD_CHANNEL_ID;
       const who = lead.lead_name || "Unnamed lead";
       const posted = await postToSlack({
         channel,
         threadTs: lead.slack_thread_ts,
-        text: `Call due: ${who}${lead.phone ? ` ${lead.phone}` : ""}\n${job.body}`,
+        text: `Call due: ${who}${lead.phone ? ` ${lead.phone}` : ""}\n${job.body}\nRecord the outcome in Intake Manager. This alert is not a completed call.`,
       });
       if (!posted.ok) {
         await supabase.from("lead_jobs").update({ status: "failed", detail: posted.error }).eq("id", job.id);
@@ -101,7 +102,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
       }
       await supabase
         .from("lead_jobs")
-        .update({ status: "sent", sent_at: now, detail: "Asked the team in Slack." })
+        .update({ notified_at: now, detail: "Slack alert posted. The call stays open until someone records an outcome." })
         .eq("id", job.id);
       result.calls += 1;
       continue;
@@ -177,6 +178,13 @@ export async function dispatchDue(supabase: SupabaseClient) {
       .eq("id", post.id);
     result.slack += 1;
   }
+
+  await supabase.from("queue_runs").insert({
+    calls_alerted: result.calls,
+    texts: result.texts,
+    slack: result.slack,
+    failed: result.failed,
+  });
 
   return result;
 }

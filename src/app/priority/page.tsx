@@ -9,12 +9,12 @@ import {
   type Lead,
   type PriorityReason,
 } from "@/lib/leads";
-import { leadCycle, priorityBucket } from "@/lib/next-step";
+import { leadCycle, priorityBucket, textSequenceLive } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 import { formatCallWhen } from "@/lib/time";
 
 const COLUMNS =
-  "id, lead_name, phone, grade, kind, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, agreement_status, agreement_sent_at, priority_reason, last_action, next_action, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_name, phone, grade, kind, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, agreement_status, agreement_sent_at, priority_reason, last_action, next_action, text_sequence_status, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type PriorityLead = Pick<
   Lead,
@@ -38,6 +38,7 @@ type PriorityLead = Pick<
   | "priority_reason"
   | "last_action"
   | "next_action"
+  | "text_sequence_status"
   | "quo_link"
   | "slack_permalink"
   | "slack_channel_id"
@@ -102,11 +103,12 @@ export default async function PriorityPage() {
     if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
   }
 
-  const grouped = new Map<PriorityReason, { lead: PriorityLead; calls: number; last: string; wait: number; nextCall: string }[]>();
+  const grouped = new Map<PriorityReason, { lead: PriorityLead; calls: number; last: string; wait: number; nextCall: string; textsLive: boolean }[]>();
   for (const reason of PRIORITY_REASONS) grouped.set(reason, []);
   for (const lead of candidates) {
-    const cycle = leadCycle(lead, talked.has(lead.id) ? [{ type: "call", direction: "inbound" }] : []);
-    const bucket = priorityBucket(lead, cycle);
+    const connected = talked.has(lead.id);
+    const cycle = leadCycle(lead, connected ? [{ type: "call", direction: "inbound" }] : []);
+    const bucket = priorityBucket(lead, cycle, connected);
     if (!bucket) continue;
     const wait = daysSince(lastOutreach.get(lead.id));
     grouped.get(bucket)?.push({
@@ -115,6 +117,7 @@ export default async function PriorityPage() {
       last: lastContacted(wait),
       wait: wait ?? 99,
       nextCall: formatCallWhen(nextCall.get(lead.id)),
+      textsLive: textSequenceLive(lead.text_sequence_status),
     });
   }
   for (const rows of grouped.values()) {
@@ -127,9 +130,8 @@ export default async function PriorityPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Priority</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            The highest-priority leads. A contract that went out and is still unsigned, a lead we already
-            want to send a contract, and a strong lead we have not finished — including a good web form we
-            have not reached, or one that may need a drop letter.
+            The highest-priority leads. A contract that went out and is still unsigned, a lead we have
+            already talked to and want to send a contract, and a strong lead we still need to talk to.
           </p>
         </div>
         <Link href="/" className="text-sm font-medium text-slate-900 underline">
@@ -158,6 +160,7 @@ export default async function PriorityPage() {
                         <th className="px-4 py-3 font-medium">Lead</th>
                         <th className="px-4 py-3 font-medium">Grade</th>
                         <th className="px-4 py-3 font-medium">Calls</th>
+                        <th className="px-4 py-3 font-medium">Texts</th>
                         <th className="px-4 py-3 font-medium">Last contacted</th>
                         <th className="px-4 py-3 font-medium">Last action</th>
                         <th className="px-4 py-3 font-medium">Next action</th>
@@ -192,6 +195,9 @@ export default async function PriorityPage() {
                             </td>
                             <td className="px-4 py-3 font-medium text-slate-800">{row.lead.grade ?? "—"}</td>
                             <td className="px-4 py-3 tabular-nums text-slate-700">{row.calls}</td>
+                            <td className={`px-4 py-3 ${row.textsLive ? "font-medium text-slate-900" : "text-slate-500"}`}>
+                              {row.textsLive ? "Live" : "Off"}
+                            </td>
                             <td className="px-4 py-3 text-slate-700">{row.last}</td>
                             <td className="max-w-xs px-4 py-3 text-slate-700">{row.lead.last_action || "No note yet."}</td>
                             <td className="max-w-xs px-4 py-3 text-slate-700">{row.lead.next_action || "No note yet."}</td>
@@ -220,8 +226,8 @@ function gradeRank(grade: string | null): number {
 
 function groupDetail(reason: PriorityReason): string {
   if (reason === "contract_out") return "The contract has been sent and it is not signed yet.";
-  if (reason === "send_contract") return "We already know this lead should get a contract.";
-  return "A strong lead that is not fully triaged. A good web form we have not reached, or a lead that may need a drop letter.";
+  if (reason === "send_contract") return "We have talked with them and already know they should get a contract.";
+  return "We still need to talk to them. A strong lead, a good web form we have not reached, or one that may need a drop letter.";
 }
 
 function mightBePriority(lead: PriorityLead): boolean {

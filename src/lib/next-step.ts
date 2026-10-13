@@ -73,6 +73,7 @@ export function priorityBucket(
     priority_reason?: string | null;
   },
   cycle: LeadCycle,
+  talked = false,
 ): "contract_out" | "send_contract" | "high_potential" | null {
   if (lead.signed_case || lead.case_id) return null;
   if (cycle === "signed" || cycle === "closed") return null;
@@ -86,14 +87,15 @@ export function priorityBucket(
     (Boolean(lead.agreement_sent_at) && agreement !== "failed" && agreement !== "signed" && agreement !== "completed");
   if (contractSent || lead.priority_reason === "contract_out") return "contract_out";
 
-  const readyToSend =
+  const wantsContract =
     lead.priority_reason === "send_contract" ||
-    (lead.kind === "pursue" && cycle === "information" && (lead.grade === "A" || lead.grade === "B"));
-  if (readyToSend) return "send_contract";
+    (lead.kind === "pursue" && (lead.grade === "A" || lead.grade === "B"));
+  if (wantsContract && talked) return "send_contract";
 
   const webForm = lead.arrival === "form" || lead.source_channel === "Web form";
   const strongWebForm = webForm && lead.grade !== "C" && injuryStrength(lead) === "strong";
-  if (lead.priority_reason === "high_potential" || (lead.grade === "A" && cycle === "contact") || (strongWebForm && cycle === "contact")) {
+  const needToTalk = !talked && (wantsContract || lead.grade === "A" || strongWebForm || lead.priority_reason === "high_potential");
+  if (needToTalk || lead.priority_reason === "high_potential" || (lead.grade === "A" && cycle === "contact") || (strongWebForm && cycle === "contact")) {
     return "high_potential";
   }
   return null;

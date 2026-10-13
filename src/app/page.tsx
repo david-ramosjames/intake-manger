@@ -263,7 +263,7 @@ export default async function LeadListPage({
       step: nextStepLabel(nextCallPurpose(cycle, tally.calls)),
       accident: listAccident(lead),
       priority: leadPriority(lead, cycle),
-      bucket: priorityBucket(lead, cycle),
+      bucket: priorityBucket(lead, cycle, talked.has(lead.id)),
     };
   });
 

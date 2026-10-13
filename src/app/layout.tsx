@@ -35,9 +35,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               Intake
             </Link>
             <div className="flex items-center gap-4 text-sm text-slate-600">
-              <Link href="/how-it-fits" className="font-medium text-slate-900">
-                How it fits
-              </Link>
             {email ? (
               <>
                 <Link href="/priority" className="font-medium text-slate-900">
@@ -64,6 +61,9 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                     Sign out
                   </button>
                 </form>
+                <Link href="/how-it-fits" className="font-medium text-slate-900">
+                  How it fits
+                </Link>
               </>
             ) : null}
             </div>

@@ -102,7 +102,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                     {row.grade ?? "—"}
                   </span>
                 </td>
-                <td className={`px-4 py-3 ${row.priority === "High" || row.priority === "Contract out" || row.priority === "Send contract" || row.priority === "High potential" ? "font-medium text-slate-900" : "text-slate-500"}`}>
+                <td className={`px-4 py-3 ${row.priority === "High" || row.priority === "Contract out" || row.priority === "Send contract" || row.priority === "Need to talk" ? "font-medium text-slate-900" : "text-slate-500"}`}>
                   {row.priority ?? "—"}
                 </td>
                 <td className="px-4 py-3">

@@ -179,9 +179,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Jon&apos;s list</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Highest priority is a contract already sent, a lead we know should get a contract, or a
-          strong lead we have not finished — a good web form we have not reached, or one that may
-          need a drop letter. Write the last step and the next step the way you would in the daily note.
+          Highest priority is a contract already sent, a lead we have talked to and want to send a
+          contract, or a strong lead we still need to talk to — a good web form we have not reached,
+          or one that may need a drop letter. Write the last step and the next step the way you would
+          in the daily note.
         </p>
         <form action={savePriority.bind(null, lead.id)} className="mt-4 grid gap-3">
           <label className="flex items-center gap-2 text-sm">

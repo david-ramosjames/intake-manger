@@ -122,13 +122,13 @@ export type PriorityReason = (typeof PRIORITY_REASONS)[number];
 export const PRIORITY_REASON_LABEL: Record<PriorityReason, string> = {
   contract_out: "Contract sent, not signed",
   send_contract: "Ready to send the contract",
-  high_potential: "High potential, not triaged",
+  high_potential: "High potential, need to talk",
 };
 
 export const PRIORITY_REASON_SHORT: Record<PriorityReason, string> = {
   contract_out: "Contract out",
   send_contract: "Send contract",
-  high_potential: "High potential",
+  high_potential: "Need to talk",
 };
 
 export function isPriorityReason(value: string | null | undefined): value is PriorityReason {

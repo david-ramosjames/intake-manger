@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { LeadFlow } from "@/components/LeadFlow";
+import { requireStaff } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "How it fits · Intake",
@@ -451,7 +452,8 @@ const ENVS: { service: string; name: string; why: string }[] = [
   },
 ];
 
-export default function HowItFitsPage() {
+export default async function HowItFitsPage() {
+  await requireStaff();
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight">How the intake services fit</h1>

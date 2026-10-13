@@ -7,6 +7,7 @@ import { signOut } from "@/lib/auth-actions";
 const LOGO = "https://res.cloudinary.com/dmmxuoa3p/image/upload/v1783363036/logo_rdt8yk.webp";
 
 const LINKS = [
+  { href: "/", label: "Work queue" },
   { href: "/priority", label: "Priority" },
   { href: "/verify", label: "Verify" },
   { href: "/sequences", label: "Sequences" },
@@ -15,7 +16,7 @@ const LINKS = [
 ];
 
 function isActive(pathname: string, href: string): boolean {
-  if (href === "/leads/new") return pathname === "/leads/new";
+  if (href === "/" || href === "/leads/new") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

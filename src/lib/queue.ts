@@ -1,9 +1,28 @@
 import type { LeadCycle } from "@/lib/next-step";
 
-export type QueueId = "all" | "attention" | "fresh" | "working" | "signed" | "closed";
+export type QueueId =
+  | "all"
+  | "attention"
+  | "contact"
+  | "information"
+  | "signing"
+  | "signed"
+  | "closed"
+  | "fresh"
+  | "working";
 
 export function isQueue(value: string | undefined): value is QueueId {
-  return value === "all" || value === "attention" || value === "fresh" || value === "working" || value === "signed" || value === "closed";
+  return (
+    value === "all" ||
+    value === "attention" ||
+    value === "contact" ||
+    value === "information" ||
+    value === "signing" ||
+    value === "signed" ||
+    value === "closed" ||
+    value === "fresh" ||
+    value === "working"
+  );
 }
 
 export function receivedLabel(age: number | null): string {
@@ -35,7 +54,9 @@ export function needsAttention(input: {
 
 export function matchesQueue(queue: QueueId, cycle: LeadCycle, attention: boolean): boolean {
   if (queue === "attention") return attention;
-  if (queue === "fresh") return cycle === "contact";
+  if (queue === "contact" || queue === "fresh") return cycle === "contact";
+  if (queue === "information") return cycle === "information";
+  if (queue === "signing") return cycle === "signing";
   if (queue === "working") return cycle === "information" || cycle === "signing";
   if (queue === "signed") return cycle === "signed";
   if (queue === "closed") return cycle === "closed";

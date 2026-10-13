@@ -102,13 +102,13 @@ const RANGES: { id: LeadRange; label: string }[] = [
   { id: "7", label: "Last 7 days" },
 ];
 
-const QUEUES: { id: QueueId; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "attention", label: "Needs attention" },
-  { id: "fresh", label: "New" },
-  { id: "working", label: "In progress" },
-  { id: "signed", label: "Signed" },
-  { id: "closed", label: "Closed" },
+const STAGES: { id: QueueId; label: string; dot: string }[] = [
+  { id: "all", label: "All", dot: "" },
+  { id: "contact", label: "Need to contact", dot: "bg-amber-400" },
+  { id: "information", label: "Need more information", dot: "bg-sky-500" },
+  { id: "signing", label: "Finish signing", dot: "bg-violet-500" },
+  { id: "signed", label: "Signed", dot: "bg-emerald-500" },
+  { id: "closed", label: "Closed", dot: "bg-slate-300" },
 ];
 
 const LEGACY: { id: LeadView; label: string }[] = [
@@ -189,7 +189,8 @@ export default async function LeadListPage({
 }) {
   const params = await searchParams;
   const view: LeadView = isLeadView(params.view) ? params.view : "all";
-  const queue: QueueId = isQueue(params.queue) ? params.queue : "all";
+  const requested = params.queue === "fresh" ? "contact" : params.queue;
+  const queue: QueueId = isQueue(requested) ? requested : "all";
   const range: LeadRange = isLeadRange(params.range) ? params.range : "all";
   const q = (params.q ?? "").trim();
   const selectedId = params.lead?.trim() || "";
@@ -300,17 +301,19 @@ export default async function LeadListPage({
 
   const windowRows = rows.filter((row) => row.inWindow);
   const metrics = {
-    fresh: windowRows.filter((row) => row.cycle === "contact").length,
+    contact: windowRows.filter((row) => row.cycle === "contact").length,
+    information: windowRows.filter((row) => row.cycle === "information").length,
+    signing: windowRows.filter((row) => row.cycle === "signing").length,
     attention: windowRows.filter((row) => row.attention).length,
-    working: windowRows.filter((row) => row.cycle === "information" || row.cycle === "signing").length,
     signed: windowRows.filter((row) => row.cycle === "signed").length,
     closed: windowRows.filter((row) => row.cycle === "closed").length,
     total: windowRows.length,
   };
   const conversion = metrics.total ? Math.round((metrics.signed / metrics.total) * 100) : 0;
   const pipeline = [
-    { id: "fresh" as const, label: "New", count: metrics.fresh, className: "bg-amber-400" },
-    { id: "working" as const, label: "In progress", count: metrics.working, className: "bg-sky-500" },
+    { id: "contact" as const, label: "Need to contact", count: metrics.contact, className: "bg-amber-400" },
+    { id: "information" as const, label: "Need more information", count: metrics.information, className: "bg-sky-500" },
+    { id: "signing" as const, label: "Finish signing", count: metrics.signing, className: "bg-violet-500" },
     { id: "signed" as const, label: "Signed", count: metrics.signed, className: "bg-emerald-500" },
     { id: "closed" as const, label: "Closed", count: metrics.closed, className: "bg-slate-300" },
   ];
@@ -430,11 +433,12 @@ export default async function LeadListPage({
 
       {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
 
-      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Metric href={listHref({ queue: "fresh", q, range })} active={queue === "fresh"} label="New" value={String(metrics.fresh)} hint="Need to contact" tone="text-amber-700" />
-        <Metric href={listHref({ queue: "attention", q, range })} active={queue === "attention"} label="Need action" value={String(metrics.attention)} hint="Waiting or blocked" tone="text-red-700" />
-        <Metric href={listHref({ queue: "working", q, range })} active={queue === "working"} label="Following up" value={String(metrics.working)} hint="In conversation or signing" tone="text-sky-700" />
+      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <Metric href={listHref({ queue: "contact", q, range })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} hint="Not reached yet" tone="text-amber-700" />
+        <Metric href={listHref({ queue: "information", q, range })} active={queue === "information"} label="Need more information" value={String(metrics.information)} hint="Talked, still open" tone="text-sky-700" />
+        <Metric href={listHref({ queue: "signing", q, range })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} hint="Contract is out" tone="text-violet-700" />
         <Metric href={listHref({ queue: "signed", q, range })} active={queue === "signed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
+        <Metric href={listHref({ queue: "attention", q, range })} active={queue === "attention"} label="Needs attention" value={String(metrics.attention)} hint="Waiting, review, or failed contract" tone="text-red-700" />
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-navy">{conversion}%</p>
@@ -482,18 +486,31 @@ export default async function LeadListPage({
             {item.label}
           </Link>
         ))}
-        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
-        {QUEUES.map((item) => (
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Stage</span>
+        {STAGES.map((item) => (
           <Link
             key={item.id}
             href={listHref({ queue: item.id, view, q, range })}
-            className={`rounded-full px-3 py-1 text-sm ${
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
               queue === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
           >
+            {item.dot ? <span className={`h-2 w-2 rounded-full ${item.dot}`} /> : null}
             {item.label}
           </Link>
         ))}
+        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
+        <Link
+          href={listHref({ queue: "attention", view, q, range })}
+          className={`rounded-full px-3 py-1 text-sm ${
+            queue === "attention" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
+          }`}
+        >
+          Needs attention
+        </Link>
+        <span className="text-xs text-slate-500">Waiting too long, identity needs review, or the contract failed.</span>
       </div>
 
       <WorkQueue rows={queueRows} initialId={selectedId} />

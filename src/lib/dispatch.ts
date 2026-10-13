@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
+import { loadSlackSettings } from "./slack-settings";
+import { channelLeadMention, LEAD_CHANNEL_ID, postToSlack } from "./slack";
 
 type Job = {
   id: string;
@@ -24,6 +25,7 @@ type LeadRow = {
   phone_e164: string | null;
   slack_channel_id: string | null;
   slack_thread_ts: string | null;
+  slack_message_ts: string | null;
   signed_case: boolean;
   case_id: string | null;
   lead_status: string;
@@ -55,6 +57,7 @@ function closed(lead: LeadRow): boolean {
 
 export async function dispatchDue(supabase: SupabaseClient) {
   const now = new Date().toISOString();
+  const slack = await loadSlackSettings();
   const result = { texts: 0, calls: 0, slack: 0, skipped: 0, failed: 0 };
 
   const { data: jobs, error } = await supabase
@@ -70,7 +73,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
   const { data: leads } = leadIds.length
     ? await supabase
         .from("leads")
-        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, signed_case, case_id, lead_status, kind")
+        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind")
         .in("id", leadIds)
     : { data: [] };
   const byId = new Map((leads ?? []).map((lead) => [lead.id as string, lead as LeadRow]));
@@ -87,13 +90,39 @@ export async function dispatchDue(supabase: SupabaseClient) {
     }
 
     if (job.queue === "call") {
-      if (job.notified_at) continue;
       const channel = lead.slack_channel_id || LEAD_CHANNEL_ID;
+      const threadTs = lead.slack_thread_ts || lead.slack_message_ts;
+      if (job.notified_at) {
+        const loggedAt = await callLoggedAfter(supabase, lead, job.notified_at);
+        if (!loggedAt) continue;
+        await supabase
+          .from("lead_jobs")
+          .update({
+            status: "completed",
+            completed_at: loggedAt,
+            completed_by: "call-log",
+            outcome: "answered",
+            detail: "Call log shows a call after the Slack reminder.",
+          })
+          .eq("id", job.id);
+        if (slack.posting) {
+          await postToSlack({
+            token: slack.token,
+            channel,
+            threadTs,
+            text: `Call completed. The call log shows a call with ${lead.lead_name || "this lead"} after the reminder.`,
+          });
+        }
+        continue;
+      }
+      if (!slack.posting) continue;
       const who = lead.lead_name || "Unnamed lead";
+      const mention = await channelLeadMention(channel, slack.token);
       const posted = await postToSlack({
-        channel,
-        threadTs: lead.slack_thread_ts,
-        text: `Call due: ${who}${lead.phone ? ` ${lead.phone}` : ""}\n${job.body}\nRecord the outcome in Intake Manager. This alert is not a completed call.`,
+        token: slack.token,
+        channel: slack.channelId || channel,
+        threadTs,
+        text: `${mention ? `${mention} ` : ""}Call due: ${who}${lead.phone ? ` ${lead.phone}` : ""}\n${job.body}\nThis reminder is not the call. It closes when the call log shows a call.`,
       });
       if (!posted.ok) {
         await supabase.from("lead_jobs").update({ status: "failed", detail: posted.error }).eq("id", job.id);
@@ -102,16 +131,17 @@ export async function dispatchDue(supabase: SupabaseClient) {
       }
       await supabase
         .from("lead_jobs")
-        .update({ notified_at: now, detail: "Slack alert posted. The call stays open until someone records an outcome." })
+        .update({ notified_at: now, detail: "Slack alert posted. Waiting for a call in the call log." })
         .eq("id", job.id);
       result.calls += 1;
       continue;
     }
 
     if (!textSendingLive()) {
-      if (!job.notified_at) {
-        const channel = lead.slack_channel_id || LEAD_CHANNEL_ID;
+      if (!job.notified_at && slack.posting) {
+        const channel = lead.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID;
         await postToSlack({
+          token: slack.token,
           channel,
           threadTs: lead.slack_thread_ts,
           text: `Text is due for ${lead.lead_name || "a lead"}, and live sending is off.\n${job.body}`,
@@ -162,8 +192,10 @@ export async function dispatchDue(supabase: SupabaseClient) {
       | { slack_channel_id: string | null; slack_thread_ts: string | null }
       | undefined;
     const mention = post.mention ? `<@${post.mention.replace(/[<@>]/g, "")}> ` : "";
+    if (!slack.posting) continue;
     const posted = await postToSlack({
-      channel: lead?.slack_channel_id || LEAD_CHANNEL_ID,
+      token: slack.token,
+      channel: lead?.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID,
       threadTs: lead?.slack_thread_ts,
       text: `${mention}${post.body}`,
     });
@@ -187,4 +219,25 @@ export async function dispatchDue(supabase: SupabaseClient) {
   });
 
   return result;
+}
+
+async function callLoggedAfter(supabase: SupabaseClient, lead: LeadRow, since: string): Promise<string | null> {
+  const found = async (column: "lead_id" | "phone", value: string) => {
+    const { data } = await supabase
+      .from("intake_interactions")
+      .select("occurred_at")
+      .eq(column, value)
+      .gte("occurred_at", since)
+      .in("type", ["call", "sona_call"])
+      .order("occurred_at", { ascending: true })
+      .limit(1);
+    const at = data?.[0]?.occurred_at;
+    return typeof at === "string" ? at : null;
+  };
+  const onLead = await found("lead_id", lead.id);
+  if (onLead) return onLead;
+  const digits = (lead.phone || lead.phone_e164 || "").replace(/\D/g, "");
+  const phone = digits.length >= 10 ? digits.slice(-10) : "";
+  if (!phone) return null;
+  return found("phone", phone);
 }

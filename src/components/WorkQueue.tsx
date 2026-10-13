@@ -5,6 +5,7 @@ import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { saveLeadTags } from "@/lib/ops-actions";
+import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
 
 export type QueueRow = {
@@ -42,6 +43,7 @@ export type QueueRow = {
   calls: number;
   texts: number;
   nextCallLabel: string;
+  nextAction: NextActionLine[];
 };
 
 type LeadIdentity = "ok" | "needs_review" | "confirmed";
@@ -68,7 +70,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
               <th className="px-4 py-3 font-medium">Grade</th>
               <th className="px-4 py-3 font-medium">Priority</th>
               <th className="px-4 py-3 font-medium">Stage</th>
-              <th className="px-4 py-3 font-medium">Next step</th>
+              <th className="px-4 py-3 font-medium">Next action</th>
               <th className="px-4 py-3 font-medium">Qualified</th>
               <th className="px-4 py-3 font-medium">Last contacted</th>
               <th className="px-4 py-3 font-medium">Automation</th>
@@ -110,7 +112,13 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                     {row.label}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-slate-700">{row.step}</td>
+                <td className="px-4 py-3 text-slate-700">
+                  {row.nextAction.map((line) => (
+                    <p key={line.label} className="whitespace-nowrap">
+                      <span className="text-slate-500">{line.label}</span> {line.when}
+                    </p>
+                  ))}
+                </td>
                 <td className={`px-4 py-3 ${row.qualifiedLabel === "Not tagged" ? "text-amber-700" : "text-slate-700"}`}>
                   {row.qualifiedLabel}
                 </td>
@@ -235,10 +243,12 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
               <dt className="text-slate-500">Last contacted</dt>
               <dd>{row.lastLabel}</dd>
             </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-500">Next call</dt>
-              <dd>{row.nextCallLabel}</dd>
-            </div>
+            {row.nextAction.map((line) => (
+              <div key={line.label} className="flex justify-between gap-3">
+                <dt className="text-slate-500">{line.label}</dt>
+                <dd>{line.when}</dd>
+              </div>
+            ))}
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">Calls / texts</dt>
               <dd>

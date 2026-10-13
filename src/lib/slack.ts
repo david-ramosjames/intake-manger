@@ -20,9 +20,10 @@ export async function postToSlack(input: {
   channel: string;
   text: string;
   threadTs?: string | null;
+  token?: string | null;
 }): Promise<{ ok: true; ts: string | null } | { ok: false; error: string }> {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) return { ok: false, error: "SLACK_BOT_TOKEN is not set." };
+  const token = input.token || process.env.SLACK_BOT_TOKEN;
+  if (!token) return { ok: false, error: "The Quo Router Slack bot token is not saved." };
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
@@ -39,4 +40,53 @@ export async function postToSlack(input: {
   const payload = (await response.json()) as { ok?: boolean; error?: string; ts?: string };
   if (!payload.ok) return { ok: false, error: payload.error || `Slack returned ${response.status}` };
   return { ok: true, ts: payload.ts ?? null };
+}
+
+const mentionCache = new Map<string, { at: number; mention: string }>();
+
+export async function channelLeadMention(channel: string, token?: string | null): Promise<string> {
+  const cached = mentionCache.get(channel);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.mention;
+  const mention = await lookupChannelLead(channel, token || process.env.SLACK_BOT_TOKEN || "");
+  mentionCache.set(channel, { at: Date.now(), mention });
+  return mention;
+}
+
+async function lookupChannelLead(channel: string, token: string): Promise<string> {
+  if (!token) return "";
+  const info = await slackApi(token, "conversations.info", { channel });
+  const topic = String((info.channel as { topic?: { value?: string } } | undefined)?.topic?.value ?? "");
+  const linked = topic.match(/Lead\s+<@([A-Z0-9]+)(?:\|[^>]+)?>/i)?.[1];
+  if (linked) return `<@${linked}>`;
+  const named = topic.match(/Lead\s+@([^\s|]+)/i)?.[1];
+  if (!named) return "";
+  const userId = await findUserId(token, named);
+  return userId ? `<@${userId}>` : "";
+}
+
+async function findUserId(token: string, name: string): Promise<string | null> {
+  const needle = name.trim().toLowerCase();
+  let cursor = "";
+  for (let page = 0; page < 8; page += 1) {
+    const payload = await slackApi(token, "users.list", { limit: "200", cursor });
+    const members = (payload.members as { id?: string; name?: string; real_name?: string; profile?: { display_name?: string; real_name?: string } }[]) ?? [];
+    const match = members.find((member) => {
+      const names = [member.name, member.real_name, member.profile?.display_name, member.profile?.real_name];
+      return names.some((value) => (value || "").trim().toLowerCase() === needle);
+    });
+    if (match?.id) return match.id;
+    cursor = String((payload.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? "");
+    if (!cursor) break;
+  }
+  return null;
+}
+
+async function slackApi(token: string, method: string, params: Record<string, string>): Promise<Record<string, unknown>> {
+  const query = new URLSearchParams(params);
+  const response = await fetch(`https://slack.com/api/${method}?${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = (await response.json()) as Record<string, unknown>;
+  if (!payload.ok) return {};
+  return payload;
 }

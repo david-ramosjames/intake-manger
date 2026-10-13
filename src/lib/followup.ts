@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LeadKind } from "./leads";
+import type { CallSequenceId } from "./sequences";
 import { formatChicago, snapToWorkHours } from "./time";
 
 type LeadBits = {
@@ -24,14 +25,15 @@ export async function enrollFollowUp(supabase: SupabaseClient, lead: LeadBits) {
   if (lead.signed_case || lead.case_id) return;
   if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.lead_status === "Promoted") return;
 
-  const queues = ["call"];
+  const sequence: CallSequenceId = lead.kind === "needs_info" ? "more_info" : "first_talk";
   const { data: steps, error } = await supabase
     .from("sequence_steps")
     .select("queue, position, delay_minutes, body")
-    .in("queue", queues)
+    .eq("sequence", sequence)
+    .eq("queue", "call")
     .order("position");
   if (error) throw new Error(error.message);
-  if (!steps?.length) throw new Error("The sequence has no steps, so follow-up could not start.");
+  if (!steps?.length) return;
 
   const now = Date.now();
   const rows = (steps ?? []).map((step) => ({

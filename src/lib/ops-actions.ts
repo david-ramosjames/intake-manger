@@ -9,10 +9,12 @@ import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { isPriorityReason } from "./leads";
+import { delayMinutes, isCallSequence } from "./sequences";
 import { chicagoLocalToIso } from "./time";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
+import { loadSlackSettings } from "./slack-settings";
 
 function text(formData: FormData, key: string): string | null {
   const value = String(formData.get(key) ?? "").trim();
@@ -244,8 +246,11 @@ export async function sendReferral(leadId: string, formData: FormData) {
   });
 
   const who = lead.lead_name || "Unnamed lead";
+  const slack = await loadSlackSettings();
+  if (slack.posting) {
   await postToSlack({
-    channel: lead.slack_channel_id || LEAD_CHANNEL_ID,
+    token: slack.token,
+    channel: lead.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID,
     threadTs: lead.slack_thread_ts,
     text: [
       `Referral: ${who}${lead.phone ? ` ${lead.phone}` : ""}`,
@@ -257,6 +262,7 @@ export async function sendReferral(leadId: string, formData: FormData) {
       .filter(Boolean)
       .join("\n"),
   });
+  }
 
   revalidatePath("/");
   revalidatePath(`/leads/${leadId}`);
@@ -280,18 +286,78 @@ export async function saveDestination(formData: FormData) {
   revalidatePath("/referrals");
 }
 
+export async function saveSlackSettings(formData: FormData) {
+  const { email } = await requireStaff();
+  const supabase = createSupabaseServiceClient();
+  const posting = formData.getAll("slack_posting").includes("yes");
+  const pasted = String(formData.get("slack_bot_token") ?? "").trim();
+  const channel = String(formData.get("slack_channel_id") ?? "").trim();
+  const { data: current } = await supabase
+    .from("intake_settings")
+    .select("slack_bot_token")
+    .eq("id", "default")
+    .maybeSingle();
+  const token = pasted || (typeof current?.slack_bot_token === "string" ? current.slack_bot_token : null);
+  const { error } = await supabase.from("intake_settings").upsert({
+    id: "default",
+    slack_posting: posting,
+    slack_bot_token: token,
+    slack_channel_id: channel || "C026G89PPSS",
+    updated_at: new Date().toISOString(),
+    updated_by: email,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/how-it-fits");
+}
+
 export async function saveSequenceStep(formData: FormData) {
   const { supabase } = await requireStaff();
   const id = text(formData, "id");
-  const body = text(formData, "body");
-  const delay = Number(formData.get("delay_minutes"));
-  if (!id || !body || !Number.isFinite(delay) || delay < 0) {
-    throw new Error("Each step needs a message and a delay.");
+  const days = Number(formData.get("days"));
+  const hours = Number(formData.get("hours"));
+  if (!id || !Number.isInteger(days) || days < 0 || !Number.isInteger(hours) || hours < 0 || hours > 23) {
+    throw new Error("Use a day count and hours from 0 to 23.");
   }
   const { error } = await supabase
     .from("sequence_steps")
-    .update({ body, delay_minutes: Math.round(delay) })
+    .update({ delay_minutes: delayMinutes(days, hours) })
     .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/sequences");
+}
+
+export async function addSequenceStep(formData: FormData) {
+  const { supabase } = await requireStaff();
+  const sequence = text(formData, "sequence");
+  const queue = text(formData, "queue");
+  if (!isCallSequence(sequence) || (queue !== "call" && queue !== "text")) {
+    throw new Error("Choose a sequence and whether this step is a call or a text.");
+  }
+  const { data: existing, error: loadError } = await supabase
+    .from("sequence_steps")
+    .select("position")
+    .eq("sequence", sequence)
+    .eq("queue", queue)
+    .order("position", { ascending: false })
+    .limit(1);
+  if (loadError) throw new Error(loadError.message);
+  const position = Number((existing ?? [])[0]?.position ?? 0) + 1;
+  const { error } = await supabase.from("sequence_steps").insert({
+    sequence,
+    queue,
+    position,
+    delay_minutes: 0,
+    body: queue === "call" ? "Call" : "Text",
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/sequences");
+}
+
+export async function removeSequenceStep(formData: FormData) {
+  const { supabase } = await requireStaff();
+  const id = text(formData, "id");
+  if (!id) throw new Error("Missing step.");
+  const { error } = await supabase.from("sequence_steps").delete().eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/sequences");
 }

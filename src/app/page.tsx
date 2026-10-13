@@ -4,6 +4,8 @@ import { attachCallrailSources } from "@/lib/callrail";
 import { daysSince, isLeadView, leadTitle, listAccident, PRIORITY_REASON_SHORT, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel, priorityBucket } from "@/lib/next-step";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
+import { nextActionLines, type CallStep } from "@/lib/next-action";
+import { leadSequenceId } from "@/lib/sequences";
 import { qualifiedSummary } from "@/lib/tags";
 import { formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
@@ -97,7 +99,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, agreement_status, agreement_sent_at, agreement_signing_url, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -123,12 +125,15 @@ type ListLead = Pick<
   | "agreement_status"
   | "agreement_sent_at"
   | "agreement_signing_url"
+  | "agreement_next_reminder_at"
   | "text_sequence_status"
   | "text_sequence_slug"
   | "text_next_at"
   | "summary"
   | "owner_name"
   | "kind"
+  | "sequence"
+  | "follow_up"
   | "needs_verification"
   | "signed_case"
   | "date_signed"
@@ -166,12 +171,12 @@ export default async function LeadListPage({
   const { supabase } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const { data, error } = await supabase
-    .from("leads")
-    .select(LIST_COLUMNS)
-    .order("lead_date", { ascending: false, nullsFirst: false })
-    .limit(300);
+  const [{ data, error }, { data: stepRows }] = await Promise.all([
+    supabase.from("leads").select(LIST_COLUMNS).order("lead_date", { ascending: false, nullsFirst: false }).limit(300),
+    supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
+  ]);
   const leads = (data ?? []) as ListLead[];
+  const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
   await attachCallrailSources(leads, async (id, source) => {
     await supabase.from("leads").update({ lead_source: source }).eq("id", id).is("lead_source", null);
@@ -342,6 +347,24 @@ export default async function LeadListPage({
       calls: row.tally.calls,
       texts: row.tally.texts,
       nextCallLabel: formatCallWhen(row.nextAt),
+      nextAction: nextActionLines({
+        closed: row.cycle === "signed" || row.cycle === "closed",
+        sequence: row.lead.sequence,
+        textStatus: row.lead.text_sequence_status,
+        textNextAt: row.lead.text_next_at,
+        reminderAt: row.lead.agreement_next_reminder_at,
+        agreementStatus: row.lead.agreement_status,
+        callStart: row.lead.lead_date ?? row.lead.created_at,
+        callsMade: row.tally.calls,
+        pendingCallAt: row.nextAt ?? null,
+        callSteps: stepsForLead(callSteps, {
+          closed: row.cycle === "signed" || row.cycle === "closed",
+          talked: talked.has(row.lead.id),
+          kind: row.lead.kind,
+          agreementStatus: row.lead.agreement_status,
+          agreementSentAt: row.lead.agreement_sent_at,
+        }),
+      }),
     };
   });
 
@@ -442,6 +465,21 @@ export default async function LeadListPage({
       </p>
     </main>
   );
+}
+
+function stepsForLead(
+  steps: (CallStep & { sequence: string })[],
+  lead: {
+    closed: boolean;
+    talked: boolean;
+    kind: string | null;
+    agreementStatus: string | null;
+    agreementSentAt: string | null;
+  },
+): CallStep[] {
+  const sequence = leadSequenceId(lead);
+  if (!sequence) return [];
+  return steps.filter((step) => step.sequence === sequence);
 }
 
 function matchesLegacy(view: LeadView, lead: ListLead): boolean {

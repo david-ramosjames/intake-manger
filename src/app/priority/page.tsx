@@ -9,12 +9,13 @@ import {
   type Lead,
   type PriorityReason,
 } from "@/lib/leads";
+import { nextActionLines, type CallStep } from "@/lib/next-action";
+import { leadSequenceId } from "@/lib/sequences";
 import { leadCycle, priorityBucket, textSequenceLive } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
-import { formatCallWhen } from "@/lib/time";
 
 const COLUMNS =
-  "id, lead_name, phone, grade, kind, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, agreement_status, agreement_sent_at, priority_reason, last_action, next_action, text_sequence_status, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, agreement_status, agreement_sent_at, agreement_next_reminder_at, priority_reason, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type PriorityLead = Pick<
   Lead,
@@ -23,6 +24,8 @@ type PriorityLead = Pick<
   | "phone"
   | "grade"
   | "kind"
+  | "sequence"
+  | "follow_up"
   | "arrival"
   | "source_channel"
   | "lead_date"
@@ -35,10 +38,12 @@ type PriorityLead = Pick<
   | "close_reason"
   | "agreement_status"
   | "agreement_sent_at"
+  | "agreement_next_reminder_at"
   | "priority_reason"
   | "last_action"
   | "next_action"
   | "text_sequence_status"
+  | "text_next_at"
   | "quo_link"
   | "slack_permalink"
   | "slack_channel_id"
@@ -61,14 +66,18 @@ function countsAsContact(type: string): boolean {
 
 export default async function PriorityPage() {
   const { supabase } = await requireStaff();
-  const { data, error } = await supabase
-    .from("leads")
-    .select(COLUMNS)
-    .eq("signed_case", false)
-    .is("case_id", null)
-    .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
-    .order("lead_date", { ascending: false, nullsFirst: false })
-    .limit(500);
+  const [{ data, error }, { data: stepRows }] = await Promise.all([
+    supabase
+      .from("leads")
+      .select(COLUMNS)
+      .eq("signed_case", false)
+      .is("case_id", null)
+      .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
+      .order("lead_date", { ascending: false, nullsFirst: false })
+      .limit(500),
+    supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
+  ]);
+  const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
   const leads = (data ?? []) as PriorityLead[];
   const candidates = leads.filter(mightBePriority);
@@ -103,7 +112,7 @@ export default async function PriorityPage() {
     if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
   }
 
-  const grouped = new Map<PriorityReason, { lead: PriorityLead; calls: number; last: string; wait: number; nextCall: string; textsLive: boolean }[]>();
+  const grouped = new Map<PriorityReason, { lead: PriorityLead; calls: number; last: string; wait: number; textsLive: boolean; nextAction: ReturnType<typeof nextActionLines> }[]>();
   for (const reason of PRIORITY_REASONS) grouped.set(reason, []);
   for (const lead of candidates) {
     const connected = talked.has(lead.id);
@@ -116,8 +125,25 @@ export default async function PriorityPage() {
       calls: calls.get(lead.id) ?? 0,
       last: lastContacted(wait),
       wait: wait ?? 99,
-      nextCall: formatCallWhen(nextCall.get(lead.id)),
       textsLive: textSequenceLive(lead.text_sequence_status),
+      nextAction: nextActionLines({
+        closed: false,
+        sequence: lead.sequence,
+        textStatus: lead.text_sequence_status,
+        textNextAt: lead.text_next_at,
+        reminderAt: lead.agreement_next_reminder_at,
+        agreementStatus: lead.agreement_status,
+        callStart: lead.lead_date ?? lead.created_at,
+        callsMade: calls.get(lead.id) ?? 0,
+        pendingCallAt: nextCall.get(lead.id) ?? null,
+        callSteps: callSteps.filter((step) => step.sequence === leadSequenceId({
+          closed: false,
+          talked: talked.has(lead.id),
+          kind: lead.kind,
+          agreementStatus: lead.agreement_status,
+          agreementSentAt: lead.agreement_sent_at,
+        })),
+      }),
     });
   }
   for (const rows of grouped.values()) {
@@ -164,7 +190,6 @@ export default async function PriorityPage() {
                         <th className="px-4 py-3 font-medium">Last contacted</th>
                         <th className="px-4 py-3 font-medium">Last action</th>
                         <th className="px-4 py-3 font-medium">Next action</th>
-                        <th className="px-4 py-3 font-medium">Next call</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -200,8 +225,13 @@ export default async function PriorityPage() {
                             </td>
                             <td className="px-4 py-3 text-slate-700">{row.last}</td>
                             <td className="max-w-xs px-4 py-3 text-slate-700">{row.lead.last_action || "No note yet."}</td>
-                            <td className="max-w-xs px-4 py-3 text-slate-700">{row.lead.next_action || "No note yet."}</td>
-                            <td className="px-4 py-3 text-slate-700">{row.nextCall}</td>
+                            <td className="px-4 py-3 text-slate-700">
+                              {row.nextAction.map((line) => (
+                                <p key={line.label} className="whitespace-nowrap">
+                                  <span className="text-slate-500">{line.label}</span> {line.when}
+                                </p>
+                              ))}
+                            </td>
                           </tr>
                         );
                       })}

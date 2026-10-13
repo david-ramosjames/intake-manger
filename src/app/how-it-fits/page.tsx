@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { LeadFlow } from "@/components/LeadFlow";
+import { saveSlackSettings } from "@/lib/ops-actions";
 import { requireStaff } from "@/lib/session";
+import { loadSlackSettings } from "@/lib/slack-settings";
 
 export const metadata: Metadata = {
   title: "How it fits · Intake",
@@ -153,7 +155,7 @@ const ENVS: { service: string; name: string; why: string }[] = [
   {
     service: "Intake Manager",
     name: "SLACK_BOT_TOKEN",
-    why: "Posts due calls and scheduled notes into #lead-calls.",
+    why: "Saved on this page from Quo Router. There is no separate Intake Manager Slack app.",
   },
   {
     service: "Intake Manager",
@@ -454,6 +456,7 @@ const ENVS: { service: string; name: string; why: string }[] = [
 
 export default async function HowItFitsPage() {
   await requireStaff();
+  const slack = await loadSlackSettings();
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight">How the intake services fit</h1>
@@ -500,6 +503,44 @@ export default async function HowItFitsPage() {
           </details>
         ))}
       </div>
+
+      <h2 className="mt-10 text-lg font-semibold tracking-tight">Slack call reminders</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">
+        Use the Quo Router Slack bot. Copy its bot token and the #lead-calls channel id into the
+        fields below. On Quo Router those are <span className="font-mono text-xs">FIRM_RAMOSJAMES_SLACK_BOT_TOKEN</span> and{" "}
+        <span className="font-mono text-xs">FIRM_RAMOSJAMES_SLACK_LEAD_CALLS_CHANNEL_ID</span>. If Quo
+        Router was set up without the firm prefix, the names are <span className="font-mono text-xs">SLACK_BOT_TOKEN</span> and{" "}
+        <span className="font-mono text-xs">SLACK_LEAD_CALLS_CHANNEL_ID</span>. Posting stays off until the switch is on.
+      </p>
+      <form action={saveSlackSettings} className="mt-4 max-w-xl space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="hidden" name="slack_posting" value="no" />
+          <input type="checkbox" name="slack_posting" value="yes" defaultChecked={slack.posting} />
+          Post call reminders to Slack
+        </label>
+        <label className="block text-sm">
+          <span className="font-medium text-slate-700">Quo Router Slack bot token</span>
+          <input
+            name="slack_bot_token"
+            type="password"
+            autoComplete="off"
+            placeholder={slack.tokenSet ? "Saved. Paste a new token to replace it." : "xoxb-…"}
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="font-medium text-slate-700">#lead-calls channel id</span>
+          <input
+            name="slack_channel_id"
+            defaultValue={slack.channelId}
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+          />
+        </label>
+        <p className="text-sm text-slate-500">{slack.tokenSet ? "A bot token is saved." : "No bot token saved yet."}</p>
+        <button type="submit" className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+          Save Slack settings
+        </button>
+      </form>
 
       <h2 className="mt-10 text-lg font-semibold tracking-tight">Environment</h2>
       <p className="mt-2 text-sm leading-6 text-slate-600">

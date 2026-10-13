@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
+import { desiredCase } from "./desired";
 import { displayContact } from "./leads";
 import { tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
@@ -114,9 +115,9 @@ function fieldsFromForm(formData: FormData) {
     source_note: text(formData, "source_note"),
     case_type: text(formData, "case_type"),
     lead_status: text(formData, "lead_status") ?? "New",
-    consultation: text(formData, "consultation"),
+    consultation: null as string | null,
     consultation_date: dateOrNull(formData, "consultation_date"),
-    desired_case: triBool(formData, "desired_case"),
+    desired_case: null as boolean | null,
     signed_case: signed,
     case_number: text(formData, "case_number"),
     date_signed: dateOrNull(formData, "date_signed"),
@@ -150,9 +151,30 @@ function changedFields(before: Lead, after: ReturnType<typeof fieldsFromForm>) {
   return changes;
 }
 
+function applyDesired(
+  fields: ReturnType<typeof fieldsFromForm>,
+  before: { consultation: string | null; consultation_date: string | null; close_reason: string | null } | null,
+) {
+  const previousDate = before?.consultation_date?.slice(0, 10) ?? null;
+  if (!fields.consultation_date) fields.consultation = null;
+  else if (!before || fields.consultation_date !== previousDate) fields.consultation = "staff";
+  else fields.consultation = before.consultation;
+  fields.desired_case = desiredCase({
+    consultationDate: fields.consultation_date,
+    grade: fields.grade,
+    tags: fields.callrail_tags,
+    declineReason: fields.decline_reason,
+    closeReason: fields.lead_status === "Lost" ? before?.close_reason ?? "not_a_lead" : null,
+    leadStatus: fields.lead_status,
+    signed: fields.signed_case,
+    qualified: fields.qualified,
+  });
+}
+
 export async function createLead(formData: FormData) {
   const { supabase, email } = await requireStaff();
   const fields = fieldsFromForm(formData);
+  applyDesired(fields, null);
   const now = new Date().toISOString();
   const signedExtras = fields.signed_case
     ? {
@@ -209,6 +231,7 @@ export async function updateLead(leadId: string, formData: FormData) {
 
   const before = existing as Lead;
   const fields = fieldsFromForm(formData);
+  applyDesired(fields, before);
   const changes = changedFields(before, fields);
   const statusNow = fields.lead_status;
   const closed =

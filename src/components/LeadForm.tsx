@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { LeadTagFields } from "@/components/LeadTagFields";
+import { consultationWhen, desiredWord } from "@/lib/desired";
 import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
@@ -89,14 +90,18 @@ export function LeadForm({
           ))}
         </select>
       </label>
-      <Field label="Consultation" name="consultation" defaultValue={lead?.consultation ?? ""} />
       <Field
         label="Consultation date"
         name="consultation_date"
         type="date"
         defaultValue={dateValue(lead?.consultation_date)}
       />
-      <Tri label="Desired case" name="desired_case" defaultValue={triValue(lead?.desired_case)} />
+      <p className="text-xs leading-5 text-slate-500">
+        Quo Router fills this when a phone call was the consultation. Desired case is{" "}
+        {lead?.consultation_date ? desiredWord(lead.desired_case) : "unanswered until that call"}
+        {lead?.consultation_date ? ` · ${consultationWhen(lead.consultation_date)}` : ""}. It uses that date plus the
+        grade, the qualified tag, and whether the lead was declined.
+      </p>
       <Tri
         label="Signed"
         name="signed_case"

@@ -21,6 +21,8 @@ export type QueueRow = {
   tags: string[];
   declineReason: string | null;
   qualifiedLabel: string;
+  consultWhen: string;
+  desired: string;
   signed: boolean;
   lastLabel: string;
   waiting: boolean;
@@ -72,6 +74,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
               <th className="px-4 py-3 font-medium">Stage</th>
               <th className="px-4 py-3 font-medium">Next action</th>
               <th className="px-4 py-3 font-medium">Qualified</th>
+              <th className="px-4 py-3 font-medium">Consult</th>
               <th className="px-4 py-3 font-medium">Last contacted</th>
               <th className="px-4 py-3 font-medium">Automation</th>
               <th className="px-4 py-3 font-medium">Links</th>
@@ -122,6 +125,12 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                 <td className={`px-4 py-3 ${row.qualifiedLabel === "Not tagged" ? "text-amber-700" : "text-slate-700"}`}>
                   {row.qualifiedLabel}
                 </td>
+                <td className="px-4 py-3 text-slate-700">
+                  <p className="whitespace-nowrap">{row.consultWhen}</p>
+                  {row.consultWhen !== "No consult" ? (
+                    <p className="text-xs text-slate-500">Desired {row.desired}</p>
+                  ) : null}
+                </td>
                 <td className="px-4 py-3 text-slate-700">{row.lastLabel}</td>
                 <td className={`px-4 py-3 ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
                   {row.automationLabel}
@@ -133,7 +142,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={10} className="px-4 py-10 text-center text-slate-500">
                   Nothing in this queue.
                 </td>
               </tr>
@@ -228,6 +237,8 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           {row.owner ? ` · ${row.owner}` : ""}
           {row.grade ? ` · Grade ${row.grade}` : " · No grade"}
           {row.priority ? ` · ${row.priority}` : ""}
+          {` · ${row.consultWhen}`}
+          {row.consultWhen !== "No consult" ? ` · Desired ${row.desired}` : ""}
         </p>
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>

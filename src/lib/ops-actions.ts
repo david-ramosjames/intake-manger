@@ -9,6 +9,7 @@ import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { isPriorityReason } from "./leads";
+import { desiredCase } from "./desired";
 import { clockToMinutes, delayMinutes, isCallSequence } from "./sequences";
 import { chicagoLocalToIso } from "./time";
 import { requireStaff } from "./session";
@@ -176,7 +177,7 @@ export async function markNotALead(leadId: string) {
   const { supabase, email } = await requireStaff();
   const { data, error } = await supabase
     .from("leads")
-    .select("id, signed_case, case_id, lead_status, text_sequence_status")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status, consultation_date, grade, callrail_tags, decline_reason, qualified")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
@@ -190,6 +191,16 @@ export async function markNotALead(leadId: string) {
       follow_up: false,
       sequence: "stop",
       close_reason: "not_a_lead",
+      desired_case: desiredCase({
+        consultationDate: data.consultation_date,
+        grade: data.grade,
+        tags: data.callrail_tags ?? [],
+        declineReason: data.decline_reason,
+        closeReason: "not_a_lead",
+        leadStatus: "Lost",
+        signed: false,
+        qualified: data.qualified,
+      }),
       text_sequence_status: data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status,
     })
     .eq("id", leadId);
@@ -399,7 +410,7 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const { data: before, error } = await supabase
     .from("leads")
-    .select("id, signed_case, callrail_call_id, callrail_tags, qualified, decline_reason")
+    .select("id, signed_case, callrail_call_id, callrail_tags, qualified, decline_reason, consultation_date, grade, close_reason, lead_status")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
@@ -418,6 +429,16 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
       callrail_tags: tagged.tags,
       qualified: tagged.qualified,
       decline_reason: tagged.decline_reason,
+      desired_case: desiredCase({
+        consultationDate: before.consultation_date,
+        grade: before.grade,
+        tags: tagged.tags,
+        declineReason: tagged.decline_reason,
+        closeReason: before.close_reason,
+        leadStatus: before.lead_status,
+        signed,
+        qualified: tagged.qualified,
+      }),
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);

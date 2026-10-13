@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { consultationWhen, desiredWord } from "@/lib/desired";
 import {
   daysSince,
   leadTitle,
@@ -15,7 +16,7 @@ import { leadCycle, priorityBucket, textSequenceLive } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 
 const COLUMNS =
-  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, agreement_status, agreement_sent_at, agreement_next_reminder_at, priority_reason, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, agreement_status, agreement_sent_at, agreement_next_reminder_at, priority_reason, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type PriorityLead = Pick<
   Lead,
@@ -36,6 +37,8 @@ type PriorityLead = Pick<
   | "signed_case"
   | "case_id"
   | "close_reason"
+  | "consultation_date"
+  | "desired_case"
   | "agreement_status"
   | "agreement_sent_at"
   | "agreement_next_reminder_at"
@@ -215,6 +218,8 @@ export default async function PriorityPage() {
                               <p className="mt-0.5 text-xs text-slate-500">
                                 {listAccident(row.lead) !== "—" ? listAccident(row.lead) : "Accident not captured"}
                                 {row.lead.phone ? ` · ${row.lead.phone}` : ""}
+                                {` · ${consultationWhen(row.lead.consultation_date)}`}
+                                {row.lead.consultation_date ? ` · Desired ${desiredWord(row.lead.desired_case)}` : ""}
                               </p>
                               <p className="mt-1 flex gap-3 text-xs">
                                 {row.lead.quo_link ? (

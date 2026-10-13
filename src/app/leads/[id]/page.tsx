@@ -8,6 +8,7 @@ import { CallWork } from "@/components/CallWork";
 import { callOutcomeLabel } from "@/lib/calls";
 import { describeFollowUp } from "@/lib/followup";
 import { formatChicago } from "@/lib/time";
+import { consultationWhen, desiredWord } from "@/lib/desired";
 import { daysOpen, isPriorityReason, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { leadCycle, leadNeed, leadPriority, leadStatusLabel } from "@/lib/next-step";
@@ -127,6 +128,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             {lead.owner_name ? ` · handled by ${lead.owner_name}` : " · nobody assigned"}
             {` · ${qualifiedLine(lead.callrail_tags ?? [], lead.decline_reason)}`}
             {lead.grade ? ` · Grade ${lead.grade}` : " · no grade"}
+            {` · ${lead.consultation_date ? `Consult ${consultationWhen(lead.consultation_date)}` : "No consult"}`}
+            {lead.consultation_date ? ` · Desired ${desiredWord(lead.desired_case)}` : ""}
             {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}
             {lead.sentiment ? ` · ${LEAD_SENTIMENT_LABEL[lead.sentiment as LeadSentiment]}` : ""}
           </p>

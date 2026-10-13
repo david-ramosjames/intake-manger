@@ -6,7 +6,7 @@ import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
 import { desiredCase } from "./desired";
 import { displayContact } from "./leads";
-import { tagsFromSelection } from "./tags";
+import { LEAD_TAGS, tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
 import { requireStaff } from "./session";
@@ -367,14 +367,16 @@ export async function updateLead(leadId: string, formData: FormData) {
 
   if (changes.callrail_tags && callrailConfigured() && before.callrail_call_id) {
     try {
-      await pushCallrailTags(before.callrail_call_id, fields.callrail_tags);
+      await pushCallrailTags(before.callrail_call_id, fields.callrail_tags, LEAD_TAGS);
     } catch (err) {
+      const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
       await supabase.from("lead_events").insert({
         lead_id: leadId,
         event_type: "callrail_tags",
         actor: email,
-        payload: { error: err instanceof Error ? err.message : "CallRail did not take the tags." },
+        payload: { error: message },
       });
+      throw new Error(`Saved on the lead. CallRail did not take the tags. ${message}`);
     }
   }
 

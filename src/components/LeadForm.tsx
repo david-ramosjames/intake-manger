@@ -194,6 +194,7 @@ export function LeadForm({
           tags={lead?.callrail_tags ?? []}
           declineReason={lead?.decline_reason ?? null}
           signed={Boolean(lead?.signed_case)}
+          callrail={Boolean(lead?.callrail_call_id)}
         />
       </div>
       <label className="flex items-center gap-2 text-sm sm:col-span-2">

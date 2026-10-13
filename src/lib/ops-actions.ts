@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags, pushCallrailTags } from "./callrail";
-import { tagsFromSelection } from "./tags";
+import { LEAD_TAGS, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
@@ -456,14 +456,16 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
 
   if (callrailConfigured() && before.callrail_call_id) {
     try {
-      await pushCallrailTags(before.callrail_call_id, tagged.tags);
+      await pushCallrailTags(before.callrail_call_id, tagged.tags, LEAD_TAGS);
     } catch (err) {
+      const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
       await supabase.from("lead_events").insert({
         lead_id: leadId,
         event_type: "callrail_tags",
         actor: email,
-        payload: { error: err instanceof Error ? err.message : "CallRail did not take the tags." },
+        payload: { error: message },
       });
+      throw new Error(`Saved on the lead. CallRail did not take the tags. ${message}`);
     }
   }
 

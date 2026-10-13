@@ -62,6 +62,9 @@ export default async function SequencesPage() {
             </button>
           </form>
         </div>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          QUALIFIED YES, QUALIFIED NO, CVR DESIRED, CVR SIGNED, and the DEC tags are applied on the lead. This list is every tag name already in CallRail.
+        </p>
         <p className="mt-1 text-xs leading-5 text-slate-600">
           {(tags ?? []).map((tag) => (tag as { name: string }).name).join(", ") || "No tags pulled yet."}
         </p>

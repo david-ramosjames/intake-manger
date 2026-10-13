@@ -119,7 +119,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, consultation_date, desired_case, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, consultation_date, desired_case, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -163,6 +163,7 @@ type ListLead = Pick<
   | "case_id"
   | "case_number"
   | "intake_call_id"
+  | "callrail_call_id"
   | "quo_link"
   | "slack_permalink"
   | "slack_channel_id"
@@ -349,6 +350,7 @@ export default async function LeadListPage({
       stageClassName: stageClass(row.label),
       step: row.step,
       tags: row.lead.callrail_tags ?? [],
+      callrail: Boolean(row.lead.callrail_call_id),
       declineReason: row.lead.decline_reason,
       qualifiedLabel: qualifiedSummary(row.lead.callrail_tags ?? [], row.lead.decline_reason),
       consultWhen: consultationWhen(row.lead.consultation_date),

@@ -86,9 +86,25 @@ export async function attachCallrailSources<T extends {
   );
 }
 
-export async function pushCallrailTags(callId: string, tags: string[]): Promise<void> {
+function tagNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((tag) => {
+      if (typeof tag === "string") return tag.trim();
+      if (tag && typeof tag === "object" && "name" in tag) return String((tag as { name?: string }).name ?? "").trim();
+      return "";
+    })
+    .filter(Boolean);
+}
+
+/** Keep tags that are not part of this set, then apply the lead's current tags. */
+export async function pushCallrailTags(callId: string, tags: string[], managed: readonly string[]): Promise<void> {
+  const payload = await callrail(`/calls/${encodeURIComponent(callId)}.json`);
+  const owned = new Set(managed);
+  const kept = tagNames(payload.tags).filter((tag) => !owned.has(tag));
+  const next = [...new Set([...kept, ...tags])];
   await callrail(`/calls/${encodeURIComponent(callId)}.json`, {
     method: "PUT",
-    body: JSON.stringify({ tags }),
+    body: JSON.stringify({ tags: next }),
   });
 }

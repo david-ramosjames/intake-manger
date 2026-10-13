@@ -15,6 +15,20 @@ export const DECLINE_TAGS = [
 
 export const LEAD_TAGS = [QUALIFIED_YES, QUALIFIED_NO, ...COVERAGE_TAGS, ...DECLINE_TAGS] as const;
 
+export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
+  "QUALIFIED YES": "QUALIFIED YES",
+  "QUALIFIED NO": "QUALIFIED NO",
+  "CVR DESIRED": "CVR DESIRED (want to sign)",
+  "CVR SIGNED": "CVR SIGNED (signed)",
+  "DEC: At Fault / Bad Facts": "DEC: At Fault / Bad Facts",
+  "DEC: Has Attorney": "DEC: Has Attorney",
+  "DEC: Medmal": "DEC: Medmal",
+  "DEC: No Injury / Property Damage": "DEC: No Injury / Property Damage",
+  "DEC: No Insurance": "DEC: No Insurance",
+  "DEC: Referred": "DEC: Referred",
+  "DEC: Statue Issue": "DEC: Statue Issue",
+};
+
 export type DeclineTag = (typeof DECLINE_TAGS)[number];
 
 const DECLINE_SET = new Set<string>(DECLINE_TAGS);

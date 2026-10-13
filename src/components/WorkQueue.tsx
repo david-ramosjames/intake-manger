@@ -19,6 +19,7 @@ export type QueueRow = {
   stageClassName: string;
   step: string;
   tags: string[];
+  callrail: boolean;
   declineReason: string | null;
   qualifiedLabel: string;
   consultWhen: string;
@@ -351,6 +352,7 @@ function TagEditor({ row }: { row: QueueRow }) {
         tags={row.tags}
         declineReason={row.declineReason}
         signed={row.signed}
+        callrail={row.callrail}
       />
       {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
       <button

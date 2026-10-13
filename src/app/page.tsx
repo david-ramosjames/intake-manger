@@ -25,6 +25,36 @@ function phoneKey(value: string | null | undefined): string {
   return digits.length >= 10 ? digits.slice(-10) : "";
 }
 
+function combineByPhone<T extends { lead: ListLead; cycle: string; age: number | null; inWindow: boolean }>(
+  input: T[],
+): { row: T; others: T[] }[] {
+  const groups = new Map<string, T[]>();
+  const order: string[] = [];
+  for (const row of input) {
+    const key = phoneKey(row.lead.phone) || phoneKey(row.lead.phone_e164) || `id:${row.lead.id}`;
+    const list = groups.get(key);
+    if (list) list.push(row);
+    else {
+      groups.set(key, [row]);
+      order.push(key);
+    }
+  }
+  return order.map((key) => {
+    const group = groups.get(key) ?? [];
+    const sorted = [...group].sort((a, b) => {
+      const rank = (item: T) => (item.lead.signed_case || item.lead.case_id || item.cycle === "signed" ? 0 : item.cycle === "closed" ? 2 : 1);
+      const byRank = rank(a) - rank(b);
+      if (byRank) return byRank;
+      const aStamp = a.lead.lead_date ?? a.lead.created_at ?? "";
+      const bStamp = b.lead.lead_date ?? b.lead.created_at ?? "";
+      return bStamp.localeCompare(aStamp);
+    });
+    const [keeper, ...others] = sorted;
+    const age = group.reduce<number | null>((newest, item) => (item.age != null && (newest == null || item.age < newest) ? item.age : newest), null);
+    return { row: { ...keeper, age, inWindow: age != null && age <= 30 }, others };
+  });
+}
+
 function countsAsContact(type: string): boolean {
   return type === "call" || type === "sona_call" || type === "text" || type === "voicemail";
 }
@@ -119,7 +149,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, consultation_date, desired_case, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, consultation_date, desired_case, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -128,6 +158,7 @@ type ListLead = Pick<
   | "created_at"
   | "lead_name"
   | "phone"
+  | "phone_e164"
   | "email"
   | "identity_status"
   | "lead_source"
@@ -299,14 +330,15 @@ export default async function LeadListPage({
     };
   });
 
-  const windowRows = rows.filter((row) => row.inWindow);
+  const combined = combineByPhone(rows);
+  const windowRows = combined.filter((group) => group.row.inWindow);
   const metrics = {
-    contact: windowRows.filter((row) => row.cycle === "contact").length,
-    information: windowRows.filter((row) => row.cycle === "information").length,
-    signing: windowRows.filter((row) => row.cycle === "signing").length,
-    attention: windowRows.filter((row) => row.attention).length,
-    signed: windowRows.filter((row) => row.cycle === "signed").length,
-    closed: windowRows.filter((row) => row.cycle === "closed").length,
+    contact: windowRows.filter((group) => group.row.cycle === "contact").length,
+    information: windowRows.filter((group) => group.row.cycle === "information").length,
+    signing: windowRows.filter((group) => group.row.cycle === "signing").length,
+    attention: windowRows.filter((group) => group.row.attention).length,
+    signed: windowRows.filter((group) => group.row.cycle === "signed").length,
+    closed: windowRows.filter((group) => group.row.cycle === "closed").length,
     total: windowRows.length,
   };
   const conversion = metrics.total ? Math.round((metrics.signed / metrics.total) * 100) : 0;
@@ -319,32 +351,42 @@ export default async function LeadListPage({
   ];
 
   const needle = q.toLowerCase();
-  const shown = rows
-    .filter((row) => arrivedInRange(row.age, range))
-    .filter((row) => matchesQueue(queue, row.cycle, row.attention))
-    .filter((row) => matchesLegacy(view, row.lead))
-    .filter((row) => {
+  const needleDigits = needle.replace(/\D/g, "");
+  const shown = combined
+    .filter((group) => arrivedInRange(group.row.age, range))
+    .filter((group) => matchesQueue(queue, group.row.cycle, group.row.attention))
+    .filter((group) => matchesLegacy(view, group.row.lead))
+    .filter((group) => {
       if (!needle) return true;
-      const lead = row.lead;
-      return [lead.lead_name, lead.phone, lead.email, lead.case_number].some((value) =>
-        (value || "").toLowerCase().includes(needle),
-      );
+      return [group.row, ...group.others].some((item) => {
+        const lead = item.lead;
+        const textHit = [lead.lead_name, lead.phone, lead.phone_e164, lead.email, lead.case_number].some((value) =>
+          (value || "").toLowerCase().includes(needle),
+        );
+        if (textHit) return true;
+        return needleDigits.length >= 7 && phoneKey(lead.phone || lead.phone_e164).includes(needleDigits.slice(-10));
+      });
     })
     .sort((a, b) => {
       const rank = (row: (typeof rows)[number]) => (row.cycle === "closed" ? 3 : row.cycle === "signed" ? 2 : row.waiting ? 0 : 1);
-      const byRank = rank(a) - rank(b);
+      const byRank = rank(a.row) - rank(b.row);
       if (byRank) return byRank;
-      const aWait = a.outreach ?? 99;
-      const bWait = b.outreach ?? 99;
+      const aWait = a.row.outreach ?? 99;
+      const bWait = b.row.outreach ?? 99;
       if (aWait !== bWait) return bWait - aWait;
-      return (b.age ?? 0) - (a.age ?? 0);
+      return (b.row.age ?? 0) - (a.row.age ?? 0);
     });
 
-  const queueRows: QueueRow[] = shown.map((row) => {
+  const queueRows: QueueRow[] = shown.map(({ row, others }) => {
     const automation = automationLine(row.lead);
     return {
       id: row.lead.id,
       title: leadTitle(row.lead),
+      samePhone: others.map((other) => ({
+        id: other.lead.id,
+        title: leadTitle(other.lead),
+        label: other.label,
+      })),
       identityStatus: row.lead.identity_status,
       accident: row.accident,
       when: receivedLabel(row.age),
@@ -428,6 +470,9 @@ export default async function LeadListPage({
             placeholder="Name, phone, email, or case number"
             className="w-64 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
           />
+          <Link href="/" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">
+            Clear
+          </Link>
         </form>
       </div>
 

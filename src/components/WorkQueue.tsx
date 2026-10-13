@@ -11,6 +11,7 @@ import { formatChicago } from "@/lib/time";
 export type QueueRow = {
   id: string;
   title: string;
+  samePhone: { id: string; title: string; label: string }[];
   identityStatus: LeadIdentity | null;
   accident: string;
   when: string;
@@ -102,6 +103,9 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                     {row.accident !== "—" ? row.accident : "Accident not captured"}
                     {row.when ? ` · ${row.when}` : ""}
                   </p>
+                  {row.samePhone.length > 0 ? (
+                    <p className="mt-0.5 text-xs text-slate-500">{row.samePhone.length + 1} records, same phone</p>
+                  ) : null}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${gradeClass(row.grade)}`}>
@@ -241,6 +245,21 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           {` · ${row.consultWhen}`}
           {row.consultWhen !== "No consult" ? ` · Desired ${row.desired}` : ""}
         </p>
+        {row.samePhone.length > 0 ? (
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Same phone</h3>
+            <ul className="mt-2 space-y-1 text-sm">
+              {row.samePhone.map((other) => (
+                <li key={other.id}>
+                  <Link href={`/leads/${other.id}`} className="font-medium text-navy underline">
+                    {other.title}
+                  </Link>
+                  <span className="text-slate-500"> · {other.label}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">

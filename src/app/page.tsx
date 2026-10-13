@@ -82,6 +82,25 @@ function lastContacted(days: number | null): string {
   return `${days} days`;
 }
 
+type LeadRange = "all" | "today" | "7";
+
+function isLeadRange(value: string | undefined): value is LeadRange {
+  return value === "all" || value === "today" || value === "7";
+}
+
+function arrivedInRange(age: number | null, range: LeadRange): boolean {
+  if (range === "all") return true;
+  if (age == null) return false;
+  if (range === "today") return age === 0;
+  return age <= 6;
+}
+
+const RANGES: { id: LeadRange; label: string }[] = [
+  { id: "all", label: "Any time" },
+  { id: "today", label: "Today" },
+  { id: "7", label: "Last 7 days" },
+];
+
 const QUEUES: { id: QueueId; label: string }[] = [
   { id: "all", label: "All" },
   { id: "attention", label: "Needs attention" },
@@ -148,10 +167,11 @@ type ListLead = Pick<
   | "slack_thread_ts"
 >;
 
-function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: string }): string {
+function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: string; range?: LeadRange }): string {
   const params = new URLSearchParams();
   if (input.queue && input.queue !== "all") params.set("queue", input.queue);
   if (input.view && input.view !== "all") params.set("view", input.view);
+  if (input.range && input.range !== "all") params.set("range", input.range);
   if (input.q) params.set("q", input.q);
   if (input.lead) params.set("lead", input.lead);
   const query = params.toString();
@@ -161,11 +181,12 @@ function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: 
 export default async function LeadListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; view?: string; queue?: string; lead?: string }>;
+  searchParams: Promise<{ q?: string; view?: string; queue?: string; lead?: string; range?: string }>;
 }) {
   const params = await searchParams;
   const view: LeadView = isLeadView(params.view) ? params.view : "all";
   const queue: QueueId = isQueue(params.queue) ? params.queue : "all";
+  const range: LeadRange = isLeadRange(params.range) ? params.range : "all";
   const q = (params.q ?? "").trim();
   const selectedId = params.lead?.trim() || "";
   const { supabase } = await requireStaff();
@@ -291,6 +312,7 @@ export default async function LeadListPage({
 
   const needle = q.toLowerCase();
   const shown = rows
+    .filter((row) => arrivedInRange(row.age, range))
     .filter((row) => matchesQueue(queue, row.cycle, row.attention))
     .filter((row) => matchesLegacy(view, row.lead))
     .filter((row) => {
@@ -378,6 +400,7 @@ export default async function LeadListPage({
         <form action="/" className="flex items-center gap-2">
           {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
           {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
+          {range !== "all" ? <input type="hidden" name="range" value={range} /> : null}
           <input
             name="q"
             defaultValue={q}
@@ -390,10 +413,10 @@ export default async function LeadListPage({
       {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
 
       <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Metric href={listHref({ queue: "fresh", q })} active={queue === "fresh"} label="New" value={String(metrics.fresh)} hint="Need to contact" tone="text-amber-700" />
-        <Metric href={listHref({ queue: "attention", q })} active={queue === "attention"} label="Need action" value={String(metrics.attention)} hint="Waiting or blocked" tone="text-red-700" />
-        <Metric href={listHref({ queue: "working", q })} active={queue === "working"} label="Following up" value={String(metrics.working)} hint="In conversation or signing" tone="text-sky-700" />
-        <Metric href={listHref({ queue: "signed", q })} active={queue === "signed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
+        <Metric href={listHref({ queue: "fresh", q, range })} active={queue === "fresh"} label="New" value={String(metrics.fresh)} hint="Need to contact" tone="text-amber-700" />
+        <Metric href={listHref({ queue: "attention", q, range })} active={queue === "attention"} label="Need action" value={String(metrics.attention)} hint="Waiting or blocked" tone="text-red-700" />
+        <Metric href={listHref({ queue: "working", q, range })} active={queue === "working"} label="Following up" value={String(metrics.working)} hint="In conversation or signing" tone="text-sky-700" />
+        <Metric href={listHref({ queue: "signed", q, range })} active={queue === "signed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{conversion}%</p>
@@ -411,7 +434,7 @@ export default async function LeadListPage({
             part.count ? (
               <Link
                 key={part.id}
-                href={listHref({ queue: part.id, q })}
+                href={listHref({ queue: part.id, q, range })}
                 title={`${part.label}: ${part.count}`}
                 className={part.className}
                 style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
@@ -421,7 +444,7 @@ export default async function LeadListPage({
         </div>
         <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600">
           {pipeline.map((part) => (
-            <Link key={part.id} href={listHref({ queue: part.id, q })} className="hover:text-slate-900">
+            <Link key={part.id} href={listHref({ queue: part.id, q, range })} className="hover:text-slate-900">
               {part.label} ({part.count})
             </Link>
           ))}
@@ -435,10 +458,23 @@ export default async function LeadListPage({
         >
           Priority
         </Link>
+        <span className="ml-1 text-xs font-medium uppercase tracking-wide text-slate-400">Arrived</span>
+        {RANGES.map((item) => (
+          <Link
+            key={item.id}
+            href={listHref({ queue, view, q, range: item.id })}
+            className={`rounded-full px-3 py-1 text-sm ${
+              range === item.id ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+            }`}
+          >
+            {item.label}
+          </Link>
+        ))}
+        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         {QUEUES.map((item) => (
           <Link
             key={item.id}
-            href={listHref({ queue: item.id, view, q })}
+            href={listHref({ queue: item.id, view, q, range })}
             className={`rounded-full px-3 py-1 text-sm ${
               queue === item.id ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
@@ -453,12 +489,12 @@ export default async function LeadListPage({
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>
         {LEGACY.map((item) => (
-          <Link key={item.id} href={listHref({ view: item.id, q })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
+          <Link key={item.id} href={listHref({ view: item.id, q, range })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
             {item.label}
           </Link>
         ))}
         {view !== "all" ? (
-          <Link href={listHref({ queue, q })} className="hover:text-slate-900">
+          <Link href={listHref({ queue, q, range })} className="hover:text-slate-900">
             Clear that filter
           </Link>
         ) : null}

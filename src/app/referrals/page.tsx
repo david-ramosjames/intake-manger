@@ -18,7 +18,7 @@ export default async function ReferralsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Referral tree</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-navy">Referral tree</h1>
       <p className="mt-1 text-sm text-slate-600">
         When we cannot take a case, the lead page suggests the destination whose case types match.
         Sending the referral posts it to Slack and stops follow-up.
@@ -44,7 +44,7 @@ export default async function ReferralsPage() {
           className="rounded-md border border-slate-300 px-3 py-2 text-sm"
         />
         <textarea name="notes" rows={2} placeholder="Notes" className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-        <button type="submit" className="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+        <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
           Add destination
         </button>
       </form>

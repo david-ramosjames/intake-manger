@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Geist } from "next/font/google";
 import "./globals.css";
+import { AppHeader } from "@/components/AppHeader";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { signOut } from "@/lib/auth-actions";
 
 const geist = Geist({
   variable: "--font-geist-sans",
@@ -12,7 +11,7 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Intake",
+  title: "Intake Manager",
   description: "Lead cockpit for Ramos James Law intake",
 };
 
@@ -29,43 +28,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
       <body className="min-h-full">
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-            <Link href="/" className="text-sm font-semibold tracking-tight">
-              Intake
-            </Link>
-            <div className="flex items-center gap-4 text-sm text-slate-600">
-            {email ? (
-              <>
-                <Link href="/priority" className="font-medium text-slate-900">
-                  Priority
-                </Link>
-                <Link href="/verify" className="font-medium text-slate-900">
-                  Verify
-                </Link>
-                <Link href="/sequences" className="font-medium text-slate-900">
-                  Sequences
-                </Link>
-                <Link href="/referrals" className="font-medium text-slate-900">
-                  Referrals
-                </Link>
-                <Link href="/leads/new" className="font-medium text-slate-900">
-                  Add lead
-                </Link>
-                <span className="hidden sm:inline">{email}</span>
-                <form action={signOut}>
-                  <button type="submit" className="text-slate-500 hover:text-slate-900">
-                    Sign out
-                  </button>
-                </form>
-                <Link href="/how-it-fits" className="font-medium text-slate-900">
-                  How it fits
-                </Link>
-              </>
-            ) : null}
-            </div>
-          </div>
-        </header>
+        <AppHeader email={email} />
         {children}
       </body>
     </html>

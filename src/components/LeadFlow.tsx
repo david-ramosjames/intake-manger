@@ -11,7 +11,7 @@ function Card({
 }) {
   const shell =
     tone === "decision"
-      ? "bg-slate-900 text-white"
+      ? "bg-navy text-white"
       : tone === "notice"
         ? "border border-slate-300 bg-slate-50 text-slate-900"
         : "border border-slate-200 bg-white text-slate-900";

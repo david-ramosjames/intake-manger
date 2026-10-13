@@ -44,14 +44,14 @@ export default async function VerifyPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Needs verification</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-navy">Needs verification</h1>
       <p className="mt-1 text-sm text-slate-600">
         Records missing a name or phone, plus names and phones filled in from a summary or an intake.
         Confirming a record removes it from this queue once both fields are present. The same phone on
         two rows is a review, not proof they are the same matter.
       </p>
       <p className="mt-4 text-sm">
-        <Link href="/?view=verify" className="font-medium text-slate-900 underline">
+        <Link href="/?view=verify" className="font-medium text-navy underline">
           {count ?? 0} leads need verification
         </Link>
       </p>
@@ -67,7 +67,7 @@ export default async function VerifyPage() {
         <ul className="mt-3 space-y-3">
           {((identityResult.data ?? []) as { id: string; lead_name: string | null; phone: string | null; identity_status: string; identity_evidence: string | null; lead_status: string }[]).map((lead) => (
             <li key={lead.id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
-              <Link href={`/leads/${lead.id}`} className="font-medium text-slate-900 underline">
+              <Link href={`/leads/${lead.id}`} className="font-medium text-navy underline">
                 {leadTitle(lead)}
               </Link>
               <span className="text-slate-500"> · {lead.lead_status}</span>
@@ -94,7 +94,7 @@ export default async function VerifyPage() {
                   <ul className="mt-3 space-y-3">
                     {group.map((lead) => (
                       <li key={lead.id} className="text-sm">
-                        <Link href={`/leads/${lead.id}`} className="font-medium text-slate-900 underline">
+                        <Link href={`/leads/${lead.id}`} className="font-medium text-navy underline">
                           {leadTitle(lead)}
                         </Link>
                         <span className="text-slate-500">

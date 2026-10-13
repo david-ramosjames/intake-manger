@@ -115,7 +115,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       </Link>
       <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-navy">
             {leadTitle(lead)}
             <IdentityMark status={lead.identity_status} />
           </h1>
@@ -228,7 +228,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
             />
           </label>
-          <button type="submit" className="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+          <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
             Save priority
           </button>
         </form>
@@ -336,7 +336,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </select>
             </label>
           </div>
-          <button type="submit" className="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+          <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
             Schedule Slack post
           </button>
         </form>
@@ -369,7 +369,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             ))}
           </select>
           <input name="note" placeholder="Anything the referral needs" className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <button type="submit" className="w-fit rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+          <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
             Send referral
           </button>
         </form>
@@ -549,7 +549,7 @@ function IdentityReview({ lead, staff }: { lead: Lead; staff: StaffPerson[] }) {
           type="submit"
           name="decision"
           value="replace"
-          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+          className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy"
         >
           Save this client name
         </button>
@@ -602,7 +602,7 @@ function FollowUpPanel({
       </p>
       {described.state === "Not enrolled" && lead.follow_up ? (
         <form action={startFollowUp.bind(null, lead.id)} className="mt-3">
-          <button type="submit" className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+          <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
             Create the steps
           </button>
         </form>

@@ -8,7 +8,7 @@ export default async function NewLeadPage() {
   const staff = await loadStaff(supabase);
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Add a lead</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-navy">Add a lead</h1>
       <p className="mt-1 text-sm text-slate-600">
         Use this for a form fill or a call that is not already in the list. You can correct every
         field later.

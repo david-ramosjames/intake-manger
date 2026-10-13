@@ -85,14 +85,14 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
               <tr
                 key={row.id}
                 className={`border-b border-slate-100 last:border-0 ${
-                  row.id === selectedId ? "bg-slate-50" : "hover:bg-slate-50"
-                } ${row.waiting ? "shadow-[inset_3px_0_0_0_#f59e0b]" : ""}`}
+                  row.id === selectedId ? "bg-brand/10" : "hover:bg-slate-50"
+                } ${row.waiting ? "shadow-[inset_3px_0_0_0_#f59e0b]" : row.id === selectedId ? "shadow-[inset_3px_0_0_0_#38B7E3]" : ""}`}
               >
                 <td className="px-4 py-3">
                   <button
                     type="button"
                     onClick={() => setSelectedId(row.id)}
-                    className="inline-flex items-center gap-1 text-left font-medium text-slate-900 hover:underline"
+                    className="inline-flex items-center gap-1 text-left font-medium text-navy hover:underline"
                   >
                     {row.title}
                     <IdentityMark status={row.identityStatus} />
@@ -197,7 +197,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
     <aside className="flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-4">
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+          <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">
             {row.title}
             <IdentityMark status={row.identityStatus} />
           </h2>
@@ -213,7 +213,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
       <div className="space-y-5 overflow-y-auto px-4 py-4">
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
-            <a href={row.quoUrl} className="rounded-md bg-slate-900 px-3 py-1.5 font-medium text-white" target="_blank" rel="noreferrer">
+            <a href={row.quoUrl} className="rounded-md bg-brand px-3 py-1.5 font-medium text-navy" target="_blank" rel="noreferrer">
               Open in Quo
             </a>
           ) : (
@@ -356,7 +356,7 @@ function TagEditor({ row }: { row: QueueRow }) {
       <button
         type="submit"
         disabled={pending}
-        className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+        className="mt-3 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy disabled:opacity-60"
       >
         {pending ? "Saving…" : "Save tags"}
       </button>

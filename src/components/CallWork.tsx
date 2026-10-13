@@ -16,7 +16,7 @@ export function CallWork({
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
         <span>{assignedEmail ? `Owner ${assignedEmail}` : "Unassigned"}</span>
         {mine ? (
-          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-white">Yours</span>
+          <span className="rounded-full bg-brand px-2 py-0.5 text-navy">Yours</span>
         ) : (
           <form action={claimCall}>
             <input type="hidden" name="job_id" value={jobId} />
@@ -51,7 +51,7 @@ export function CallWork({
           <input type="checkbox" name="stop_rest" value="yes" />
           Stop the remaining calls on this lead
         </label>
-        <button type="submit" className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white sm:col-span-2 sm:w-fit">
+        <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy sm:col-span-2 sm:w-fit">
           Record outcome
         </button>
       </form>

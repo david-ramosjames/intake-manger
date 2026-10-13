@@ -38,8 +38,7 @@ function LoginForm({ origin, configured }: { origin: string; configured: boolean
 
   return (
     <main className="mx-auto flex min-h-full max-w-md flex-col justify-center px-6 py-16">
-      <p className="text-sm font-medium text-slate-500">Ramos James Law</p>
-      <h1 className="mt-2 text-3xl font-semibold tracking-tight">Intake</h1>
+      <h1 className="text-3xl font-semibold tracking-tight text-navy">Intake Manager</h1>
       <p className="mt-3 text-sm leading-6 text-slate-600">
         The lead list for the intake team. Sign in with your firm Google account.
       </p>
@@ -63,7 +62,7 @@ function LoginForm({ origin, configured }: { origin: string; configured: boolean
         type="button"
         onClick={() => void signIn()}
         disabled={busy || !configured}
-        className="mt-8 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+        className="mt-8 rounded-md bg-brand px-4 py-2.5 text-sm font-medium text-navy disabled:opacity-60"
       >
         {busy ? "Redirecting…" : "Continue with Google"}
       </button>

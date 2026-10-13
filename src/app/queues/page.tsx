@@ -118,7 +118,7 @@ export default async function QueuesPage({
     <main className="mx-auto max-w-5xl px-4 py-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Queues</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-navy">Queues</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
             Claim a call, dial from Quo, and record what happened. Times are Central. A Slack alert
             does not finish the call. The scheduled run posts those alerts; finishing the call happens here.
@@ -149,7 +149,7 @@ export default async function QueuesPage({
             key={item.id}
             href={item.id === "all" ? "/queues" : `/queues?view=${item.id}`}
             className={`rounded-full px-3 py-1 text-sm ${
-              view === item.id ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+              view === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
           >
             {item.label}
@@ -170,7 +170,7 @@ export default async function QueuesPage({
             <li key={job.id} className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <Link href={`/leads/${job.lead_id}`} className="font-medium text-slate-900 underline">
+                  <Link href={`/leads/${job.lead_id}`} className="font-medium text-navy underline">
                     {leadTitle({
                       lead_name: lead?.lead_name ?? null,
                       phone: lead?.phone ?? null,

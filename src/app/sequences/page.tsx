@@ -30,7 +30,7 @@ export default async function SequencesPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Sequences</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-navy">Sequences</h1>
       <p className="mt-1 text-sm text-slate-600">
         Call timing for each kind of lead. Texts are listed here, and SMS Follow-Up still sends them. A Slack
         reminder waits until that sequence’s hours.
@@ -41,7 +41,7 @@ export default async function SequencesPage() {
         {CALL_SEQUENCES.map((sequence) => (
           <section key={sequence} className="rounded-lg border border-slate-200 bg-white px-3 py-3">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              <h2 className="font-semibold">{CALL_SEQUENCE_LABEL[sequence]}</h2>
+              <h2 className="font-semibold text-navy">{CALL_SEQUENCE_LABEL[sequence]}</h2>
               <p className="text-xs text-slate-500">{CALL_SEQUENCE_DETAIL[sequence]}</p>
             </div>
             <HoursForm sequence={sequence} hours={hours[sequence]} />
@@ -79,7 +79,7 @@ function HoursForm({ sequence, hours }: { sequence: CallSequenceId; hours: WorkH
       <TimeRange name="weekday" start={hours.weekdayStart} end={hours.weekdayEnd} />
       <DayToggle name="saturday" label="Sat" start={hours.saturdayStart} end={hours.saturdayEnd} />
       <DayToggle name="sunday" label="Sun" start={hours.sundayStart} end={hours.sundayEnd} />
-      <button type="submit" className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white">
+      <button type="submit" className="rounded bg-brand px-2 py-1 text-xs font-medium text-navy">
         Save hours
       </button>
     </form>
@@ -174,7 +174,7 @@ function StepList({
                   className="w-14 rounded border border-slate-300 px-1.5 py-0.5 text-sm"
                 />
                 <span className="text-xs text-slate-400">h</span>
-                <button type="submit" className="rounded bg-slate-900 px-2 py-0.5 text-xs font-medium text-white">
+                <button type="submit" className="rounded bg-brand px-2 py-0.5 text-xs font-medium text-navy">
                   Save
                 </button>
               </form>

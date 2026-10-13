@@ -5,7 +5,7 @@ import { requireStaff } from "@/lib/session";
 import { loadSlackSettings } from "@/lib/slack-settings";
 
 export const metadata: Metadata = {
-  title: "How it fits · Intake",
+  title: "How it fits · Intake Manager",
   description: "Which service owns each part of Ramos James Law intake",
 };
 
@@ -459,7 +459,7 @@ export default async function HowItFitsPage() {
   const slack = await loadSlackSettings();
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">How the intake services fit</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-navy">How the intake services fit</h1>
       <p className="mt-2 text-sm leading-6 text-slate-600">
         Intake Manager holds the decision. The other services stay on their own hosts and read that
         decision when they do their work.
@@ -537,7 +537,7 @@ export default async function HowItFitsPage() {
           />
         </label>
         <p className="text-sm text-slate-500">{slack.tokenSet ? "A bot token is saved." : "No bot token saved yet."}</p>
-        <button type="submit" className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+        <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
           Save Slack settings
         </button>
       </form>

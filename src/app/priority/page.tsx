@@ -168,7 +168,7 @@ export default async function PriorityPage() {
     <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Priority</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-navy">Priority</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
             The highest-priority leads. A contract that went out and is still unsigned, a lead we have
             already talked to and want to send a contract, and a strong lead we still need to talk to.
@@ -212,7 +212,7 @@ export default async function PriorityPage() {
                         return (
                           <tr key={row.lead.id} className="border-b border-slate-100 last:border-0">
                             <td className="px-4 py-3">
-                              <Link href={`/leads/${row.lead.id}`} className="font-medium text-slate-900 hover:underline">
+                              <Link href={`/leads/${row.lead.id}`} className="font-medium text-navy hover:underline">
                                 {leadTitle(row.lead)}
                               </Link>
                               <p className="mt-0.5 text-xs text-slate-500">

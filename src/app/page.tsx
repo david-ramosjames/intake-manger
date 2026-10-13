@@ -410,7 +410,7 @@ export default async function LeadListPage({
     <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Work queue</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-navy">Work queue</h1>
           <p className="mt-1 text-sm text-slate-600">What to work on next. Counts are the last 30 days.</p>
         </div>
         <form action="/" className="flex items-center gap-2">
@@ -435,7 +435,7 @@ export default async function LeadListPage({
         <Metric href={listHref({ queue: "signed", q, range })} active={queue === "signed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{conversion}%</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-navy">{conversion}%</p>
           <p className="mt-1 text-xs text-slate-500">Signed of {metrics.total} in 30 days</p>
         </div>
       </section>
@@ -480,7 +480,7 @@ export default async function LeadListPage({
             key={item.id}
             href={listHref({ queue, view, q, range: item.id })}
             className={`rounded-full px-3 py-1 text-sm ${
-              range === item.id ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+              range === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
           >
             {item.label}
@@ -492,7 +492,7 @@ export default async function LeadListPage({
             key={item.id}
             href={listHref({ queue: item.id, view, q, range })}
             className={`rounded-full px-3 py-1 text-sm ${
-              queue === item.id ? "bg-slate-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200"
+              queue === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
           >
             {item.label}
@@ -559,7 +559,7 @@ function Metric({
   tone: string;
 }) {
   return (
-    <Link href={href} className={`rounded-xl border bg-white px-4 py-3 ${active ? "border-slate-900" : "border-slate-200 hover:border-slate-300"}`}>
+    <Link href={href} className={`rounded-xl border bg-white px-4 py-3 ${active ? "border-brand" : "border-slate-200 hover:border-slate-300"}`}>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>

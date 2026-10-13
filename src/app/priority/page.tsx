@@ -10,7 +10,7 @@ import {
   type PriorityReason,
 } from "@/lib/leads";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
-import { leadSequenceId } from "@/lib/sequences";
+import { DEFAULT_WORK_HOURS, leadSequenceId, loadWorkHours } from "@/lib/sequences";
 import { leadCycle, priorityBucket, textSequenceLive } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 
@@ -66,7 +66,7 @@ function countsAsContact(type: string): boolean {
 
 export default async function PriorityPage() {
   const { supabase } = await requireStaff();
-  const [{ data, error }, { data: stepRows }] = await Promise.all([
+  const [{ data, error }, { data: stepRows }, workHours] = await Promise.all([
     supabase
       .from("leads")
       .select(COLUMNS)
@@ -76,6 +76,7 @@ export default async function PriorityPage() {
       .order("lead_date", { ascending: false, nullsFirst: false })
       .limit(500),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
+    loadWorkHours(supabase),
   ]);
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
@@ -143,6 +144,16 @@ export default async function PriorityPage() {
           agreementStatus: lead.agreement_status,
           agreementSentAt: lead.agreement_sent_at,
         })),
+        hours:
+          workHours[
+            leadSequenceId({
+              closed: false,
+              talked: talked.has(lead.id),
+              kind: lead.kind,
+              agreementStatus: lead.agreement_status,
+              agreementSentAt: lead.agreement_sent_at,
+            }) ?? "want_to_sign"
+          ] ?? DEFAULT_WORK_HOURS,
       }),
     });
   }

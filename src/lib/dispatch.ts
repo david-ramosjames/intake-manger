@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { leadSequenceId, loadWorkHours } from "./sequences";
 import { loadSlackSettings } from "./slack-settings";
 import { channelLeadMention, LEAD_CHANNEL_ID, postToSlack } from "./slack";
+import { withinWorkHours } from "./time";
 
 type Job = {
   id: string;
@@ -30,6 +32,8 @@ type LeadRow = {
   case_id: string | null;
   lead_status: string;
   kind: string;
+  agreement_status: string | null;
+  agreement_sent_at: string | null;
 };
 
 function textSendingLive(): boolean {
@@ -58,6 +62,7 @@ function closed(lead: LeadRow): boolean {
 export async function dispatchDue(supabase: SupabaseClient) {
   const now = new Date().toISOString();
   const slack = await loadSlackSettings();
+  const hoursBySequence = await loadWorkHours(supabase);
   const result = { texts: 0, calls: 0, slack: 0, skipped: 0, failed: 0 };
 
   const { data: jobs, error } = await supabase
@@ -73,10 +78,11 @@ export async function dispatchDue(supabase: SupabaseClient) {
   const { data: leads } = leadIds.length
     ? await supabase
         .from("leads")
-        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind")
+        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind, agreement_status, agreement_sent_at")
         .in("id", leadIds)
     : { data: [] };
   const byId = new Map((leads ?? []).map((lead) => [lead.id as string, lead as LeadRow]));
+  const talked = await talkedIds(supabase, leadIds);
 
   for (const job of (jobs ?? []) as Job[]) {
     const lead = byId.get(job.lead_id);
@@ -116,6 +122,14 @@ export async function dispatchDue(supabase: SupabaseClient) {
         continue;
       }
       if (!slack.posting) continue;
+      const sequence = leadSequenceId({
+        closed: false,
+        talked: talked.has(lead.id),
+        kind: lead.kind,
+        agreementStatus: lead.agreement_status,
+        agreementSentAt: lead.agreement_sent_at,
+      });
+      if (sequence && !withinWorkHours(new Date(), hoursBySequence[sequence])) continue;
       const who = lead.lead_name || "Unnamed lead";
       const mention = await channelLeadMention(channel, slack.token);
       const posted = await postToSlack({
@@ -219,6 +233,27 @@ export async function dispatchDue(supabase: SupabaseClient) {
   });
 
   return result;
+}
+
+async function talkedIds(supabase: SupabaseClient, ids: string[]): Promise<Set<string>> {
+  const talked = new Set<string>();
+  if (!ids.length) return talked;
+  const { data } = await supabase
+    .from("intake_interactions")
+    .select("lead_id, type, direction")
+    .in("lead_id", ids)
+    .in("type", ["call", "sona_call", "text", "email"])
+    .limit(2000);
+  for (const row of data ?? []) {
+    const type = String(row.type ?? "");
+    const direction = String(row.direction ?? "");
+    const leadId = typeof row.lead_id === "string" ? row.lead_id : "";
+    if (!leadId) continue;
+    if (type === "call" || type === "sona_call" || ((type === "text" || type === "email") && direction === "inbound")) {
+      talked.add(leadId);
+    }
+  }
+  return talked;
 }
 
 async function callLoggedAfter(supabase: SupabaseClient, lead: LeadRow, since: string): Promise<string | null> {

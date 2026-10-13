@@ -1,3 +1,5 @@
+import { DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/sequences";
+
 const ZONE = "America/Chicago";
 
 export function formatChicago(value: string | null | undefined): string {
@@ -77,7 +79,7 @@ export function chicagoLocalToIso(value: string): string {
   return new Date(utcGuess - (shown - utcGuess)).toISOString();
 }
 
-type ChicagoParts = { year: number; month: number; day: number; hour: number; dow: number };
+type ChicagoParts = { year: number; month: number; day: number; hour: number; minute: number; dow: number };
 
 function chicagoParts(date: Date): ChicagoParts {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -88,15 +90,18 @@ function chicagoParts(date: Date): ChicagoParts {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
+    minute: "2-digit",
   }).formatToParts(date);
   const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   const weekday = pick("weekday");
   const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekday);
+  const hour = Number(pick("hour"));
   return {
     year: Number(pick("year")),
     month: Number(pick("month")),
     day: Number(pick("day")),
-    hour: Number(pick("hour")),
+    hour: hour === 24 ? 0 : hour,
+    minute: Number(pick("minute")),
     dow,
   };
 }
@@ -105,19 +110,47 @@ function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-/** Calls are placed on weekdays between 8:00am and 6:00pm Central. */
-export function snapToWorkHours(iso: string): string {
+function windowFor(dow: number, hours: WorkHours): { start: number; end: number } | null {
+  if (dow === 0) {
+    if (hours.sundayStart == null || hours.sundayEnd == null) return null;
+    return { start: hours.sundayStart, end: hours.sundayEnd };
+  }
+  if (dow === 6) {
+    if (hours.saturdayStart == null || hours.saturdayEnd == null) return null;
+    return { start: hours.saturdayStart, end: hours.saturdayEnd };
+  }
+  return { start: hours.weekdayStart, end: hours.weekdayEnd };
+}
+
+function clock(minutes: number): string {
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
+/** True when this instant is inside the sequence's open window. */
+export function withinWorkHours(date: Date, hours: WorkHours = DEFAULT_WORK_HOURS): boolean {
+  const parts = chicagoParts(date);
+  const window = windowFor(parts.dow, hours);
+  if (!window) return false;
+  const minute = parts.hour * 60 + parts.minute;
+  return minute >= window.start && minute < window.end;
+}
+
+/** Move a call to the next open minute for this sequence. Times already inside the window stay put. */
+export function snapToWorkHours(iso: string, hours: WorkHours = DEFAULT_WORK_HOURS): string {
   const instant = new Date(iso);
   if (Number.isNaN(instant.getTime())) return iso;
   const parts = chicagoParts(instant);
-  const afterClose = parts.hour >= 18;
-  const beforeOpen = parts.hour < 8;
-  const sunday = parts.dow === 0;
-  if (!sunday && !afterClose && !beforeOpen) return instant.toISOString();
-  let addDays = 0;
-  if (sunday) addDays = 1;
-  else if (afterClose) addDays = parts.dow === 5 ? 3 : parts.dow === 6 ? 2 : 1;
-  const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + addDays));
-  const day = `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
-  return chicagoLocalToIso(`${day}T09:00`);
+  const minute = parts.hour * 60 + parts.minute;
+  for (let add = 0; add < 8; add += 1) {
+    const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + add));
+    const window = windowFor(shifted.getUTCDay(), hours);
+    if (!window) continue;
+    if (add === 0) {
+      if (minute >= window.start && minute < window.end) return instant.toISOString();
+      if (minute >= window.end) continue;
+    }
+    const day = `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+    return chicagoLocalToIso(`${day}T${clock(window.start)}`);
+  }
+  return instant.toISOString();
 }

@@ -9,7 +9,7 @@ import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { isPriorityReason } from "./leads";
-import { delayMinutes, isCallSequence } from "./sequences";
+import { clockToMinutes, delayMinutes, isCallSequence } from "./sequences";
 import { chicagoLocalToIso } from "./time";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -308,6 +308,39 @@ export async function saveSlackSettings(formData: FormData) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/how-it-fits");
+}
+
+export async function saveSequenceHours(formData: FormData) {
+  const { supabase } = await requireStaff();
+  const sequence = text(formData, "sequence");
+  if (!isCallSequence(sequence)) throw new Error("Choose a sequence.");
+  const weekday = dayWindow(formData, "weekday", true);
+  const saturday = dayWindow(formData, "saturday", formData.getAll("saturday_open").includes("yes"));
+  const sunday = dayWindow(formData, "sunday", formData.getAll("sunday_open").includes("yes"));
+  const { error } = await supabase.from("sequence_hours").upsert({
+    sequence,
+    weekday_start: weekday.start,
+    weekday_end: weekday.end,
+    saturday_start: saturday.start,
+    saturday_end: saturday.end,
+    sunday_start: sunday.start,
+    sunday_end: sunday.end,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/sequences");
+  revalidatePath("/");
+  revalidatePath("/priority");
+}
+
+function dayWindow(formData: FormData, name: string, open: boolean): { start: number | null; end: number | null } {
+  if (!open) return { start: null, end: null };
+  const start = clockToMinutes(String(formData.get(`${name}_start`) ?? ""));
+  const end = clockToMinutes(String(formData.get(`${name}_end`) ?? ""));
+  const label = name === "weekday" ? "Monday through Friday" : name === "saturday" ? "Saturday" : "Sunday";
+  if (start == null || end == null || end <= start) {
+    throw new Error(`${label} needs an open time and a later close time.`);
+  }
+  return { start, end };
 }
 
 export async function saveSequenceStep(formData: FormData) {

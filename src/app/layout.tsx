@@ -43,9 +43,6 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                 <Link href="/verify" className="font-medium text-slate-900">
                   Verify
                 </Link>
-                <Link href="/queues" className="font-medium text-slate-900">
-                  Queues
-                </Link>
                 <Link href="/sequences" className="font-medium text-slate-900">
                   Sequences
                 </Link>

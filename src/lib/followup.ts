@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LeadKind } from "./leads";
-import type { CallSequenceId } from "./sequences";
+import { loadWorkHours, type CallSequenceId, type WorkHours } from "./sequences";
 import { formatChicago, snapToWorkHours } from "./time";
 
 type LeadBits = {
@@ -20,7 +20,11 @@ export function renderStep(body: string, lead: { lead_name: string | null; case_
   return body.replaceAll("{{name}}", name).replaceAll("{{case_type}}", caseType);
 }
 
-export async function enrollFollowUp(supabase: SupabaseClient, lead: LeadBits) {
+export async function enrollFollowUp(
+  supabase: SupabaseClient,
+  lead: LeadBits,
+  hoursBySequence?: Record<CallSequenceId, WorkHours>,
+) {
   if (!lead.follow_up) return;
   if (lead.signed_case || lead.case_id) return;
   if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.lead_status === "Promoted") return;
@@ -35,12 +39,13 @@ export async function enrollFollowUp(supabase: SupabaseClient, lead: LeadBits) {
   if (error) throw new Error(error.message);
   if (!steps?.length) return;
 
+  const hours = hoursBySequence?.[sequence] ?? (await loadWorkHours(supabase))[sequence];
   const now = Date.now();
   const rows = (steps ?? []).map((step) => ({
     lead_id: lead.id,
     queue: step.queue as string,
     position: step.position as number,
-    due_at: snapToWorkHours(new Date(now + Number(step.delay_minutes) * 60_000).toISOString()),
+    due_at: snapToWorkHours(new Date(now + Number(step.delay_minutes) * 60_000).toISOString(), hours),
     body: renderStep(String(step.body), lead),
   }));
   if (!rows.length) return;
@@ -74,6 +79,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
 
   const leads = (data ?? []) as LeadBits[];
   if (!leads.length) return 0;
+  const hoursBySequence = await loadWorkHours(supabase);
   const { data: existing, error: jobsError } = await supabase
     .from("lead_jobs")
     .select("lead_id")
@@ -87,7 +93,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   let enrolled = 0;
   for (const lead of leads) {
     if (started.has(lead.id)) continue;
-    await enrollFollowUp(supabase, lead);
+    await enrollFollowUp(supabase, lead, hoursBySequence);
     enrolled += 1;
   }
   return enrolled;

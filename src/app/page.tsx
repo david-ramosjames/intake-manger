@@ -5,7 +5,7 @@ import { daysSince, isLeadView, leadTitle, listAccident, PRIORITY_REASON_SHORT, 
 import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel, priorityBucket } from "@/lib/next-step";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
-import { leadSequenceId } from "@/lib/sequences";
+import { DEFAULT_WORK_HOURS, leadSequenceId, loadWorkHours } from "@/lib/sequences";
 import { qualifiedSummary } from "@/lib/tags";
 import { formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
@@ -192,9 +192,10 @@ export default async function LeadListPage({
   const { supabase } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, { data: stepRows }] = await Promise.all([
+  const [{ data, error }, { data: stepRows }, workHours] = await Promise.all([
     supabase.from("leads").select(LIST_COLUMNS).order("lead_date", { ascending: false, nullsFirst: false }).limit(300),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
+    loadWorkHours(supabase),
   ]);
   const leads = (data ?? []) as ListLead[];
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
@@ -386,6 +387,16 @@ export default async function LeadListPage({
           agreementStatus: row.lead.agreement_status,
           agreementSentAt: row.lead.agreement_sent_at,
         }),
+        hours:
+          workHours[
+            leadSequenceId({
+              closed: row.cycle === "signed" || row.cycle === "closed",
+              talked: talked.has(row.lead.id),
+              kind: row.lead.kind,
+              agreementStatus: row.lead.agreement_status,
+              agreementSentAt: row.lead.agreement_sent_at,
+            }) ?? "want_to_sign"
+          ] ?? DEFAULT_WORK_HOURS,
       }),
     };
   });

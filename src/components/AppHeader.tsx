@@ -24,16 +24,29 @@ export function AppHeader({ email }: { email: string | null }) {
   const docsActive = isActive(pathname, "/how-it-fits");
 
   return (
-    <header className="bg-[linear-gradient(100deg,#0A1E41_0%,#0F316D_100%)] text-white">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+    <header className="sticky top-0 z-30 bg-[linear-gradient(100deg,#0A1E41_0%,#0F316D_100%)] text-white">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
         <Link href="/" className="flex items-center gap-3">
-          <img src={LOGO} alt="Ramos James Law" className="h-16 w-auto" />
+          <img src={LOGO} alt="Ramos James Law" className="h-12 w-auto" />
           <span className="text-sm font-semibold tracking-tight">Intake Manager</span>
         </Link>
         {email ? (
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             {LINKS.map((link) => {
               const active = isActive(pathname, link.href);
+              if (link.href === "/priority") {
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`rounded-full bg-brand px-3 py-1 font-semibold text-navy ${
+                      active ? "ring-2 ring-accent" : ""
+                    }`}
+                  >
+                    {link.label}
+                  </Link>
+                );
+              }
               return (
                 <Link
                   key={link.href}

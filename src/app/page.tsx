@@ -468,13 +468,7 @@ export default async function LeadListPage({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Link
-          href="/priority"
-          className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-900 ring-1 ring-slate-200"
-        >
-          Priority
-        </Link>
-        <span className="ml-1 text-xs font-medium uppercase tracking-wide text-slate-400">Arrived</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Arrived</span>
         {RANGES.map((item) => (
           <Link
             key={item.id}

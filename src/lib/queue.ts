@@ -75,20 +75,30 @@ export function stageClass(label: string): string {
   return "bg-slate-100 text-slate-600";
 }
 
+const TEXT_SEQUENCE_LABEL: Record<string, string> = {
+  "new-lead": "New lead",
+  "more-info": "More info",
+  "qualified-lead": "Qualified lead",
+  "qualified-lead-copy": "Referral",
+};
+
+export function textSequenceLabel(slug: string | null | undefined): string | null {
+  const key = (slug || "").trim().toLowerCase();
+  if (!key) return null;
+  return TEXT_SEQUENCE_LABEL[key] ?? key.replaceAll("-", " ");
+}
+
 export function automationLine(lead: {
   text_sequence_status: string | null;
+  text_sequence_slug?: string | null;
   text_next_at?: string | null;
   agreement_status: string | null;
   agreement_sent_at?: string | null;
 }): { label: string; bad: boolean } {
+  if ((lead.text_sequence_status || "").toLowerCase() === "active") {
+    return { label: textSequenceLabel(lead.text_sequence_slug) ?? "Texts", bad: false };
+  }
   const agreement = (lead.agreement_status || "").toLowerCase();
   if (agreement === "failed") return { label: "Contract failed", bad: true };
-  if (agreement === "signed" || agreement === "completed") return { label: "Contract complete", bad: false };
-  if (agreement === "sent" || agreement === "viewed" || lead.agreement_sent_at) {
-    return { label: "Contract sent", bad: false };
-  }
-  if ((lead.text_sequence_status || "").toLowerCase() === "active") {
-    return { label: lead.text_next_at ? "Text scheduled" : "Texts live", bad: false };
-  }
   return { label: "—", bad: false };
 }

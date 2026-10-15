@@ -44,14 +44,16 @@ export function milestoneQualified(input: {
   return null;
 }
 
-/** A sent contract marks the case desired. A stored value counts only after a person or that contract set it. */
+/** A sent contract marks the case desired. A lead that is not qualified is not desired. A stored value counts only after a person or that contract set it. */
 export function milestoneDesired(input: {
+  qualified?: boolean | null;
   desired_case?: boolean | null;
   desired_source?: string | null;
   agreement_sent_at?: string | null;
   agreement_status?: string | null;
   callrail_tags?: string[] | null;
 }): boolean | null {
+  if (milestoneQualified(input) === false) return false;
   if (contractSent(input)) return true;
   if (input.desired_source === "staff" || input.desired_source === "contract") {
     return input.desired_case === true ? true : input.desired_case === false ? false : null;

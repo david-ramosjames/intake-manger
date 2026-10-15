@@ -172,7 +172,10 @@ function applyMilestones(fields: ReturnType<typeof fieldsFromForm>, before: Lead
   else fields.consultation = before.consultation;
 
   const contract = before ? contractSent(before) : false;
-  if (fields.signed_case || contract) {
+  if (fields.qualified === false) {
+    fields.desired_case = false;
+    fields.desired_source = "staff";
+  } else if (fields.signed_case || contract) {
     fields.desired_case = true;
     fields.desired_source = before?.desired_source === "staff" ? "staff" : contract ? "contract" : "staff";
   } else if (fields.desired_case === true || fields.desired_case === false) {

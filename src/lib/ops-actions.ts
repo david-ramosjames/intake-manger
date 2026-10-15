@@ -8,6 +8,7 @@ import { LEAD_TAGS, NOT_A_LEAD_TAGS, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
+import { textSequenceLabel } from "./queue";
 import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
@@ -79,16 +80,103 @@ export async function markPriority(formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
 }
 
+export async function startTextSequence(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  const sequence = text(formData, "sequence");
+  if (!leadId) throw new Error("Missing the lead.");
+  if (sequence !== "new-lead" && sequence !== "more-info") throw new Error("Choose New lead or More info.");
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, email")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+  if ((lead.text_sequence_status || "").toLowerCase() === "active") throw new Error("A text sequence is already running.");
+  if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status) || lead.sequence === "stop") {
+    throw new Error("This lead is closed, so a text sequence stays off.");
+  }
+  const phone = lead.phone_e164 || lead.phone;
+  if (!phone) throw new Error("This lead has no phone number.");
+  const staff = await loadStaff(supabase);
+  const owner = matchStaff(lead.owner_name, staff);
+  const assignee = owner?.slackUserId || (await defaultTextOwner());
+  if (!assignee) throw new Error("Set an owner on the lead, or a default owner in SMS Follow-Up, before starting texts.");
+  const [first, ...rest] = (lead.lead_name || "").trim().split(/\s+/).filter(Boolean);
+  const service = createSupabaseServiceClient();
+  const { data, error: enrollError } = await service.rpc("followup_enroll", {
+    payload: {
+      phone,
+      sequence_slug: sequence,
+      first_name: first || null,
+      last_name: rest.join(" ") || null,
+      case_type: lead.case_type,
+      assigned_slack_user_id: assignee,
+      assigned_slack_user_name: owner?.slackUserId ? owner.name : null,
+      slack_channel_id: lead.slack_channel_id,
+      slack_thread_ts: lead.slack_thread_ts,
+      source: "dashboard",
+      lead_source: "intake-manager",
+      lead_detail: { email: lead.email, started_by: email },
+    },
+  });
+  if (enrollError) throw new Error(enrollError.message);
+  const result = (data ?? {}) as { ok?: boolean; reason?: string; next_run_at?: string | null; sequence?: { slug?: string } };
+  if (!result.ok) throw new Error(textSequenceError(result.reason));
+  const slug = result.sequence?.slug || sequence;
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      text_sequence_slug: slug,
+      text_sequence_status: "active",
+      text_next_at: result.next_run_at ?? null,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "text_sequence_started",
+    actor: email,
+    payload: { sequence: slug, label: textSequenceLabel(slug) },
+  });
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
+}
+
+async function defaultTextOwner(): Promise<string | null> {
+  const service = createSupabaseServiceClient();
+  const { data } = await service
+    .from("app_settings")
+    .select("value")
+    .eq("key", "lead_default_owner_slack_id")
+    .limit(1)
+    .maybeSingle();
+  const value = data?.value;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function textSequenceError(reason: string | undefined): string {
+  if (reason === "invalid_phone") return "That phone number cannot take a text sequence.";
+  if (reason === "already_active") return "A text sequence is already running for this number.";
+  if (reason === "opted_out") return "This number has opted out of texts.";
+  if (reason === "sequence_not_found") return "That sequence is not set up.";
+  if (reason === "sequence_inactive") return "That sequence is switched off.";
+  if (reason === "no_steps") return "That sequence has no texts yet.";
+  if (reason === "missing_assignee") return "Nobody is assigned to send these texts.";
+  return "The text sequence could not be started.";
+}
+
 export async function setQualified(formData: FormData) {
   const decision = text(formData, "decision");
   if (decision !== "yes" && decision !== "no") throw new Error("Choose yes or no.");
   const qualified = decision === "yes";
   await saveQueueMilestone(formData, {
     event: "qualified_set",
-    payload: { qualified },
-    patch: { qualified },
+    payload: qualified ? { qualified } : { qualified, desired: false },
+    patch: qualified ? { qualified } : { qualified, desired_case: false, desired_source: "staff" },
     tags(current) {
-      const tags = current.filter((tag) => tag !== "QUALIFIED YES" && tag !== "QUALIFIED NO");
+      const tags = current.filter((tag) => tag !== "QUALIFIED YES" && tag !== "QUALIFIED NO" && (qualified || tag !== "CVR DESIRED"));
       tags.push(qualified ? "QUALIFIED YES" : "QUALIFIED NO");
       return tags;
     },
@@ -128,10 +216,11 @@ export async function setDesired(formData: FormData) {
   if (!leadId) throw new Error("Missing the lead.");
   const { data: before, error } = await supabase
     .from("leads")
-    .select("agreement_status, agreement_sent_at, signed_case")
+    .select("agreement_status, agreement_sent_at, signed_case, qualified")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
+  if (decision === "yes" && before.qualified === false) throw new Error("A lead that is not qualified is not desired.");
   if (before.signed_case || contractSent(before)) throw new Error("A sent or signed contract is already a desired case.");
   const desired = decision === "yes";
   await saveQueueMilestone(formData, {
@@ -409,7 +498,7 @@ export async function classifyNonLead(formData: FormData) {
   if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
     throw new Error("A signed or promoted matter stays a lead.");
   }
-  const drop = new Set<string>([...NOT_A_LEAD_TAGS, NON_LEAD_TAG.spam, "QUALIFIED YES"]);
+  const drop = new Set<string>([...NOT_A_LEAD_TAGS, NON_LEAD_TAG.spam, "QUALIFIED YES", "CVR DESIRED"]);
   const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !drop.has(tag));
   if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
   const reasonTag = NON_LEAD_TAG[reason];
@@ -424,6 +513,8 @@ export async function classifyNonLead(formData: FormData) {
       close_suggestion: null,
       caller_class: reason,
       qualified: false,
+      desired_case: false,
+      desired_source: "staff",
       callrail_tags: tags,
       text_sequence_status: data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status,
     })
@@ -913,13 +1004,17 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
 
   const signed = Boolean(before.signed_case);
+  const qualifiedNo =
+    String(formData.get("qualified_tag") ?? "") === "QUALIFIED NO" ||
+    Boolean(String(formData.get("not_qualified_tag") ?? "")) ||
+    before.caller_class === "non_pi";
   const coverage = ["CVR DESIRED", "CVR SIGNED"].filter((tag) => (before.callrail_tags ?? []).includes(tag));
   const tagged = tagsFromSelection({
     qualified: String(formData.get("qualified_tag") ?? ""),
     coverage,
     decline: String(formData.get("decline_tag") ?? ""),
     signed,
-    desired: Boolean(before.desired_case) || signed,
+    desired: qualifiedNo ? false : Boolean(before.desired_case) || signed,
     nonPi: before.caller_class === "non_pi",
     size: String(formData.get("size_tag") ?? ""),
     injuryType: String(formData.get("injury_type") ?? ""),
@@ -931,6 +1026,7 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
       callrail_tags: tagged.tags,
       qualified: tagged.qualified,
       decline_reason: tagged.decline_reason,
+      ...(tagged.qualified === false ? { desired_case: false, desired_source: "staff" } : {}),
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);

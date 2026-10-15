@@ -507,7 +507,7 @@ export default async function LeadListPage({
       qualifiedLabel: desiredWord(milestoneQualified(row.lead)),
       consultWhen: consultationWhen(row.lead.consultation_date),
       desired: desiredWord(milestoneDesired(row.lead)),
-      desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead),
+      desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead) || milestoneQualified(row.lead) === false,
       signed: milestoneSigned(row.lead),
       nonPi: row.lead.caller_class === "non_pi",
       callerClass: row.lead.caller_class,
@@ -518,6 +518,16 @@ export default async function LeadListPage({
       waiting: row.waiting,
       automationLabel: automation.label,
       automationBad: automation.bad,
+      canStartText:
+        (row.lead.text_sequence_status || "").toLowerCase() !== "active" &&
+        Boolean(row.lead.phone_e164 || row.lead.phone) &&
+        !row.lead.signed_case &&
+        !row.lead.case_id &&
+        row.lead.lead_status !== "Lost" &&
+        row.lead.lead_status !== "Referred" &&
+        row.lead.lead_status !== "Promoted" &&
+        row.lead.lead_status !== "Signed" &&
+        row.lead.sequence !== "stop",
       quoUrl: row.lead.quo_link || outsideLinks.get(row.lead.id)?.quo || null,
       slackUrl: slackMessageUrl(row.lead) || outsideLinks.get(row.lead.id)?.slack || null,
       phone: displayPhone(row.lead.phone),

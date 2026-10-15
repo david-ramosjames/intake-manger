@@ -6,7 +6,7 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags, setConsultation, setDesired, setQualified } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags, setConsultation, setDesired, setQualified, startTextSequence } from "@/lib/ops-actions";
 import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
 
@@ -41,6 +41,7 @@ export type QueueRow = {
   waiting: boolean;
   automationLabel: string;
   automationBad: boolean;
+  canStartText: boolean;
   quoUrl: string | null;
   slackUrl: string | null;
   phone: string | null;
@@ -82,8 +83,8 @@ const COLUMNS: { id: Column; label: string; width: string }[] = [
   { id: "qualified", label: "Qualified", width: "9%" },
   { id: "desired", label: "Desired", width: "9%" },
   { id: "signed", label: "Signed", width: "6%" },
-  { id: "last", label: "Last contacted", width: "11%" },
-  { id: "automation", label: "Automation", width: "8%" },
+  { id: "last", label: "Last contacted", width: "9%" },
+  { id: "automation", label: "Automation", width: "10%" },
 ];
 
 function columnValue(row: QueueRow, column: Column): string {
@@ -222,8 +223,8 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                 </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—"}</td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.lastLabel}</td>
-                <td className={`px-2 py-2 text-center ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
-                  {row.automationLabel}
+                <td className="px-1 py-2 text-center">
+                  <TextAutomation row={row} />
                 </td>
                 <td className="px-2 py-2 text-center">
                   <RowLinks quoUrl={row.quoUrl} slackUrl={row.slackUrl} />
@@ -316,6 +317,26 @@ function MenuChoice({ current, onPick, children }: { current: boolean; onPick: (
     <button type="button" onClick={onPick} className={`block w-full px-3 py-1.5 text-left hover:bg-slate-50 ${current ? "font-medium text-navy" : ""}`}>
       {children}
     </button>
+  );
+}
+
+function TextAutomation({ row }: { row: QueueRow }) {
+  if (row.textsLive) {
+    return <span className={row.automationBad ? "font-medium text-red-700" : "font-medium text-slate-800"}>{row.automationLabel}</span>;
+  }
+  if (!row.canStartText) {
+    return <span className={row.automationBad ? "font-medium text-red-700" : "text-slate-400"}>{row.automationLabel}</span>;
+  }
+  return (
+    <form action={startTextSequence} className="flex flex-col items-center gap-1">
+      <input type="hidden" name="lead_id" value={row.id} />
+      <button name="sequence" value="new-lead" className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700">
+        New lead
+      </button>
+      <button name="sequence" value="more-info" className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700">
+        More info
+      </button>
+    </form>
   );
 }
 
@@ -547,9 +568,9 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>
           <ul className="mt-2 space-y-2 text-sm">
             <li className="flex justify-between gap-3">
-              <span className="text-slate-500">Auto sequence</span>
+              <span className="text-slate-500">Texts</span>
               <span>
-                {row.sequenceLabel}
+                {row.textsLive ? row.automationLabel : "Off"}
                 {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
               </span>
             </li>

@@ -141,7 +141,7 @@ export function tagsFromSelection(input: {
         : "";
   if (!qualified) throw new Error("Choose Qualified YES or Qualified NO.");
   const decline = DECLINE_SET.has(input.decline) ? input.decline : "";
-  const wanted = Boolean(input.desired || input.signed);
+  const wanted = qualified === QUALIFIED_NO ? false : Boolean(input.desired || input.signed);
   const coverage = COVERAGE_TAGS.filter((tag) => input.coverage.includes(tag)).filter((tag) => {
     if (tag === "CVR DESIRED") return wanted;
     if (tag === "CVR SIGNED") return Boolean(input.signed);

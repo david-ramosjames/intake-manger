@@ -65,10 +65,10 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     .in("lead_id", ids)
     .eq("status", "pending");
   for (const row of rows) {
-    const tags = ((row.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES");
+    const tags = ((row.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES" && tag !== "CVR DESIRED");
     if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
     if (!tags.includes("NQ: Unresponsive")) tags.push("NQ: Unresponsive");
-    await supabase.from("leads").update({ callrail_tags: tags, qualified: false }).eq("id", row.id);
+    await supabase.from("leads").update({ callrail_tags: tags, qualified: false, desired_case: false, desired_source: "staff" }).eq("id", row.id);
   }
   return ids.length;
 }
@@ -173,10 +173,10 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
   if (closeError) throw new Error(closeError.message);
   for (const row of leads ?? []) {
     if (!closing.includes(String(row.id))) continue;
-    const tags = ((row.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES");
+    const tags = ((row.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES" && tag !== "CVR DESIRED");
     if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
     if (!tags.includes("NQ: Unresponsive")) tags.push("NQ: Unresponsive");
-    await supabase.from("leads").update({ callrail_tags: tags, qualified: false }).eq("id", row.id);
+    await supabase.from("leads").update({ callrail_tags: tags, qualified: false, desired_case: false, desired_source: "staff" }).eq("id", row.id);
   }
   return closing.length;
 }

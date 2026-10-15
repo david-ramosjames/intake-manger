@@ -73,10 +73,8 @@ export default async function PriorityPage() {
     supabase
       .from("leads")
       .select(COLUMNS)
-      .eq("signed_case", false)
-      .is("case_id", null)
-      .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
-      .or("priority.eq.true,priority_suggestion.not.is.null,agreement_sent_at.not.is.null,agreement_status.in.(sent,viewed,signed,completed)")
+      .not("lead_status", "in", "(Lost,Referred)")
+      .or("and(signed_case.eq.false,case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed),and(signed_case.eq.false,agreement_status.in.(signed,completed))")
       .order("lead_date", { ascending: false, nullsFirst: false })
       .limit(300),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),

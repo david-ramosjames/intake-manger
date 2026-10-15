@@ -1,3 +1,4 @@
+import { syncContractsFromTexts } from "@/lib/contract-sync";
 import { dispatchDue } from "@/lib/dispatch";
 import { closeFinishedLeads } from "@/lib/funnel";
 import { enrollMissingFollowUps } from "@/lib/followup";
@@ -17,10 +18,11 @@ export async function POST(request: Request) {
   }
   try {
     const supabase = createSupabaseServiceClient();
+    const contracts = await syncContractsFromTexts(supabase);
     const enrolled = await enrollMissingFollowUps(supabase);
     const closed = await closeFinishedLeads(supabase);
     const result = await dispatchDue(supabase);
-    return Response.json({ ...result, enrolled, closed });
+    return Response.json({ ...result, enrolled, closed, contracts });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Queue run failed" },

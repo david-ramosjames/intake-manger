@@ -59,6 +59,7 @@ function reachedClient(lead: CycleLead, touches: ClientTouch[]): boolean {
 }
 
 export function leadCycle(lead: CycleLead, touches: ClientTouch[] = []): LeadCycle {
+  if (contractOutstanding(lead)) return "signing";
   if (lead.signed_case || lead.lead_status === "Signed") return "signed";
   if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.lead_status === "Promoted") return "closed";
   if (contractIsOut(lead) || signatureNeedsConfirm(lead)) return "signing";
@@ -93,9 +94,10 @@ export function priorityPlace(lead: {
   priority?: boolean | null;
   priority_suggestion?: string | null;
 }): PriorityPlace | null {
+  if (contractOutstanding(lead)) return "contract";
   if (lead.case_id || lead.lead_status === "Promoted") return null;
   if (milestoneSigned(lead) || lead.lead_status === "Lost" || lead.lead_status === "Referred") return null;
-  if (signatureNeedsConfirm(lead) || contractOutstanding(lead)) return "contract";
+  if (signatureNeedsConfirm(lead)) return "contract";
   if (lead.priority) return "flagged";
   if (lead.priority_suggestion) return "suggested";
   return null;

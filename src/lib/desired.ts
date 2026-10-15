@@ -12,13 +12,18 @@ export function contractSent(input: {
   return Boolean(input.agreement_sent_at);
 }
 
-/** A contract is still out while Sign Flow is waiting on a signature. */
+/** A contract is still out while Sign Flow is waiting on a signature. A finished reminder series is not. */
 export function contractOutstanding(input: {
   agreement_sent_at?: string | null;
   agreement_status?: string | null;
+  agreement_reminder_count?: number | null;
+  agreement_next_reminder_at?: string | null;
 }): boolean {
   const status = (input.agreement_status || "").toLowerCase();
   if (["signed", "completed", "cancelled", "expired", "failed"].includes(status)) return false;
+  if ((input.agreement_reminder_count ?? 0) >= 6 && !input.agreement_next_reminder_at && (status === "sent" || status === "viewed")) {
+    return false;
+  }
   return status === "sent" || status === "viewed" || Boolean(input.agreement_sent_at);
 }
 

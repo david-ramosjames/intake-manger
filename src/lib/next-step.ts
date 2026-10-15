@@ -6,8 +6,6 @@ export type ClientTouch = {
   direction: string | null;
 };
 
-const SIGNING = new Set(["sent", "viewed"]);
-
 export type LeadCycle = "contact" | "information" | "signing" | "signed" | "closed";
 
 export const CYCLE_LABEL: Record<LeadCycle, string> = {
@@ -42,6 +40,8 @@ type CycleLead = {
   lead_status?: string | null;
   agreement_status?: string | null;
   agreement_sent_at?: string | null;
+  agreement_reminder_count?: number | null;
+  agreement_next_reminder_at?: string | null;
   arrival?: string | null;
   grade?: string | null;
   case_type?: string | null;
@@ -50,9 +50,7 @@ type CycleLead = {
 };
 
 function contractIsOut(lead: CycleLead): boolean {
-  const status = lead.agreement_status || "";
-  if (["signed", "completed", "cancelled", "expired", "failed"].includes(status)) return false;
-  return SIGNING.has(status) || Boolean(lead.agreement_sent_at);
+  return contractOutstanding(lead);
 }
 
 function reachedClient(lead: CycleLead, touches: ClientTouch[]): boolean {

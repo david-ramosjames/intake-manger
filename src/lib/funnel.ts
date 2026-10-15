@@ -20,11 +20,57 @@ export function isLeadOpen(status: string | null | undefined): boolean {
 
 const CLOSED_LIST = "(Signed,Promoted,Lost,Referred)";
 
-/** Signing closes the lead. A finished call sequence with no reply closes it too. */
-export async function closeFinishedLeads(supabase: SupabaseClient): Promise<{ signed: number; expired: number }> {
+/** Signing closes the lead. A finished call sequence, or a finished Sign Flow reminder series, closes it too. */
+export async function closeFinishedLeads(
+  supabase: SupabaseClient,
+): Promise<{ signed: number; expired: number; signSeries: number }> {
   const signed = await closeSignedLeads(supabase);
   const expired = await closeExpiredSequences(supabase);
-  return { signed, expired };
+  const signSeries = await closeExhaustedSignSeries(supabase);
+  return { signed, expired, signSeries };
+}
+
+/** Sign Flow's default contract series is six reminders. Count 6 with no next reminder means it finished. */
+const SIGN_SERIES_LENGTH = 6;
+
+async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<number> {
+  const { data, error } = await supabase
+    .from("leads")
+    .select("id, callrail_tags")
+    .in("agreement_status", ["sent", "viewed"])
+    .is("agreement_next_reminder_at", null)
+    .gte("agreement_reminder_count", SIGN_SERIES_LENGTH)
+    .eq("signed_case", false)
+    .is("case_id", null)
+    .not("lead_status", "in", CLOSED_LIST);
+  if (error) throw new Error(error.message);
+  const rows = data ?? [];
+  if (!rows.length) return 0;
+  const ids = rows.map((row) => row.id as string);
+  const { error: closeError } = await supabase
+    .from("leads")
+    .update({
+      lead_status: "Lost",
+      follow_up: false,
+      sequence: "stop",
+      close_reason: "no_response",
+      close_suggestion: null,
+    })
+    .in("id", ids)
+    .not("lead_status", "in", CLOSED_LIST);
+  if (closeError) throw new Error(closeError.message);
+  await supabase
+    .from("lead_jobs")
+    .update({ status: "skipped", detail: "Sign Flow reminder series finished with no signature." })
+    .in("lead_id", ids)
+    .eq("status", "pending");
+  for (const row of rows) {
+    const tags = ((row.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES");
+    if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
+    if (!tags.includes("NQ: Unresponsive")) tags.push("NQ: Unresponsive");
+    await supabase.from("leads").update({ callrail_tags: tags, qualified: false }).eq("id", row.id);
+  }
+  return ids.length;
 }
 
 async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {

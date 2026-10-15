@@ -8,7 +8,7 @@ import { leadCycle, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, prio
 import { requireStaff } from "@/lib/session";
 
 const COLUMNS =
-  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, desired_source, qualified, callrail_tags, agreement_status, agreement_sent_at, agreement_next_reminder_at, agreement_via_sms, agreement_via_email, priority, priority_reason, priority_suggestion, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, desired_source, qualified, callrail_tags, agreement_status, agreement_sent_at, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, priority, priority_reason, priority_suggestion, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type PriorityLead = Pick<
   Lead,
@@ -37,6 +37,7 @@ type PriorityLead = Pick<
   | "agreement_status"
   | "agreement_sent_at"
   | "agreement_next_reminder_at"
+  | "agreement_reminder_count"
   | "agreement_via_sms"
   | "agreement_via_email"
   | "priority"

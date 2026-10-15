@@ -8,6 +8,7 @@ import { leadSequenceId } from "@/lib/sequences";
 import { leadCycle, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, type PriorityPlace } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { requireStaff } from "@/lib/session";
+import { formatCallWhen } from "@/lib/time";
 
 const COLUMNS =
   "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, desired_source, qualified, callrail_tags, agreement_status, agreement_sent_at, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, priority, priority_reason, priority_suggestion, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
@@ -72,16 +73,55 @@ function phoneKey(value: string | null | undefined): string {
   return tail.length >= 10 ? tail : "";
 }
 
-function actionText(note: string | null, touch: Touch | undefined): string {
-  const written = note?.trim();
-  if (written) return written;
-  const summary = (touch?.content || "").replace(/\s+/g, " ").trim();
-  if (summary) return summary.length > 160 ? `${summary.slice(0, 157)}…` : summary;
-  const type = (touch?.type || "").toLowerCase();
-  if (type === "call" || type === "sona_call") return "Spoke on a call.";
-  if (type === "text") return "Text sent.";
-  if (type === "voicemail") return "Voicemail.";
-  return "No note yet.";
+function touchKind(touch: Touch): string {
+  return String(touch.type || "").toLowerCase();
+}
+
+function isCallTouch(touch: Touch): boolean {
+  const type = touchKind(touch);
+  return type === "call" || type === "sona_call" || type === "missed_call" || type === "voicemail";
+}
+
+function spokeOnCall(touch: Touch): boolean {
+  return Boolean((touch.content || "").replace(/\s+/g, " ").trim());
+}
+
+/** A second log of the same call arrives a few seconds later with no summary. */
+function sameCall(left: Touch, right: Touch): boolean {
+  if (!isCallTouch(left) || !isCallTouch(right)) return false;
+  if ((left.direction || "").toLowerCase() !== (right.direction || "").toLowerCase()) return false;
+  const a = Date.parse(left.occurred_at || "");
+  const b = Date.parse(right.occurred_at || "");
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  return Math.abs(a - b) < 2 * 60 * 1000;
+}
+
+function distinctTouches(list: Touch[]): Touch[] {
+  const ordered = [...list].sort((a, b) => (a.occurred_at || "").localeCompare(b.occurred_at || ""));
+  const kept: Touch[] = [];
+  for (const touch of ordered) {
+    const previous = kept[kept.length - 1];
+    if (previous && sameCall(previous, touch)) {
+      if (spokeOnCall(touch) && !spokeOnCall(previous)) kept[kept.length - 1] = touch;
+      continue;
+    }
+    kept.push(touch);
+  }
+  return kept;
+}
+
+function actionLabel(touch: Touch): string {
+  const type = touchKind(touch);
+  const direction = (touch.direction || "").toLowerCase();
+  if (type === "missed_call" || type === "voicemail") return "Missed call";
+  if (type === "text" || type === "email") return direction === "inbound" ? "Text received" : "Text sent";
+  if (direction === "outbound" && !spokeOnCall(touch)) return "Call tried";
+  return "Call completed";
+}
+
+function actionText(touch: Touch | undefined): string {
+  if (!touch?.occurred_at) return "No contact yet.";
+  return `${actionLabel(touch)} · ${formatCallWhen(touch.occurred_at)}`;
 }
 
 function lastContacted(days: number | null): string {
@@ -141,22 +181,31 @@ export default async function PriorityPage() {
     seen.add(touch.id);
     touches.push(touch);
   }
-  const talked = new Set<string>();
-  const calls = new Map<string, number>();
-  const lastOutreach = new Map<string, string>();
-  const lastTouch = new Map<string, Touch>();
+  const byLead = new Map<string, Touch[]>();
   for (const touch of touches) {
-    const type = String(touch.type || "").toLowerCase();
-    const direction = String(touch.direction || "").toLowerCase();
     const owners = new Set<string>();
     if (touch.lead_id && idSet.has(touch.lead_id)) owners.add(touch.lead_id);
     const key = phoneKey(touch.phone) || phoneKey(touch.phone_e164);
     for (const id of idsByPhone.get(key) ?? []) owners.add(id);
-    const isCall = type === "call" || type === "sona_call" || type === "missed_call";
-    const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
     for (const leadId of owners) {
-      if (isCall) calls.set(leadId, (calls.get(leadId) ?? 0) + 1);
-      if (reached) talked.add(leadId);
+      const list = byLead.get(leadId) ?? [];
+      list.push(touch);
+      byLead.set(leadId, list);
+    }
+  }
+  const talked = new Set<string>();
+  const calls = new Map<string, number>();
+  const lastOutreach = new Map<string, string>();
+  const lastTouch = new Map<string, Touch>();
+  for (const [leadId, list] of byLead) {
+    const unique = distinctTouches(list);
+    calls.set(leadId, unique.filter((touch) => isCallTouch(touch)).length);
+    for (const touch of unique) {
+      const type = touchKind(touch);
+      const direction = (touch.direction || "").toLowerCase();
+      if (type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"))) {
+        talked.add(leadId);
+      }
       if (touch.occurred_at && countsAsContact(type)) {
         const current = lastOutreach.get(leadId);
         if (!current || touch.occurred_at > current) {
@@ -189,7 +238,7 @@ export default async function PriorityPage() {
       lead,
       calls: calls.get(lead.id) ?? 0,
       last: lastContacted(wait),
-      actionNote: actionText(lead.last_action, lastTouch.get(lead.id)),
+      actionNote: actionText(lastTouch.get(lead.id)),
       wait: wait ?? 99,
       sequence: outreachSequence(lead),
       action: openLeadAction(lead, cycle, calls.get(lead.id) ?? 0),
@@ -266,7 +315,7 @@ export default async function PriorityPage() {
                         <th className="px-4 py-3 font-medium">Lead</th>
                         <th className="px-4 py-3 font-medium">Grade</th>
                         <th className="px-4 py-3 font-medium">Calls</th>
-                        <th className="px-4 py-3 font-medium">Sequence</th>
+                        <th className="px-4 py-3 font-medium">Auto sequence</th>
                         <th className="px-4 py-3 font-medium">Last contacted</th>
                         <th className="px-4 py-3 font-medium">Last action</th>
                         <th className="px-4 py-3 font-medium">Next action</th>

@@ -320,7 +320,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>
           <ul className="mt-2 space-y-2 text-sm">
             <li className="flex justify-between gap-3">
-              <span className="text-slate-500">Sequence</span>
+              <span className="text-slate-500">Auto sequence</span>
               <span>
                 {row.sequenceLabel}
                 {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}

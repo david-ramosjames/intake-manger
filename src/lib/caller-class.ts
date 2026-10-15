@@ -26,6 +26,17 @@ export const CALLER_CLASS_LABEL: Record<CallerClass, string> = {
   non_pi: "Non-PI legal matter",
 };
 
+export const NON_LEAD_TAG: Record<ExcludedCallerClass, string> = {
+  spam: "NQ: Spam / Robo Call",
+  vendor: "NL: Vendor / Sales",
+  employment: "NL: Seeking Employment",
+  existing_client: "NL: Existing Client",
+  insurance: "NL: Insurance Company / Provider",
+  other_law_office: "NL: Law Office",
+  wrong_number: "NL: Wrong Number / Misdial",
+  return_call: "NL: Return Call",
+};
+
 export function isWorkLead(lead: { caller_class?: string | null }): boolean {
   if (lead.caller_class && EXCLUDED.has(lead.caller_class)) return false;
   return true;

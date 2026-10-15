@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags, pushCallrailTags } from "./callrail";
-import { LEAD_TAGS, tagsFromSelection } from "./tags";
+import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG, type ExcludedCallerClass } from "./caller-class";
+import { LEAD_TAGS, NOT_A_LEAD_TAGS, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
@@ -278,6 +279,64 @@ export async function scheduleSlackPost(leadId: string, formData: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/queues");
+}
+
+export async function classifyNonLead(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  const callerClass = text(formData, "caller_class");
+  if (!leadId) throw new Error("Missing the lead.");
+  if (!callerClass || !EXCLUDED_CALLER_CLASSES.includes(callerClass as ExcludedCallerClass)) {
+    throw new Error("Choose why this is not a lead.");
+  }
+  const reason = callerClass as ExcludedCallerClass;
+  const { data, error } = await supabase
+    .from("leads")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !data) throw new Error(error?.message ?? "Lead not found");
+  if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
+    throw new Error("A signed or promoted matter stays a lead.");
+  }
+  const drop = new Set<string>([...NOT_A_LEAD_TAGS, NON_LEAD_TAG.spam, "QUALIFIED YES"]);
+  const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !drop.has(tag));
+  if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
+  const reasonTag = NON_LEAD_TAG[reason];
+  if (!tags.includes(reasonTag)) tags.push(reasonTag);
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      lead_status: "Lost",
+      follow_up: false,
+      sequence: "stop",
+      close_reason: "not_a_lead",
+      close_suggestion: null,
+      caller_class: reason,
+      qualified: false,
+      callrail_tags: tags,
+      text_sequence_status: data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  await stopFollowUp(supabase, leadId, "Not a lead");
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "not_a_lead",
+    actor: email,
+    payload: { caller_class: reason, tag: reasonTag },
+  });
+  if (callrailConfigured() && data.callrail_call_id) {
+    try {
+      await pushCallrailTags(data.callrail_call_id, tags, LEAD_TAGS);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
+      throw new Error(`Moved to non-leads. CallRail did not take the tags. ${message}`);
+    }
+  }
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
 }
 
 export async function markNotALead(leadId: string) {

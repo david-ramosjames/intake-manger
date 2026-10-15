@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { QueueHelp } from "@/components/QueueHelp";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
 import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
@@ -281,7 +282,7 @@ export default async function LeadListPage({
     ? leadQuery.or("lead_status.in.(Signed,Promoted,Lost,Referred),signed_case.eq.true,case_id.not.is.null")
     : leadQuery.not("lead_status", "in", "(Signed,Promoted,Lost,Referred)").eq("signed_case", false).is("case_id", null);
   const since = recentCutoff();
-  const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, { data: stepRows }] = await Promise.all([
+  const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, desiredCount, { data: stepRows }] = await Promise.all([
     leadQuery,
     queue === "nonleads"
       ? supabase
@@ -308,6 +309,12 @@ export default async function LeadListPage({
       .in("lead_status", ["Lost", "Referred", "Promoted"])
       .eq("signed_case", false)
       .gte("lead_date", since),
+    supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .or("caller_class.is.null,caller_class.eq.non_pi")
+      .gte("lead_date", since)
+      .or('desired_case.eq.true,agreement_sent_at.not.is.null,agreement_status.in.(sent,viewed,signed,completed),signed_case.eq.true,lead_status.eq.Signed,callrail_tags.cs.{"CVR DESIRED"}'),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
   ]);
   const workLeads = (data ?? []) as ListLead[];
@@ -436,7 +443,9 @@ export default async function LeadListPage({
     closed: funnel === "open" ? (closedCount.count ?? 0) : windowRows.filter((group) => group.row.cycle === "closed").length,
     total: funnel === "open" ? windowRows.length + (signedCount.count ?? 0) : windowRows.length,
   };
-  const conversion = metrics.total ? Math.round((metrics.signed / metrics.total) * 100) : 0;
+  if (desiredCount.error) throw new Error(desiredCount.error.message);
+  const desired = desiredCount.count ?? 0;
+  const conversion = desired ? Math.round((metrics.signed / desired) * 100) : 0;
   const pipeline = [
     { id: "contact" as const, label: "Need to contact", count: metrics.contact, className: "bg-amber-400" },
     { id: "information" as const, label: "Need more information", count: metrics.information, className: "bg-sky-500" },
@@ -500,6 +509,7 @@ export default async function LeadListPage({
       desired: desiredWord(milestoneDesired(row.lead)),
       signed: milestoneSigned(row.lead),
       nonPi: row.lead.caller_class === "non_pi",
+      callerClass: row.lead.caller_class,
       confirmSigned: signatureNeedsConfirm(row.lead),
       lastLabel: lastContacted(row.outreach),
       lastDays: row.outreach,
@@ -559,11 +569,9 @@ export default async function LeadListPage({
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+        <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight text-navy">Work queue</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            {funnel === "closed" ? "Closed leads." : "Open leads."} A lead stays open until it is signed, declined, referred, rejected, or the sequence ends with no reply. Counts are the last 30 days.
-          </p>
+          <QueueHelp />
         </div>
         <form action="/" className="flex items-center gap-2">
           {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
@@ -585,14 +593,13 @@ export default async function LeadListPage({
       {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
 
       <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Metric href={listHref({ queue: "contact", q, range, funnel })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} hint="Not reached yet" tone="text-amber-700" />
-        <Metric href={listHref({ queue: "information", q, range, funnel })} active={queue === "information"} label="Need more information" value={String(metrics.information)} hint="Talked, still open" tone="text-sky-700" />
-        <Metric href={listHref({ queue: "signing", q, range, funnel })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} hint="Contract is out" tone="text-violet-700" />
-        <Metric href={listHref({ queue: "signed", q, range, funnel: "closed" })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
+        <Metric href={listHref({ queue: "contact", q, range, funnel })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} tone="text-amber-700" />
+        <Metric href={listHref({ queue: "information", q, range, funnel })} active={queue === "information"} label="Need more information" value={String(metrics.information)} tone="text-sky-700" />
+        <Metric href={listHref({ queue: "signing", q, range, funnel })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
+        <Metric href={listHref({ queue: "signed", q, range, funnel: "closed" })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-navy">{conversion}%</p>
-          <p className="mt-1 text-xs text-slate-500">Signed of {metrics.total} in 30 days</p>
         </div>
       </section>
 
@@ -653,7 +660,6 @@ export default async function LeadListPage({
         <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         <Link
           href={listHref({ queue: "nonleads", view, q, range, funnel })}
-          title="Spam, vendors, employment, existing clients, insurance, other law offices, wrong numbers, and return calls. A legal question outside personal injury stays open until someone confirms the decline."
           className={`rounded-full px-3 py-1 text-sm ${
             queue === "nonleads" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
           }`}
@@ -727,21 +733,18 @@ function Metric({
   active,
   label,
   value,
-  hint,
   tone,
 }: {
   href: string;
   active: boolean;
   label: string;
   value: string;
-  hint: string;
   tone: string;
 }) {
   return (
     <Link href={href} className={`rounded-xl border bg-white px-4 py-3 ${active ? "border-brand" : "border-slate-200 hover:border-slate-300"}`}>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </Link>
   );
 }

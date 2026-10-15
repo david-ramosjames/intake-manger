@@ -274,8 +274,9 @@ export function listChannel(lead: {
 function accidentAnswer(text: string | null | undefined): string | null {
   for (const raw of (text ?? "").split("\n")) {
     const line = raw.trim();
-    if (!/(?:what|qu[eé])\s+type of accident|tipo de accidente|type of accident|case type/i.test(line)) continue;
-    const answer = line.match(/(?:—|–|:)\s*\*?\s*([^*\n]+?)\s*\*?\s*$/)?.[1];
+    const answer = line.match(
+      /^(?:[•\-*]\s*)*\*?\s*(?:(?:what|qu[eé])\s+type of accident|tipo de accidente|type of accident|case type)\s*\*?\s*(?:—|–|:)\s*\*?\s*([^*\n]+?)\s*\*?\s*$/i,
+    )?.[1];
     const usable = usableAccident(answer);
     if (usable) return usable;
   }
@@ -284,8 +285,8 @@ function accidentAnswer(text: string | null | undefined): string | null {
 
 function usableAccident(value: string | null | undefined): string | null {
   const text = usableFact(value);
-  if (!text || /^(otro|otra)$/i.test(text)) return null;
-  if (/[?•—–]|when did|were you|responsible for|did the accident occur/i.test(text)) return null;
+  if (!text || text.length > 40 || /^(otro|otra)$/i.test(text)) return null;
+  if (/[?•—–|]|when did|were you|responsible for|did the accident occur/i.test(text)) return null;
   return text;
 }
 

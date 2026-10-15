@@ -5,7 +5,8 @@ import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
-import { confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags } from "@/lib/ops-actions";
+import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags } from "@/lib/ops-actions";
 import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
 
@@ -31,6 +32,7 @@ export type QueueRow = {
   desired: string;
   signed: boolean;
   nonPi: boolean;
+  callerClass: string | null;
   confirmSigned: boolean;
   lastLabel: string;
   lastDays: number | null;
@@ -152,7 +154,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   }}
                 />
               ))}
-              <th className="px-2 py-2 text-left font-medium uppercase tracking-wide">Links</th>
+              <th className="px-2 py-2 text-center font-medium uppercase tracking-wide">Links</th>
             </tr>
           </thead>
           <tbody className="[&_td]:align-top">
@@ -172,7 +174,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                     {row.title}
                     <IdentityMark status={row.identityStatus} />
                   </button>
-                  <p className="mt-0.5 text-slate-500">
+                  <p className="mt-0.5 line-clamp-2 text-slate-500">
                     {row.accident !== "—" ? row.accident : "Accident not captured"}
                     {row.when ? ` · ${row.when}` : ""}
                   </p>
@@ -193,28 +195,28 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                       </p>
                     ))}
                 </td>
-                <td className="px-2 py-2">
+                <td className="px-2 py-2 text-center">
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
                     {row.label}
                   </span>
                 </td>
-                <td className="px-2 py-2">
+                <td className="px-2 py-2 text-center">
                   <PriorityCell row={row} />
                 </td>
-                <td className="px-2 py-2">
+                <td className="px-2 py-2 text-center">
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium ${gradeClass(row.grade)}`}>
                     {row.grade ?? "—"}
                   </span>
                 </td>
-                <td className="px-2 py-2 text-slate-700">{row.consultWhen}</td>
-                <td className="px-2 py-2 text-slate-700">{row.qualifiedLabel}</td>
-                <td className="px-2 py-2 text-slate-700">{row.desired}</td>
-                <td className="px-2 py-2 text-slate-700">{row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—"}</td>
-                <td className="px-2 py-2 text-slate-700">{row.lastLabel}</td>
-                <td className={`px-2 py-2 ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
+                <td className="px-2 py-2 text-center text-slate-700">{row.consultWhen}</td>
+                <td className="px-2 py-2 text-center text-slate-700">{row.qualifiedLabel}</td>
+                <td className="px-2 py-2 text-center text-slate-700">{row.desired}</td>
+                <td className="px-2 py-2 text-center text-slate-700">{row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—"}</td>
+                <td className="px-2 py-2 text-center text-slate-700">{row.lastLabel}</td>
+                <td className={`px-2 py-2 text-center ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
                   {row.automationLabel}
                 </td>
-                <td className="px-2 py-2">
+                <td className="px-2 py-2 text-center">
                   <RowLinks quoUrl={row.quoUrl} slackUrl={row.slackUrl} />
                 </td>
               </tr>
@@ -266,12 +268,12 @@ function HeadSort({
         aria-label={`Sort or filter ${label}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className={`flex w-full items-start justify-between gap-1 rounded-md border px-1 py-1 text-left uppercase leading-tight tracking-normal ${
+        className={`relative flex w-full items-center justify-center rounded-md border px-4 py-1 text-center uppercase leading-tight tracking-normal ${
           filter || sortedHere ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white"
         }`}
       >
         <span>{label}</span>
-        <span aria-hidden="true" className="shrink-0 text-[10px]">
+        <span aria-hidden="true" className="absolute right-1 top-1 text-[10px]">
           ↕
         </span>
       </button>
@@ -311,7 +313,7 @@ function MenuChoice({ current, onPick, children }: { current: boolean; onPick: (
 function PriorityCell({ row }: { row: QueueRow }) {
   if (row.priority === "Suggested") {
     return (
-      <form action={reviewPrioritySuggestion} className="flex flex-col items-start gap-1">
+      <form action={reviewPrioritySuggestion} className="flex flex-col items-center gap-1">
         <input type="hidden" name="lead_id" value={row.id} />
         <span className="text-xs font-medium text-slate-700">Suggested</span>
         <span className="flex gap-1">
@@ -329,7 +331,7 @@ function PriorityCell({ row }: { row: QueueRow }) {
     return (
       <form action={markPriority}>
         <input type="hidden" name="lead_id" value={row.id} />
-        <button className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-left text-[11px] font-medium leading-tight text-slate-700">
+        <button className="mx-auto rounded-md border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] font-medium leading-tight text-slate-700">
           <span className="block">Make</span>
           <span className="block">priority</span>
         </button>
@@ -342,7 +344,7 @@ function PriorityCell({ row }: { row: QueueRow }) {
 function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: string | null }) {
   if (!quoUrl && !slackUrl) return <span className="text-slate-400">—</span>;
   return (
-    <span className="flex flex-col gap-0.5">
+    <span className="flex flex-col items-center gap-0.5">
       {quoUrl ? (
         <a href={quoUrl} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
           Quo
@@ -453,6 +455,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         ) : null}
         {row.closeSuggestion ? <CloseSuggestion row={row} /> : null}
         {row.priority === "Suggested" && row.prioritySuggestion ? <PrioritySuggestion row={row} /> : null}
+        {row.signed ? null : <NonLeadChoice row={row} />}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">
@@ -600,6 +603,32 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
           Keep open
         </button>
       </div>
+    </form>
+  );
+}
+
+function NonLeadChoice({ row }: { row: QueueRow }) {
+  const current = EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? "";
+  return (
+    <form action={classifyNonLead} className="rounded-lg border border-slate-200 p-3 text-sm">
+      <input type="hidden" name="lead_id" value={row.id} />
+      <label className="block font-medium text-slate-700">
+        Not a lead
+        <select
+          name="caller_class"
+          defaultValue={current}
+          required
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-normal"
+        >
+          <option value="">Choose a reason</option>
+          {EXCLUDED_CALLER_CLASSES.map((item) => (
+            <option key={item} value={item}>
+              {CALLER_CLASS_LABEL[item]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Move to non-leads</button>
     </form>
   );
 }

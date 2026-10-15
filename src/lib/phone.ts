@@ -27,3 +27,11 @@ export function phoneLikePattern(value: string | null | undefined): string | nul
   if (tail.length >= 10) return `${tail.slice(0, 3)}%${tail.slice(3, 6)}%${tail.slice(6)}`;
   return `${tail.slice(0, tail.length - 4)}%${tail.slice(-4)}`;
 }
+
+/** A stored phone matches a search when both have at least 7 digits and one contains the other. */
+export function phoneMatches(stored: string | null | undefined, typed: string | null | undefined): boolean {
+  const storedDigits = phoneTail(stored);
+  const typedDigits = phoneTail(typed);
+  if (storedDigits.length < 7 || typedDigits.length < 7) return false;
+  return storedDigits.includes(typedDigits) || typedDigits.includes(storedDigits);
+}

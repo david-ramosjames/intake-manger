@@ -8,7 +8,7 @@ import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
 import { leadSequenceId } from "@/lib/sequences";
-import { phoneLikePattern, phoneTail } from "@/lib/phone";
+import { phoneLikePattern, phoneMatches, phoneTail } from "@/lib/phone";
 import { chicagoDay, formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -108,7 +108,8 @@ async function loadTouchesByPhone(
 
 function displayPhone(phone: string | null): string | null {
   const value = phone?.trim() ?? "";
-  if (!value || /^(null|undefined)$/i.test(value)) return null;
+  if (!value || /^(null|undefined|anonymous|unknown|restricted|withheld|private)$/i.test(value)) return null;
+  if (phoneTail(value).length < 7) return null;
   return value;
 }
 
@@ -455,9 +456,7 @@ export default async function LeadListPage({
           (value || "").toLowerCase().includes(needle),
         );
         if (textHit) return true;
-        const storedDigits = phoneTail(lead.phone || lead.phone_e164);
-        const typedDigits = phoneTail(q);
-        return typedDigits.length >= 7 && (storedDigits.includes(typedDigits) || typedDigits.includes(storedDigits));
+        return phoneMatches(lead.phone || lead.phone_e164, q);
       });
     })
     .sort((a, b) => {

@@ -48,6 +48,15 @@ export function CadenceEditor({
     );
   }
 
+  function updateTexts(index: number, count: number) {
+    setChanged(true);
+    setDays((current) =>
+      current.map((day, dayIndex) =>
+        dayIndex === index ? { ...day, texts: resize(day.texts, count, "afternoon", "afternoon") } : day,
+      ),
+    );
+  }
+
   function setWindow(index: number, slot: number, value: CallbackWindow) {
     setChanged(true);
     setDays((current) =>
@@ -86,13 +95,13 @@ export function CadenceEditor({
                 <tr key={index} className="border-b border-slate-100 last:border-0">
                   <td className="px-4 py-3 font-medium text-slate-800">Day {index + 1}</td>
                   <td className="px-3 py-3">
-                    <Count value={day.calls.length} onChange={(count) => update(index, count)} />
+                    <Count kind="call" value={day.calls.length} onChange={(count) => update(index, count)} />
                   </td>
                   <td className="px-3 py-3">
                     <Windows values={day.calls} onChange={(slot, value) => setWindow(index, slot, value)} />
                   </td>
                   <td className="px-3 py-3">
-                    <TextCount count={day.texts.length} />
+                    <Count kind="text" value={day.texts.length} onChange={(count) => updateTexts(index, count)} />
                   </td>
                 </tr>
               ))}
@@ -102,7 +111,7 @@ export function CadenceEditor({
         <form action={saveCadence} className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
           <input type="hidden" name="sequence" value={sequence} />
           <input type="hidden" name="days" value={JSON.stringify(days)} />
-          <p className="text-sm text-slate-500">Text times are set in SMS Follow-Up. This column only shows how many are planned.</p>
+          <p className="text-sm text-slate-500">Set how many texts go out each day. SMS Follow-Up chooses the time.</p>
           <div className="flex items-center gap-3">
             {saved && !changed ? <p className="text-sm font-medium text-emerald-700">Saved.</p> : null}
             <button
@@ -162,35 +171,30 @@ function SaveButton() {
   );
 }
 
-function TextCount({ count }: { count: number }) {
-  if (!count) return <span className="text-slate-300">—</span>;
-  return (
-    <span className="inline-flex items-center gap-2 text-slate-700">
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-100 text-sky-700">
-        <TextIcon />
-      </span>
-      {count}
-    </span>
-  );
-}
-
 function Count({
+  kind,
   value,
   onChange,
 }: {
+  kind: "call" | "text";
   value: number;
   onChange: (count: number) => void;
 }) {
+  const text = kind === "text";
   return (
     <label className="inline-flex items-center gap-2">
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-        <PhoneIcon />
+      <span
+        className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${
+          text ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"
+        }`}
+      >
+        {text ? <TextIcon /> : <PhoneIcon />}
       </span>
       <select
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         className="rounded-md border border-slate-200 bg-white px-2 py-1.5"
-        aria-label="Number of calls"
+        aria-label={text ? "Number of texts" : "Number of calls"}
       >
         {[0, 1, 2].map((count) => (
           <option key={count} value={count}>

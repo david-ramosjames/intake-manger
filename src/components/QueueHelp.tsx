@@ -5,7 +5,7 @@ import { useState } from "react";
 export function QueueHelp() {
   const [open, setOpen] = useState(false);
   return (
-    <span className="relative inline-flex">
+    <span className="relative z-50 inline-flex">
       <button
         type="button"
         aria-expanded={open}
@@ -16,8 +16,8 @@ export function QueueHelp() {
       </button>
       {open ? (
         <>
-          <button type="button" aria-label="Close help" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-20 mt-2 w-80 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-lg">
+          <button type="button" aria-label="Close help" className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-2 w-80 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-lg">
             <p className="font-medium text-navy">Non-leads</p>
             <p className="mt-1">
               Spam, vendors, employment, existing clients, insurance, other law offices, wrong numbers, and return calls. A legal question outside personal injury stays open until someone confirms the decline.

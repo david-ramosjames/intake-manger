@@ -133,10 +133,10 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
             ))}
             <col style={{ width: "5%" }} />
           </colgroup>
-          <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white text-slate-500">
+          <thead className="text-slate-500">
             <tr>
-              <th className="px-2 py-2 text-left font-medium uppercase tracking-wide">Lead</th>
-              <th className="px-2 py-2 text-left font-medium uppercase tracking-wide">Next action</th>
+              <th className="sticky top-16 z-20 border-b border-slate-200 bg-white px-2 py-2 text-left font-medium uppercase tracking-wide">Lead</th>
+              <th className="sticky top-16 z-20 border-b border-slate-200 bg-white px-2 py-2 text-left font-medium uppercase tracking-wide">Next action</th>
               {COLUMNS.map((column, index) => (
                 <HeadSort
                   key={column.id}
@@ -156,7 +156,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   }}
                 />
               ))}
-              <th className="px-2 py-2 text-center font-medium uppercase tracking-wide">Links</th>
+              <th className="sticky top-16 z-20 border-b border-slate-200 bg-white px-2 py-2 text-center font-medium uppercase tracking-wide">Links</th>
             </tr>
           </thead>
           <tbody className="[&_td]:align-top">
@@ -272,7 +272,7 @@ function HeadSort({
     setOpen(false);
   };
   return (
-    <th className="relative px-1.5 py-2 font-medium">
+    <th className={`sticky top-16 border-b border-slate-200 bg-white px-1.5 py-2 font-medium ${open ? "z-30" : "z-20"}`}>
       <button
         type="button"
         aria-label={`Sort or filter ${label}`}

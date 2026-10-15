@@ -578,70 +578,40 @@ export default async function LeadListPage({
   });
 
   return (
-    <main className="w-full px-4 py-6 xl:px-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <main className="w-full px-4 py-4 xl:px-6">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight text-navy">Work queue</h1>
           <QueueHelp />
         </div>
-        <form action="/" className="flex items-center gap-2">
-          {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
-          {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
-          {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
-          {range !== "all" ? <input type="hidden" name="range" value={range} /> : null}
-          <input
-            name="q"
-            defaultValue={q}
-            placeholder="Name, phone, or part of a phone"
-            className="w-64 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
-          />
-          <Link href="/" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">
-            Clear
-          </Link>
-        </form>
-      </div>
-
-      {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
-
-      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Metric href={listHref({ queue: "contact", q, range, funnel })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} tone="text-amber-700" />
-        <Metric href={listHref({ queue: "information", q, range, funnel })} active={queue === "information"} label="Need more information" value={String(metrics.information)} tone="text-sky-700" />
-        <Metric href={listHref({ queue: "signing", q, range, funnel })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
-        <Metric href={listHref({ queue: "signed", q, range, funnel: "closed" })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-navy">{conversion}%</p>
-        </div>
-      </section>
-
-      <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <span className="font-medium uppercase tracking-wide">Intake pipeline</span>
-          <span>Last 30 days</span>
-        </div>
-        <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100">
-          {pipeline.map((part) =>
-            part.count ? (
-              <Link
-                key={part.id}
-                href={listHref({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel })}
-                title={`${part.label}: ${part.count}`}
-                className={part.className}
-                style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
-              />
-            ) : null,
-          )}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600">
-          {pipeline.map((part) => (
-            <Link key={part.id} href={listHref({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel })} className="hover:text-slate-900">
-              {part.label} ({part.count})
-            </Link>
-          ))}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+          <Metric href={listHref({ queue: "contact", q, range, funnel })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} tone="text-amber-700" />
+          <Metric href={listHref({ queue: "information", q, range, funnel })} active={queue === "information"} label="Need more information" value={String(metrics.information)} tone="text-sky-700" />
+          <Metric href={listHref({ queue: "signing", q, range, funnel })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
+          <Metric href={listHref({ queue: "signed", q, range, funnel: "closed" })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
+          <span className="flex items-baseline gap-1.5 px-1">
+            <span className="text-lg font-semibold tabular-nums leading-none text-navy">{conversion}%</span>
+            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Conversion</span>
+          </span>
+          <div className="flex h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-slate-200" title="Last 30 days">
+            {pipeline.map((part) =>
+              part.count ? (
+                <Link
+                  key={part.id}
+                  href={listHref({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel })}
+                  title={`${part.label}: ${part.count}`}
+                  className={part.className}
+                  style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
+                />
+              ) : null,
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+      {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Arrived</span>
         {RANGES.map((item) => (
           <Link
@@ -677,6 +647,21 @@ export default async function LeadListPage({
         >
           Non-leads{reviewCount.count ? ` (${reviewCount.count})` : ""}
         </Link>
+        <form action="/" className="ml-auto flex items-center gap-2">
+          {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
+          {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
+          {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
+          {range !== "all" ? <input type="hidden" name="range" value={range} /> : null}
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Name, phone, or part of a phone"
+            className="w-56 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm"
+          />
+          <Link href="/" className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700">
+            Clear
+          </Link>
+        </form>
       </div>
 
       <WorkQueue rows={queueRows} initialId={selectedId} />
@@ -753,9 +738,9 @@ function Metric({
   tone: string;
 }) {
   return (
-    <Link href={href} className={`rounded-xl border bg-white px-4 py-3 ${active ? "border-brand" : "border-slate-200 hover:border-slate-300"}`}>
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
+    <Link href={href} className={`flex items-baseline gap-1.5 rounded-md px-1 py-0.5 ${active ? "bg-brand/40" : "hover:bg-slate-100"}`}>
+      <span className={`text-lg font-semibold tabular-nums leading-none ${tone}`}>{value}</span>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</span>
     </Link>
   );
 }

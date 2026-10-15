@@ -74,14 +74,14 @@ type Touch = {
 type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "signed" | "last" | "automation";
 
 const COLUMNS: { id: Column; label: string; width: string }[] = [
-  { id: "stage", label: "Stage", width: "10%" },
-  { id: "priority", label: "Priority", width: "9%" },
+  { id: "stage", label: "Stage", width: "11%" },
+  { id: "priority", label: "Priority", width: "8%" },
   { id: "grade", label: "Grade", width: "5%" },
   { id: "consult", label: "Consult", width: "7%" },
-  { id: "qualified", label: "Qualified", width: "7%" },
+  { id: "qualified", label: "Qualified", width: "8%" },
   { id: "desired", label: "Desired", width: "6%" },
   { id: "signed", label: "Signed", width: "6%" },
-  { id: "last", label: "Last contacted", width: "8%" },
+  { id: "last", label: "Last contacted", width: "11%" },
   { id: "automation", label: "Automation", width: "8%" },
 ];
 
@@ -120,16 +120,16 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
     });
 
   return (
-    <div className={`mt-4 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
-      <div className="rounded-xl border border-slate-200 bg-white">
+    <div className={`mt-4 grid items-start gap-4 ${selected ? "xl:grid-cols-[minmax(0,1fr)_20rem]" : ""}`}>
+      <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
         <table className="w-full table-fixed text-left text-xs">
           <colgroup>
             <col style={{ width: "14%" }} />
-            <col style={{ width: "14%" }} />
+            <col style={{ width: "11%" }} />
             {COLUMNS.map((column) => (
               <col key={column.id} style={{ width: column.width }} />
             ))}
-            <col style={{ width: "6%" }} />
+            <col style={{ width: "5%" }} />
           </colgroup>
           <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white text-slate-500">
             <tr>
@@ -268,12 +268,12 @@ function HeadSort({
         aria-label={`Sort or filter ${label}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className={`relative flex w-full items-center justify-center rounded-md border px-4 py-1 text-center uppercase leading-tight tracking-normal ${
+        className={`flex w-full items-center justify-center gap-0.5 rounded-md border px-1 py-1 text-center text-[11px] uppercase leading-tight tracking-normal ${
           filter || sortedHere ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white"
         }`}
       >
-        <span>{label}</span>
-        <span aria-hidden="true" className="absolute right-1 top-1 text-[10px]">
+        <span className="min-w-0">{label}</span>
+        <span aria-hidden="true" className="shrink-0 text-[10px]">
           ↕
         </span>
       </button>

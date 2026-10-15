@@ -24,10 +24,11 @@ function isActive(pathname: string, href: string): boolean {
 export function AppHeader({ email }: { email: string | null }) {
   const pathname = usePathname();
   const docsActive = isActive(pathname, "/how-it-fits");
+  const wide = pathname === "/";
 
   return (
     <header className="sticky top-0 z-30 bg-[linear-gradient(100deg,#0A1E41_0%,#0F316D_100%)] text-white">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
+      <div className={`mx-auto flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 xl:px-6 ${wide ? "" : "max-w-7xl"}`}>
         <Link href="/" className="flex items-center gap-3">
           <img src={LOGO} alt="Ramos James Law" className="h-12 w-auto" />
           <span className="text-sm font-semibold tracking-tight">Intake Manager</span>

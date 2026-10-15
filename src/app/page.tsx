@@ -567,7 +567,7 @@ export default async function LeadListPage({
   });
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-6">
+    <main className="w-full px-4 py-6 xl:px-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight text-navy">Work queue</h1>

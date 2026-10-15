@@ -71,16 +71,16 @@ type Touch = {
 
 type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "signed" | "last" | "automation";
 
-const COLUMNS: { id: Column; label: string }[] = [
-  { id: "stage", label: "Stage" },
-  { id: "priority", label: "Priority" },
-  { id: "grade", label: "Grade" },
-  { id: "consult", label: "Consult" },
-  { id: "qualified", label: "Qualified" },
-  { id: "desired", label: "Desired" },
-  { id: "signed", label: "Signed" },
-  { id: "last", label: "Last contacted" },
-  { id: "automation", label: "Automation" },
+const COLUMNS: { id: Column; label: string; width: string }[] = [
+  { id: "stage", label: "Stage", width: "10%" },
+  { id: "priority", label: "Priority", width: "9%" },
+  { id: "grade", label: "Grade", width: "5%" },
+  { id: "consult", label: "Consult", width: "7%" },
+  { id: "qualified", label: "Qualified", width: "7%" },
+  { id: "desired", label: "Desired", width: "6%" },
+  { id: "signed", label: "Signed", width: "6%" },
+  { id: "last", label: "Last contacted", width: "8%" },
+  { id: "automation", label: "Automation", width: "8%" },
 ];
 
 function columnValue(row: QueueRow, column: Column): string {
@@ -119,17 +119,26 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
 
   return (
     <div className={`mt-4 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 border-b border-slate-200 bg-white text-xs text-slate-500">
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <table className="w-full table-fixed text-left text-xs">
+          <colgroup>
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "14%" }} />
+            {COLUMNS.map((column) => (
+              <col key={column.id} style={{ width: column.width }} />
+            ))}
+            <col style={{ width: "6%" }} />
+          </colgroup>
+          <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white text-slate-500">
             <tr>
-              <th className="px-4 py-3 font-medium uppercase tracking-wide">Lead</th>
-              <th className="px-4 py-3 font-medium uppercase tracking-wide">Next action</th>
-              {COLUMNS.map((column) => (
+              <th className="px-2 py-2 text-left font-medium uppercase tracking-wide">Lead</th>
+              <th className="px-2 py-2 text-left font-medium uppercase tracking-wide">Next action</th>
+              {COLUMNS.map((column, index) => (
                 <HeadSort
                   key={column.id}
                   label={column.label}
                   column={column.id}
+                  align={index >= COLUMNS.length - 3 ? "end" : "start"}
                   rows={rows}
                   filter={filters[column.id] ?? ""}
                   sort={sort}
@@ -143,10 +152,10 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   }}
                 />
               ))}
-              <th className="px-4 py-3 font-medium uppercase tracking-wide">Links</th>
+              <th className="px-2 py-2 text-left font-medium uppercase tracking-wide">Links</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="[&_td]:align-top">
             {shown.map((row) => (
               <tr
                 key={row.id}
@@ -154,58 +163,58 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   row.id === selectedId ? "bg-brand/10" : "hover:bg-slate-50"
                 } ${row.waiting ? "shadow-[inset_3px_0_0_0_#f59e0b]" : row.id === selectedId ? "shadow-[inset_3px_0_0_0_#38B7E3]" : ""}`}
               >
-                <td className="px-4 py-3">
+                <td className="px-2 py-2">
                   <button
                     type="button"
                     onClick={() => setSelectedId(row.id)}
-                    className="inline-flex items-center gap-1 text-left font-medium text-navy hover:underline"
+                    className="inline-flex items-center gap-1 text-left text-sm font-medium text-navy hover:underline"
                   >
                     {row.title}
                     <IdentityMark status={row.identityStatus} />
                   </button>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-slate-500">
                     {row.accident !== "—" ? row.accident : "Accident not captured"}
                     {row.when ? ` · ${row.when}` : ""}
                   </p>
                   {row.samePhone.length > 0 ? (
-                    <p className="mt-0.5 text-xs text-slate-500">{row.samePhone.length + 1} records, same phone</p>
+                    <p className="mt-0.5 text-slate-500">{row.samePhone.length + 1} records, same phone</p>
                   ) : null}
                   {row.closeSuggestion ? (
-                    <p className="mt-0.5 text-xs font-medium text-orange-800">Suggested close: {CLOSE_SUGGESTION_LABEL[row.closeSuggestion]}</p>
+                    <p className="mt-0.5 font-medium text-orange-800">Suggested close: {CLOSE_SUGGESTION_LABEL[row.closeSuggestion]}</p>
                   ) : null}
                 </td>
-                <td className="px-4 py-3 text-slate-800">
+                <td className="px-2 py-2 text-slate-800">
                   <p className="font-medium text-slate-900">{row.actionTitle ?? "—"}</p>
                   {row.nextAction
                     .filter((line) => line.when !== "None")
                     .map((line) => (
-                      <p key={line.label} className="whitespace-nowrap text-slate-600">
+                      <p key={line.label} className="text-slate-600">
                         <span className="text-slate-500">{line.label}</span> {line.when}
                       </p>
                     ))}
                 </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${row.stageClassName}`}>
+                <td className="px-2 py-2">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
                     {row.label}
                   </span>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 py-2">
                   <PriorityCell row={row} />
                 </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${gradeClass(row.grade)}`}>
+                <td className="px-2 py-2">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 font-medium ${gradeClass(row.grade)}`}>
                     {row.grade ?? "—"}
                   </span>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-slate-700">{row.consultWhen}</td>
-                <td className="px-4 py-3 text-slate-700">{row.qualifiedLabel}</td>
-                <td className="px-4 py-3 text-slate-700">{row.desired}</td>
-                <td className="px-4 py-3 text-slate-700">{row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—"}</td>
-                <td className="px-4 py-3 text-slate-700">{row.lastLabel}</td>
-                <td className={`px-4 py-3 ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
+                <td className="px-2 py-2 text-slate-700">{row.consultWhen}</td>
+                <td className="px-2 py-2 text-slate-700">{row.qualifiedLabel}</td>
+                <td className="px-2 py-2 text-slate-700">{row.desired}</td>
+                <td className="px-2 py-2 text-slate-700">{row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—"}</td>
+                <td className="px-2 py-2 text-slate-700">{row.lastLabel}</td>
+                <td className={`px-2 py-2 ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
                   {row.automationLabel}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-2 py-2">
                   <RowLinks quoUrl={row.quoUrl} slackUrl={row.slackUrl} />
                 </td>
               </tr>
@@ -228,6 +237,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
 function HeadSort({
   label,
   column,
+  align,
   rows,
   filter,
   sort,
@@ -235,6 +245,7 @@ function HeadSort({
 }: {
   label: string;
   column: Column;
+  align: "start" | "end";
   rows: QueueRow[];
   filter: string;
   sort: { column: Column; dir: "asc" | "desc" } | null;
@@ -249,21 +260,25 @@ function HeadSort({
     setOpen(false);
   };
   return (
-    <th className="relative px-3 py-2 font-medium">
+    <th className="relative px-1.5 py-2 font-medium">
       <button
         type="button"
-        aria-label={`${label} filter`}
+        aria-label={`Sort or filter ${label}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wide ${filter || sortedHere ? "text-navy" : "text-slate-500"}`}
+        className={`flex w-full items-start justify-between gap-1 rounded-md border px-1 py-1 text-left uppercase leading-tight tracking-normal ${
+          filter || sortedHere ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white"
+        }`}
       >
-        {label}
-        <span aria-hidden="true">▾</span>
+        <span>{label}</span>
+        <span aria-hidden="true" className="shrink-0 text-[10px]">
+          ↕
+        </span>
       </button>
       {open ? (
         <>
           <button type="button" aria-label="Close filter" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg">
+          <div className={`absolute top-full z-20 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg ${align === "end" ? "right-0" : "left-0"}`}>
             <MenuChoice current={!filter && !sortedHere} onPick={() => pick("")}>
               All
             </MenuChoice>
@@ -314,8 +329,9 @@ function PriorityCell({ row }: { row: QueueRow }) {
     return (
       <form action={markPriority}>
         <input type="hidden" name="lead_id" value={row.id} />
-        <button className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700">
-          Make priority
+        <button className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-left text-[11px] font-medium leading-tight text-slate-700">
+          <span className="block">Make</span>
+          <span className="block">priority</span>
         </button>
       </form>
     );
@@ -326,7 +342,7 @@ function PriorityCell({ row }: { row: QueueRow }) {
 function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: string | null }) {
   if (!quoUrl && !slackUrl) return <span className="text-slate-400">—</span>;
   return (
-    <span className="flex gap-3">
+    <span className="flex flex-col gap-0.5">
       {quoUrl ? (
         <a href={quoUrl} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
           Quo

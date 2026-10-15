@@ -623,7 +623,7 @@ export default async function LeadListPage({
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Arrived</span>
         {RANGES.map((item) => (
           <Link
@@ -636,8 +636,7 @@ export default async function LeadListPage({
             {item.label}
           </Link>
         ))}
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</span>
         <Link
           href={listHref({ queue: queue === "signed" || queue === "closed" ? "all" : queue, view, q, range, funnel: "open" })}
@@ -651,19 +650,16 @@ export default async function LeadListPage({
         >
           Closed
         </Link>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         <Link
           href={listHref({ queue: "nonleads", view, q, range, funnel })}
+          title="Spam, vendors, employment, existing clients, insurance, other law offices, wrong numbers, and return calls. A legal question outside personal injury stays open until someone confirms the decline."
           className={`rounded-full px-3 py-1 text-sm ${
             queue === "nonleads" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
           }`}
         >
           Non-leads{reviewCount.count ? ` (${reviewCount.count})` : ""}
         </Link>
-        <span className="text-xs text-slate-500">
-          Spam, vendors, employment, existing clients, insurance, other law offices, wrong numbers, and return calls. A legal question outside personal injury stays open until someone confirms the decline.
-        </span>
       </div>
 
       <WorkQueue rows={queueRows} initialId={selectedId} />

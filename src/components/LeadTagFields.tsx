@@ -43,35 +43,39 @@ export function LeadTagFields({
 
   return (
     <fieldset className="space-y-3 text-sm">
-      <legend className="font-medium text-slate-700">Qualified</legend>
-      {quiet ? null : (
-        <p className="text-slate-500">
-          Every lead is Qualified YES or Qualified NO. A non-PI matter, a case outside the service area, and an unresponsive lead are Qualified NO.
-        </p>
-      )}
       {nonPi ? <input type="hidden" name="non_pi" value="yes" /> : null}
-      <div className="flex flex-wrap gap-4">
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name="qualified_tag"
-            value={QUALIFIED_YES}
-            checked={qualified === QUALIFIED_YES}
-            onChange={() => setQualified(QUALIFIED_YES)}
-          />
-          {TAG_LABEL[QUALIFIED_YES]}
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name="qualified_tag"
-            value={QUALIFIED_NO}
-            checked={qualified === QUALIFIED_NO}
-            onChange={() => setQualified(QUALIFIED_NO)}
-          />
-          {TAG_LABEL[QUALIFIED_NO]}
-        </label>
-      </div>
+      {quiet ? (
+        qualified ? <input type="hidden" name="qualified_tag" value={qualified} /> : null
+      ) : (
+        <>
+          <legend className="font-medium text-slate-700">Qualified</legend>
+          <p className="text-slate-500">
+            Every lead is Qualified YES or Qualified NO. A non-PI matter, a case outside the service area, and an unresponsive lead are Qualified NO.
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="qualified_tag"
+                value={QUALIFIED_YES}
+                checked={qualified === QUALIFIED_YES}
+                onChange={() => setQualified(QUALIFIED_YES)}
+              />
+              {TAG_LABEL[QUALIFIED_YES]}
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="qualified_tag"
+                value={QUALIFIED_NO}
+                checked={qualified === QUALIFIED_NO}
+                onChange={() => setQualified(QUALIFIED_NO)}
+              />
+              {TAG_LABEL[QUALIFIED_NO]}
+            </label>
+          </div>
+        </>
+      )}
       <label className="block">
         <span className="font-medium text-slate-700">Declined</span>
         <select

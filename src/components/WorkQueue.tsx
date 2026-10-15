@@ -445,6 +445,10 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         </button>
       </div>
       <div className="space-y-5 overflow-y-auto px-4 py-4">
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
+        </section>
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
             <a href={row.quoUrl} className="rounded-md bg-brand px-3 py-1.5 font-medium text-navy" target="_blank" rel="noreferrer">
@@ -474,7 +478,12 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         </p>
         <dl className="grid grid-cols-2 gap-2 text-sm">
           <ConsultDate row={row} />
-          <FunnelMark label="Qualified" value={row.qualifiedLabel} />
+          <div className="rounded-md bg-slate-50 px-3 py-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</dt>
+            <dd className="mt-1">
+              <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} />
+            </dd>
+          </div>
           <div className="rounded-md bg-slate-50 px-3 py-2">
             <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</dt>
             <dd className="mt-1">
@@ -511,10 +520,6 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         {row.closeSuggestion ? <CloseSuggestion row={row} /> : null}
         {row.priority === "Suggested" && row.prioritySuggestion ? <PrioritySuggestion row={row} /> : null}
         {row.signed ? null : <NonLeadChoice row={row} />}
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
-        </section>
         <TagEditor row={row} />
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next</h3>

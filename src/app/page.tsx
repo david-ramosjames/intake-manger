@@ -3,7 +3,7 @@ import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
 import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
-import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
+import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
@@ -154,7 +154,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -193,6 +193,8 @@ type ListLead = Pick<
   | "agreement_sent_at"
   | "agreement_signing_url"
   | "agreement_next_reminder_at"
+  | "agreement_via_sms"
+  | "agreement_via_email"
   | "text_sequence_status"
   | "text_sequence_slug"
   | "text_next_at"
@@ -475,6 +477,7 @@ export default async function LeadListPage({
       grade: row.lead.grade,
       textsLive: (row.lead.text_sequence_status || "").toLowerCase() === "active",
       textNext: row.lead.text_next_at,
+      sequenceLabel: outreachSequence(row.lead).label,
       agreementStatus: row.lead.agreement_status,
       agreementSent: row.lead.agreement_sent_at,
       signingUrl: row.lead.agreement_signing_url,

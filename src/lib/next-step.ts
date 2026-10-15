@@ -1,4 +1,4 @@
-import { contractSent, milestoneSigned, signatureNeedsConfirm } from "./desired";
+import { contractOutstanding, contractSent, milestoneSigned, signatureNeedsConfirm } from "./desired";
 import type { Lead } from "./leads";
 
 export type ClientTouch = {
@@ -97,7 +97,7 @@ export function priorityPlace(lead: {
 }): PriorityPlace | null {
   if (lead.case_id || lead.lead_status === "Promoted") return null;
   if (milestoneSigned(lead) || lead.lead_status === "Lost" || lead.lead_status === "Referred") return null;
-  if (contractSent(lead)) return "contract";
+  if (signatureNeedsConfirm(lead) || contractOutstanding(lead)) return "contract";
   if (lead.priority) return "flagged";
   if (lead.priority_suggestion) return "suggested";
   return null;
@@ -149,6 +149,26 @@ export function nextStepLabel(purpose: string | null): string {
 
 export function textSequenceLive(status: string | null | undefined): boolean {
   return (status || "").toLowerCase() === "active";
+}
+
+/** The contract reminder sequence is on while the contract is still out. SMS Follow-Up is a separate text sequence. */
+export function outreachSequence(lead: {
+  agreement_status?: string | null;
+  agreement_sent_at?: string | null;
+  agreement_via_sms?: boolean | null;
+  agreement_via_email?: boolean | null;
+  text_sequence_status?: string | null;
+}): { label: string; on: boolean } {
+  if (contractOutstanding(lead)) {
+    const sms = lead.agreement_via_sms === true;
+    const email = lead.agreement_via_email === true;
+    if (sms && email) return { label: "Text and email", on: true };
+    if (email) return { label: "Email", on: true };
+    if (sms) return { label: "Text", on: true };
+    return { label: "On", on: true };
+  }
+  if (textSequenceLive(lead.text_sequence_status)) return { label: "Text", on: true };
+  return { label: "Off", on: false };
 }
 
 export function talkedWithClient(touches: ClientTouch[]): boolean {

@@ -4,11 +4,11 @@ import { priorityReasonText, daysSince, leadTitle, listAccident, slackMessageUrl
 import { nextActionLines, type CallStep } from "@/lib/next-action";
 import { reviewPrioritySuggestion } from "@/lib/ops-actions";
 import { leadSequenceId } from "@/lib/sequences";
-import { leadCycle, openLeadAction, PRIORITY_PLACE_LABEL, priorityPlace, textSequenceLive, type PriorityPlace } from "@/lib/next-step";
+import { leadCycle, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, type PriorityPlace } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 
 const COLUMNS =
-  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, desired_source, qualified, callrail_tags, agreement_status, agreement_sent_at, agreement_next_reminder_at, priority, priority_reason, priority_suggestion, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, desired_source, qualified, callrail_tags, agreement_status, agreement_sent_at, agreement_next_reminder_at, agreement_via_sms, agreement_via_email, priority, priority_reason, priority_suggestion, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type PriorityLead = Pick<
   Lead,
@@ -37,6 +37,8 @@ type PriorityLead = Pick<
   | "agreement_status"
   | "agreement_sent_at"
   | "agreement_next_reminder_at"
+  | "agreement_via_sms"
+  | "agreement_via_email"
   | "priority"
   | "priority_reason"
   | "priority_suggestion"
@@ -113,7 +115,7 @@ export default async function PriorityPage() {
     if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
   }
 
-  const grouped = new Map<PriorityPlace, { lead: PriorityLead; calls: number; last: string; wait: number; textsLive: boolean; action: string | null; nextAction: ReturnType<typeof nextActionLines> }[]>();
+  const grouped = new Map<PriorityPlace, { lead: PriorityLead; calls: number; last: string; wait: number; sequence: ReturnType<typeof outreachSequence>; action: string | null; nextAction: ReturnType<typeof nextActionLines> }[]>();
   for (const place of ["contract", "flagged", "suggested"] as const) grouped.set(place, []);
   for (const lead of candidates) {
     const connected = talked.has(lead.id);
@@ -126,7 +128,7 @@ export default async function PriorityPage() {
       calls: calls.get(lead.id) ?? 0,
       last: lastContacted(wait),
       wait: wait ?? 99,
-      textsLive: textSequenceLive(lead.text_sequence_status),
+      sequence: outreachSequence(lead),
       action: openLeadAction(lead, cycle, calls.get(lead.id) ?? 0),
       nextAction: nextActionLines({
         closed: false,
@@ -190,7 +192,7 @@ export default async function PriorityPage() {
                         <th className="px-4 py-3 font-medium">Lead</th>
                         <th className="px-4 py-3 font-medium">Grade</th>
                         <th className="px-4 py-3 font-medium">Calls</th>
-                        <th className="px-4 py-3 font-medium">Texts</th>
+                        <th className="px-4 py-3 font-medium">Sequence</th>
                         <th className="px-4 py-3 font-medium">Last contacted</th>
                         <th className="px-4 py-3 font-medium">Last action</th>
                         <th className="px-4 py-3 font-medium">Next action</th>
@@ -228,8 +230,8 @@ export default async function PriorityPage() {
                             </td>
                             <td className="px-4 py-3 font-medium text-slate-800">{row.lead.grade ?? "—"}</td>
                             <td className="px-4 py-3 tabular-nums text-slate-700">{row.calls}</td>
-                            <td className={`px-4 py-3 ${row.textsLive ? "font-medium text-slate-900" : "text-slate-500"}`}>
-                              {row.textsLive ? "Live" : "Off"}
+                            <td className={`px-4 py-3 ${row.sequence.on ? "font-medium text-slate-900" : "text-slate-500"}`}>
+                              {row.sequence.label}
                             </td>
                             <td className="px-4 py-3 text-slate-700">{row.last}</td>
                             <td className="max-w-xs px-4 py-3 text-slate-700">{row.lead.last_action || "No note yet."}</td>

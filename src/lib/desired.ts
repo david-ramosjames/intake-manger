@@ -12,6 +12,16 @@ export function contractSent(input: {
   return Boolean(input.agreement_sent_at);
 }
 
+/** A contract is still out while Sign Flow is waiting on a signature. */
+export function contractOutstanding(input: {
+  agreement_sent_at?: string | null;
+  agreement_status?: string | null;
+}): boolean {
+  const status = (input.agreement_status || "").toLowerCase();
+  if (["signed", "completed", "cancelled", "expired", "failed"].includes(status)) return false;
+  return status === "sent" || status === "viewed" || Boolean(input.agreement_sent_at);
+}
+
 export function milestoneConsultation(date: string | null | undefined): boolean {
   return Boolean(date);
 }

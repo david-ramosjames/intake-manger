@@ -1,129 +1,98 @@
 import Link from "next/link";
-import { callerClassLabel } from "@/lib/caller-class";
-import { desiredWord } from "@/lib/desired";
+import { CAPTURE_LABEL, CHANNEL_PAGE_SIZE, loadChannelAudit, type ChannelAuditRow } from "@/lib/lead-channel";
 import { leadTitle } from "@/lib/leads";
 import { requireStaff } from "@/lib/session";
+import { loadSlackSettings } from "@/lib/slack-settings";
 import { formatChicago } from "@/lib/time";
 
-export const metadata = { title: "Call log · Intake Manager" };
+export const metadata = { title: "Lead channel · Intake Manager" };
 
-const PAGE_SIZE = 50;
-const CALL_TYPES = ["call", "missed_call", "sona_call", "voicemail"];
+const COLUMNS = [
+  "When",
+  "Slack post",
+  "Captured",
+  "Name",
+  "Phone",
+  "Channel",
+  "Accident",
+  "Grade",
+  "Consult",
+  "Qualified",
+  "Desired",
+  "Signed",
+  "Not a lead",
+  "Decline",
+  "Injury",
+  "Size",
+  "Not qualified",
+  "Handled by",
+  "Still blank",
+] as const;
 
-const TYPE_LABEL: Record<string, string> = {
-  call: "Call",
-  missed_call: "Missed call",
-  sona_call: "Sona",
-  voicemail: "Voicemail",
-  text: "Text",
-  email: "Email",
-};
-
-type LeadBits = {
-  id: string;
-  lead_name: string | null;
-  lead_status: string | null;
-  close_reason: string | null;
-  caller_class: string | null;
-  grade: string | null;
-  qualified: boolean | null;
-  desired_case: boolean | null;
-  signed_case: boolean | null;
-  consultation_date: string | null;
-  callrail_tags: string[] | null;
-  owner_name: string | null;
-  follow_up: boolean | null;
-  summary: string | null;
-};
-
-type Touch = {
-  id: string;
-  occurred_at: string | null;
-  type: string | null;
-  direction: string | null;
-  phone: string | null;
-  phone_e164: string | null;
-  content: string | null;
-  quo_link: string | null;
-  slack_permalink: string | null;
-  source_id: string | null;
-  lead_id: string | null;
-  leads: LeadBits | LeadBits[] | null;
-};
-
-function oneLead(value: Touch["leads"]): LeadBits | null {
-  if (!value) return null;
-  return Array.isArray(value) ? value[0] ?? null : value;
-}
-
-function logHref(view: string, q: string, page: number): string {
+function logHref(input: { view?: string; q?: string; page?: number; cursor?: string }): string {
   const params = new URLSearchParams();
-  if (view !== "calls") params.set("view", view);
-  if (q) params.set("q", q);
-  if (page > 1) params.set("page", String(page));
+  if (input.view && input.view !== "all") params.set("view", input.view);
+  if (input.q) params.set("q", input.q);
+  if (input.page && input.page > 1) params.set("page", String(input.page));
+  if (input.cursor) params.set("cursor", input.cursor);
   const query = params.toString();
   return query ? `/calls?${query}` : "/calls";
 }
 
-export default async function CallLogPage({
+function missedCapture(row: ChannelAuditRow): boolean {
+  return row.capture === "not_stored" || row.capture === "no_lead";
+}
+
+export default async function LeadChannelPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ view?: string; q?: string; page?: string; cursor?: string }>;
 }) {
   const params = await searchParams;
-  const view = params.view === "texts" || params.view === "all" ? params.view : "calls";
+  const view = params.view === "gaps" ? "gaps" : "all";
   const q = (params.q || "").trim().slice(0, 80);
   const page = Math.max(1, Number(params.page) || 1);
+  const cursor = params.cursor || "";
   const { supabase } = await requireStaff();
-
-  let query = supabase
-    .from("intake_interactions")
-    .select(
-      "id, occurred_at, type, direction, phone, phone_e164, content, quo_link, slack_permalink, source_id, lead_id, leads(id, lead_name, lead_status, close_reason, caller_class, grade, qualified, desired_case, signed_case, consultation_date, callrail_tags, owner_name, follow_up, summary)",
-      { count: "exact" },
-    )
-    .order("occurred_at", { ascending: false });
-
-  if (view === "calls") query = query.in("type", CALL_TYPES);
-  if (view === "texts") query = query.eq("type", "text");
-
-  const digits = q.replace(/\D/g, "");
-  const safe = q.replace(/[%(),]/g, "");
-  if (digits.length >= 7) {
-    query = query.or(`phone.ilike.%${digits}%,phone_e164.ilike.%${digits}%`);
-  } else if (safe) {
-    const { data: named } = await supabase.from("leads").select("id").ilike("lead_name", `%${safe}%`).limit(40);
-    const ids = (named ?? []).map((row) => row.id as string);
-    const leadMatch = ids.length ? `,lead_id.in.(${ids.join(",")})` : "";
-    query = query.or(`content.ilike.%${safe}%${leadMatch}`);
-  }
-
-  const from = (page - 1) * PAGE_SIZE;
-  const { data, error, count } = await query.range(from, from + PAGE_SIZE - 1);
-  const rows = (data ?? []) as Touch[];
-  const total = count ?? rows.length;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const slack = await loadSlackSettings();
+  const audit = await loadChannelAudit(supabase, {
+    token: slack.token,
+    channelId: slack.channelId,
+    cursor: cursor || undefined,
+    page,
+    q,
+    gapsOnly: view === "gaps",
+  });
+  const pages = audit.total == null ? null : Math.max(1, Math.ceil(audit.total / CHANNEL_PAGE_SIZE));
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-navy">Call log</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-navy">#lead-calls</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Every call and text Quo has stored, with the lead decision next to it. Use this to spot-check classification, tags, and whether a call attached to the right lead. The full transcript stays in Quo.
+        Each row is a post in the leads Slack channel, with the lead fields stored from it. Use it to check that a
+        call, form, or thread reply was captured with the right decision.
       </p>
+      <p className="mt-2 max-w-3xl text-sm text-slate-600">
+        <span className="font-medium text-slate-800">Not a lead</span> is why a caller stays out of the work queue:
+        spam, a vendor, a job seeker, an existing client, an insurance company, another law office, a wrong number, or
+        a return call. A blank cell means the person was kept as a lead. A non-PI legal matter stays a lead and is
+        listed there so it can be referred.
+      </p>
+      {audit.notice ? <p className="mt-3 max-w-3xl text-sm text-amber-800">{audit.notice}</p> : null}
 
       <form className="mt-4 flex flex-wrap items-center gap-2" action="/calls">
         <input type="hidden" name="view" value={view} />
         <input
           name="q"
           defaultValue={q}
-          placeholder="Name or phone"
+          placeholder="Name, phone, or post"
           className="w-56 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
         />
         <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
           Search
         </button>
         {q ? (
-          <Link href={logHref(view, "", 1)} className="text-sm text-slate-500 hover:text-slate-900">
+          <Link href={logHref({ view })} className="text-sm text-slate-500 hover:text-slate-900">
             Clear
           </Link>
         ) : null}
@@ -132,101 +101,87 @@ export default async function CallLogPage({
       <div className="mt-3 flex flex-wrap gap-2 text-sm">
         {(
           [
-            ["calls", "Calls"],
-            ["texts", "Texts"],
-            ["all", "All"],
+            ["all", "All posts"],
+            ["gaps", "Needs a look"],
           ] as const
         ).map(([id, label]) => (
           <Link
             key={id}
-            href={logHref(id, q, 1)}
+            href={logHref({ view: id, q })}
             className={`rounded-full px-3 py-1 ${view === id ? "bg-brand font-medium text-navy" : "bg-slate-100 text-slate-700"}`}
           >
             {label}
           </Link>
         ))}
-        <span className="self-center text-slate-500">{total.toLocaleString()} records</span>
+        {audit.total != null ? (
+          <span className="self-center text-slate-500">{audit.total.toLocaleString()} stored posts</span>
+        ) : (
+          <span className="self-center text-slate-500">Read from #lead-calls</span>
+        )}
       </div>
 
-      {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
-
       <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-[1100px] w-full text-left text-sm">
+        <table className="min-w-[1680px] w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-3 py-2 font-medium">When</th>
-              <th className="px-3 py-2 font-medium">Type</th>
-              <th className="px-3 py-2 font-medium">Phone</th>
-              <th className="px-3 py-2 font-medium">Lead</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Class</th>
-              <th className="px-3 py-2 font-medium">Grade</th>
-              <th className="px-3 py-2 font-medium">Qualified</th>
-              <th className="px-3 py-2 font-medium">Desired</th>
-              <th className="px-3 py-2 font-medium">Signed</th>
-              <th className="px-3 py-2 font-medium">Consult</th>
-              <th className="px-3 py-2 font-medium">Handled by</th>
-              <th className="px-3 py-2 font-medium">What was said</th>
+              {COLUMNS.map((column) => (
+                <th key={column} className="whitespace-nowrap px-3 py-2 font-medium">
+                  {column}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
-              const lead = oneLead(row.leads);
-              const tags = (lead?.callrail_tags ?? []).join(", ");
-              return (
-                <tr key={row.id} className="border-b border-slate-100 align-top">
-                  <td className="whitespace-nowrap px-3 py-2 text-slate-600">{formatChicago(row.occurred_at)}</td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    {TYPE_LABEL[row.type || ""] || row.type || "—"}
-                    <span className="block text-xs text-slate-500">{row.direction || ""}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">{row.phone_e164 || row.phone || "—"}</td>
-                  <td className="px-3 py-2">
-                    {lead ? (
-                      <Link href={`/leads/${lead.id}`} className="font-medium text-navy hover:underline">
-                        {leadTitle({ lead_name: lead.lead_name, phone: row.phone })}
-                      </Link>
-                    ) : (
-                      <span className="text-slate-400">No lead</span>
-                    )}
-                    <span className="mt-1 block space-x-2 text-xs">
-                      {row.quo_link ? (
-                        <a href={row.quo_link} className="text-slate-500 hover:text-slate-900" target="_blank" rel="noreferrer">
-                          Quo
-                        </a>
-                      ) : null}
-                      {row.slack_permalink ? (
-                        <a href={row.slack_permalink} className="text-slate-500 hover:text-slate-900" target="_blank" rel="noreferrer">
-                          Slack
-                        </a>
-                      ) : null}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    {lead?.lead_status || "—"}
-                    {lead?.close_reason ? <span className="block text-xs text-slate-500">{lead.close_reason}</span> : null}
-                    {lead ? (
-                      <span className="block text-xs text-slate-500">{lead.follow_up ? "Follow-up on" : "Follow-up off"}</span>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2">{callerClassLabel(lead?.caller_class) || "—"}</td>
-                  <td className="px-3 py-2">{lead?.grade || "—"}</td>
-                  <td className="px-3 py-2">{desiredWord(lead?.qualified)}</td>
-                  <td className="px-3 py-2">{desiredWord(lead?.desired_case)}</td>
-                  <td className="px-3 py-2">{lead?.signed_case ? "Yes" : "—"}</td>
-                  <td className="whitespace-nowrap px-3 py-2">{lead?.consultation_date || "—"}</td>
-                  <td className="px-3 py-2">{lead?.owner_name || "—"}</td>
-                  <td className="max-w-sm px-3 py-2 text-slate-700">
-                    <p className="line-clamp-3">{row.content || lead?.summary || "—"}</p>
-                    {tags ? <p className="mt-1 text-xs text-slate-500">{tags}</p> : null}
-                  </td>
-                </tr>
-              );
-            })}
-            {rows.length === 0 ? (
+            {audit.rows.map((row) => (
+              <tr
+                key={row.id}
+                className={`border-b border-slate-100 align-top ${missedCapture(row) ? "bg-rose-50" : ""}`}
+              >
+                <td className="whitespace-nowrap px-3 py-2 text-slate-600">{formatChicago(row.when)}</td>
+                <td className="max-w-xs px-3 py-2 text-slate-700">
+                  <p className="line-clamp-3">{row.post || "—"}</p>
+                  {row.slackUrl ? (
+                    <a href={row.slackUrl} className="mt-1 inline-block text-xs text-slate-500 hover:text-slate-900" target="_blank" rel="noreferrer">
+                      Slack
+                    </a>
+                  ) : null}
+                  {row.quoUrl ? (
+                    <a href={row.quoUrl} className="mt-1 ml-2 inline-block text-xs text-slate-500 hover:text-slate-900" target="_blank" rel="noreferrer">
+                      Quo
+                    </a>
+                  ) : null}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2">{CAPTURE_LABEL[row.capture]}</td>
+                <td className="px-3 py-2">
+                  {row.leadId ? (
+                    <Link href={`/leads/${row.leadId}`} className="font-medium text-navy hover:underline">
+                      {leadTitle({ lead_name: row.leadName, phone: row.phone })}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2">{row.phone || "—"}</td>
+                <td className="whitespace-nowrap px-3 py-2">{row.channel}</td>
+                <td className="px-3 py-2">{row.accident}</td>
+                <td className="px-3 py-2">{row.grade}</td>
+                <td className="whitespace-nowrap px-3 py-2">{row.consult}</td>
+                <td className="px-3 py-2">{row.qualified}</td>
+                <td className="px-3 py-2">{row.desired}</td>
+                <td className="px-3 py-2">{row.signed}</td>
+                <td className="px-3 py-2">{row.notALead}</td>
+                <td className="px-3 py-2">{row.decline}</td>
+                <td className="px-3 py-2">{row.injury}</td>
+                <td className="px-3 py-2">{row.size}</td>
+                <td className="px-3 py-2">{row.notQualified}</td>
+                <td className="px-3 py-2">{row.handledBy}</td>
+                <td className="px-3 py-2 text-amber-800">{row.blanks || "—"}</td>
+              </tr>
+            ))}
+            {audit.rows.length === 0 ? (
               <tr>
-                <td colSpan={13} className="px-3 py-8 text-slate-500">
-                  Nothing matches this view.
+                <td colSpan={COLUMNS.length} className="px-3 py-8 text-slate-500">
+                  Nothing in this view.
                 </td>
               </tr>
             ) : null}
@@ -235,16 +190,28 @@ export default async function CallLogPage({
       </div>
 
       <div className="mt-3 flex items-center gap-3 text-sm">
-        {page > 1 ? (
-          <Link href={logHref(view, q, page - 1)} className="text-navy hover:underline">
+        {audit.source === "slack" && cursor ? (
+          <Link href={logHref({ view, q })} className="text-navy hover:underline">
+            Newest
+          </Link>
+        ) : null}
+        {audit.source === "stored" && page > 1 ? (
+          <Link href={logHref({ view, q, page: page - 1 })} className="text-navy hover:underline">
             Newer
           </Link>
         ) : null}
-        <span className="text-slate-500">
-          Page {page} of {pages}
-        </span>
-        {page < pages ? (
-          <Link href={logHref(view, q, page + 1)} className="text-navy hover:underline">
+        {pages != null ? (
+          <span className="text-slate-500">
+            Page {page} of {pages}
+          </span>
+        ) : null}
+        {audit.source === "slack" && audit.nextCursor ? (
+          <Link href={logHref({ view, q, cursor: audit.nextCursor })} className="text-navy hover:underline">
+            Older
+          </Link>
+        ) : null}
+        {audit.source === "stored" && pages != null && page < pages ? (
+          <Link href={logHref({ view, q, page: page + 1 })} className="text-navy hover:underline">
             Older
           </Link>
         ) : null}

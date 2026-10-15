@@ -45,6 +45,7 @@ export type QueueRow = {
   grade: string | null;
   textsLive: boolean;
   textNext: string | null;
+  sequenceLabel: string;
   agreementStatus: string | null;
   agreementSent: string | null;
   signingUrl: string | null;
@@ -319,8 +320,11 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>
           <ul className="mt-2 space-y-2 text-sm">
             <li className="flex justify-between gap-3">
-              <span className="text-slate-500">Texts</span>
-              <span>{row.textsLive ? (row.textNext ? `Next ${formatChicago(row.textNext)}` : "Live") : "Off"}</span>
+              <span className="text-slate-500">Sequence</span>
+              <span>
+                {row.sequenceLabel}
+                {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
+              </span>
             </li>
             <li className="flex justify-between gap-3">
               <span className="text-slate-500">Contract</span>

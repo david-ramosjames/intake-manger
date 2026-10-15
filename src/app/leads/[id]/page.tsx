@@ -12,7 +12,7 @@ import { chicagoLocalInput, formatChicago } from "@/lib/time";
 import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, signatureNeedsConfirm } from "@/lib/desired";
 import { daysOpen, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, priorityReasonText, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
-import { leadCycle, leadNeed, leadStatusLabel, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
+import { leadCycle, leadNeed, leadStatusLabel, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -523,6 +523,7 @@ function Signals({ lead }: { lead: Lead }) {
       ) : (
         <p className="text-slate-500">No contract send recorded from Sign Flow.</p>
       )}
+      {waiting ? <p>Contract sequence is {outreachSequence(lead).label.toLowerCase()}.</p> : null}
       {lead.text_sequence_status ? (
         <p>
           SMS sequence {lead.text_sequence_slug || "follow-up"} is {lead.text_sequence_status.replaceAll("_", " ")}.

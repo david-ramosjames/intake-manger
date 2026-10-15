@@ -94,6 +94,8 @@ export type Lead = {
   agreement_next_reminder_at: string | null;
   agreement_reminder_count: number | null;
   agreement_signing_url: string | null;
+  agreement_via_sms: boolean | null;
+  agreement_via_email: boolean | null;
   text_sequence_slug: string | null;
   text_sequence_status: string | null;
   text_next_at: string | null;

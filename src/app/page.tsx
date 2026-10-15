@@ -6,7 +6,7 @@ import { consultationWhen, contractSent, desiredWord, milestoneDesired, mileston
 import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
-import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
+import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
 import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
@@ -500,6 +500,7 @@ export default async function LeadListPage({
       actionTitle: row.actionTitle,
       label: callerClassLabel(row.lead.caller_class) ?? row.label,
       stageClassName: stageClass(row.label),
+      stageStripe: stageStripe(row.label),
       step: row.step,
       tags: row.lead.callrail_tags ?? [],
       callrail: Boolean(row.lead.callrail_call_id),
@@ -585,15 +586,18 @@ export default async function LeadListPage({
           <QueueHelp />
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400" title="Where leads from the last 30 days are now. Filtering the list below leaves these numbers in place.">
+            Last 30 days
+          </span>
           <Metric href={listHref({ queue: "contact", q, range, funnel })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} tone="text-amber-700" />
           <Metric href={listHref({ queue: "information", q, range, funnel })} active={queue === "information"} label="Need more information" value={String(metrics.information)} tone="text-sky-700" />
           <Metric href={listHref({ queue: "signing", q, range, funnel })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
           <Metric href={listHref({ queue: "signed", q, range, funnel: "closed" })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
-          <span className="flex items-baseline gap-1.5 px-1">
+          <span className="flex items-baseline gap-1.5 px-1" title="Signed leads among desired cases from the last 30 days.">
             <span className="text-lg font-semibold tabular-nums leading-none text-navy">{conversion}%</span>
-            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Conversion</span>
+            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Of desired</span>
           </span>
-          <div className="flex h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-slate-200" title="Last 30 days">
+          <div className="flex h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-slate-200" title="Last 30 days. Each lead is counted once, in the stage it is in now.">
             {pipeline.map((part) =>
               part.count ? (
                 <Link

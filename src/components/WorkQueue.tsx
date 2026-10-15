@@ -23,6 +23,7 @@ export type QueueRow = {
   actionTitle: string | null;
   label: string;
   stageClassName: string;
+  stageStripe: string;
   step: string;
   tags: string[];
   callrail: boolean;
@@ -165,7 +166,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                 key={row.id}
                 className={`border-b border-slate-100 last:border-0 ${
                   row.id === selectedId ? "bg-brand/10" : "hover:bg-slate-50"
-                } ${row.waiting ? "shadow-[inset_3px_0_0_0_#f59e0b]" : row.id === selectedId ? "shadow-[inset_3px_0_0_0_#38B7E3]" : ""}`}
+                } ${row.stageStripe}`}
               >
                 <td className="px-2 py-2">
                   <button

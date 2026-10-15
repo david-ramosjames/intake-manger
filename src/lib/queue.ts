@@ -75,6 +75,15 @@ export function stageClass(label: string): string {
   return "bg-slate-100 text-slate-600";
 }
 
+export function stageStripe(label: string): string {
+  if (label === "Signed") return "shadow-[inset_3px_0_0_0_#10b981]";
+  if (label === "Finish signing" || label === "Confirm signature") return "shadow-[inset_3px_0_0_0_#8b5cf6]";
+  if (label === "Need more information") return "shadow-[inset_3px_0_0_0_#0ea5e9]";
+  if (label === "Need to contact") return "shadow-[inset_3px_0_0_0_#f59e0b]";
+  if (label === "Outside practice") return "shadow-[inset_3px_0_0_0_#f97316]";
+  return "shadow-[inset_3px_0_0_0_#cbd5e1]";
+}
+
 const TEXT_SEQUENCE_LABEL: Record<string, string> = {
   "new-lead": "New lead",
   "more-info": "More info",

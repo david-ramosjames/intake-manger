@@ -24,7 +24,7 @@ export function QueueHelp() {
             </p>
             <p className="mt-3 font-medium text-navy">When a lead closes</p>
             <p className="mt-1">
-              A lead stays open until it is signed, declined, referred, or rejected. It also closes when the call sequence finishes with no reply, or when the contract reminder series finishes with no signature. Counts on this page are the last 30 days. Conversion is signed leads among desired cases.
+              A lead stays open until it is signed, declined, referred, or rejected. It also closes when the call sequence finishes with no reply, or when the contract reminder series finishes with no signature. The counts, the bar, and conversion stay on the last 30 days and follow each lead’s current stage. Conversion is signed leads among desired cases.
             </p>
           </div>
         </>

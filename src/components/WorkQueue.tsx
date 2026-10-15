@@ -136,9 +136,6 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                 </td>
                 <td className={`px-4 py-3 ${row.priority ? "font-medium text-slate-900" : "text-slate-500"}`}>
                   {row.priority ?? "—"}
-                  {row.prioritySuggestion && row.priority === "Suggested" ? (
-                    <p className="mt-0.5 max-w-40 text-xs font-normal text-slate-500">{row.prioritySuggestion}</p>
-                  ) : null}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${gradeClass(row.grade)}`}>
@@ -396,10 +393,10 @@ function PrioritySuggestion({ row }: { row: QueueRow }) {
       <p className="mt-1 text-sky-900">{row.prioritySuggestion}</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button name="decision" value="confirm" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
-          Confirm priority
+          Add to priority
         </button>
         <button name="decision" value="dismiss" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
-          Not now
+          Not a priority
         </button>
       </div>
     </form>

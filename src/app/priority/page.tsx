@@ -319,6 +319,7 @@ export default async function PriorityPage() {
                         <th className="px-4 py-3 font-medium">Last contacted</th>
                         <th className="px-4 py-3 font-medium">Last action</th>
                         <th className="px-4 py-3 font-medium">Next action</th>
+                        {reason === "suggested" ? <th className="px-4 py-3 font-medium">Priority list</th> : null}
                       </tr>
                     </thead>
                     <tbody>
@@ -373,18 +374,20 @@ export default async function PriorityPage() {
                                     <span className="text-slate-500">{line.label}</span> {line.when}
                                   </p>
                                 ))}
-                              {reason === "suggested" ? (
-                                <form action={reviewPrioritySuggestion} className="mt-2 flex flex-wrap gap-2">
+                            </td>
+                            {reason === "suggested" ? (
+                              <td className="px-4 py-3">
+                                <form action={reviewPrioritySuggestion} className="flex flex-col items-start gap-2">
                                   <input type="hidden" name="lead_id" value={row.lead.id} />
-                                  <button name="decision" value="confirm" className="rounded-md bg-navy px-2.5 py-1 text-xs font-medium text-white">
-                                    Confirm
+                                  <button name="decision" value="confirm" className="whitespace-nowrap rounded-md bg-navy px-2.5 py-1 text-xs font-medium text-white">
+                                    Add to priority
                                   </button>
-                                  <button name="decision" value="dismiss" className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs">
-                                    Not now
+                                  <button name="decision" value="dismiss" className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs">
+                                    Not a priority
                                   </button>
                                 </form>
-                              ) : null}
-                            </td>
+                              </td>
+                            ) : null}
                           </tr>
                         );
                       })}
@@ -410,7 +413,7 @@ function gradeRank(grade: string | null): number {
 function groupDetail(reason: PriorityPlace): string {
   if (reason === "contract") return "The contract has been sent and it is not signed. It stays here until the lead is signed or closed.";
   if (reason === "flagged") return "Someone marked this lead. Promising web forms and high-quality referrals belong here.";
-  return "Quo recommended this lead. It stays off the list until someone confirms it.";
+  return "Quo recommended this lead. Add it to the priority list, or leave it off.";
 }
 
 async function loadTouches(

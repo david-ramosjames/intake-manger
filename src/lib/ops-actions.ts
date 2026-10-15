@@ -528,21 +528,21 @@ export async function saveCadence(formData: FormData) {
   if (!Array.isArray(days) || days.length < 1 || days.length > 21) {
     throw new Error("Use between 1 and 21 days.");
   }
-  const rows: { sequence: string; queue: "call" | "text"; position: number; delay_minutes: number; callback_window: string; body: string }[] = [];
+  const rows: { sequence: string; queue: "call" | "text"; position: number; delay_minutes: number; callback_window: string | null; body: string }[] = [];
   const positions = { call: 0, text: 0 };
   days.forEach((day, index) => {
     for (const queue of ["call", "text"] as const) {
       const slots = queue === "call" ? day?.calls : day?.texts;
       if (!Array.isArray(slots) || slots.length > 3) throw new Error("Each day can have up to three calls and three texts.");
       for (const slot of slots) {
-        if (!isCallbackWindow(slot)) throw new Error("Choose morning, lunch, afternoon, or match last contact.");
+        if (queue === "call" && !isCallbackWindow(slot)) throw new Error("Choose morning, lunch, afternoon, or match last contact.");
         positions[queue] += 1;
         rows.push({
           sequence,
           queue,
           position: positions[queue],
           delay_minutes: index * 1440,
-          callback_window: slot,
+          callback_window: queue === "call" ? slot : null,
           body: stepBody(sequence, queue),
         });
       }
@@ -557,6 +557,7 @@ export async function saveCadence(formData: FormData) {
   revalidatePath("/sequences");
   revalidatePath("/");
   revalidatePath("/priority");
+  redirect(`/sequences?sequence=${sequence}&saved=${Date.now()}`);
 }
 
 export async function saveSequenceStep(formData: FormData) {

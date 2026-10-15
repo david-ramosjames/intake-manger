@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useFormStatus } from "react-dom";
 import { saveCadence } from "@/lib/ops-actions";
 import {
   NEW_LEAD_CADENCE,
@@ -25,34 +26,36 @@ function resize(list: CallbackWindow[], count: number, first: CallbackWindow, ex
 export function CadenceEditor({
   sequence,
   initial,
+  saved,
 }: {
   sequence: CallSequenceId;
   initial: CadenceDay[];
+  saved: boolean;
 }) {
   const [days, setDays] = useState<CadenceDay[]>(initial);
+  const [changed, setChanged] = useState(false);
   const calls = days.reduce((sum, day) => sum + day.calls.length, 0);
   const texts = days.reduce((sum, day) => sum + day.texts.length, 0);
 
-  function update(index: number, queue: "calls" | "texts", count: number) {
+  function update(index: number, count: number) {
+    setChanged(true);
     setDays((current) =>
       current.map((day, dayIndex) => {
         if (dayIndex !== index) return day;
-        if (queue === "calls") {
-          const extra = day.calls[0] === "afternoon" ? "morning" : "afternoon";
-          return { ...day, calls: resize(day.calls, count, "morning", extra) };
-        }
-        return { ...day, texts: resize(day.texts, count, "afternoon", "afternoon") };
+        const extra = day.calls[0] === "afternoon" ? "morning" : "afternoon";
+        return { ...day, calls: resize(day.calls, count, "morning", extra) };
       }),
     );
   }
 
-  function setWindow(index: number, queue: "calls" | "texts", slot: number, value: CallbackWindow) {
+  function setWindow(index: number, slot: number, value: CallbackWindow) {
+    setChanged(true);
     setDays((current) =>
       current.map((day, dayIndex) => {
         if (dayIndex !== index) return day;
-        const list = [...day[queue]];
+        const list = [...day.calls];
         list[slot] = value;
-        return { ...day, [queue]: list };
+        return { ...day, calls: list };
       }),
     );
   }
@@ -76,7 +79,6 @@ export function CadenceEditor({
                 <th className="px-3 py-3">Calls</th>
                 <th className="px-3 py-3">Call time</th>
                 <th className="px-3 py-3">Texts</th>
-                <th className="px-3 py-3">Text time</th>
               </tr>
             </thead>
             <tbody>
@@ -84,16 +86,13 @@ export function CadenceEditor({
                 <tr key={index} className="border-b border-slate-100 last:border-0">
                   <td className="px-4 py-3 font-medium text-slate-800">Day {index + 1}</td>
                   <td className="px-3 py-3">
-                    <Count value={day.calls.length} tone="call" onChange={(count) => update(index, "calls", count)} />
+                    <Count value={day.calls.length} onChange={(count) => update(index, count)} />
                   </td>
                   <td className="px-3 py-3">
-                    <Windows values={day.calls} onChange={(slot, value) => setWindow(index, "calls", slot, value)} />
+                    <Windows values={day.calls} onChange={(slot, value) => setWindow(index, slot, value)} />
                   </td>
                   <td className="px-3 py-3">
-                    <Count value={day.texts.length} tone="text" onChange={(count) => update(index, "texts", count)} />
-                  </td>
-                  <td className="px-3 py-3">
-                    <Windows values={day.texts} onChange={(slot, value) => setWindow(index, "texts", slot, value)} />
+                    <TextCount count={day.texts.length} />
                   </td>
                 </tr>
               ))}
@@ -103,18 +102,20 @@ export function CadenceEditor({
         <form action={saveCadence} className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
           <input type="hidden" name="sequence" value={sequence} />
           <input type="hidden" name="days" value={JSON.stringify(days)} />
-          <p className="text-sm text-slate-500">Texts are planned here. SMS Follow-Up still sends them.</p>
-          <div className="flex gap-2">
+          <p className="text-sm text-slate-500">Text times are set in SMS Follow-Up. This column only shows how many are planned.</p>
+          <div className="flex items-center gap-3">
+            {saved && !changed ? <p className="text-sm font-medium text-emerald-700">Saved.</p> : null}
             <button
               type="button"
-              onClick={() => setDays(NEW_LEAD_CADENCE.map((day) => ({ calls: [...day.calls], texts: [...day.texts] })))}
+              onClick={() => {
+                setChanged(true);
+                setDays(NEW_LEAD_CADENCE.map((day) => ({ calls: [...day.calls], texts: [...day.texts] })));
+              }}
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
             >
               Reset to default
             </button>
-            <button type="submit" className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-navy">
-              Save cadence
-            </button>
+            <SaveButton />
           </div>
         </form>
       </section>
@@ -133,7 +134,7 @@ export function CadenceEditor({
         <section className="rounded-xl border border-sky-100 bg-sky-50 p-4 text-sm text-sky-950">
           <h3 className="font-semibold">Recommended timing</h3>
           <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5">
-            <li>If a day has two calls or texts, they stay at least 2 hours apart.</li>
+            <li>If a day has two calls, they stay at least 2 hours apart.</li>
             <li>Morning and afternoon are the strongest windows.</li>
             <li>Nothing is placed before 8:30 AM or after 5:30 PM.</li>
             <li>Match last contact uses that whole window, then picks a minute inside it.</li>
@@ -152,25 +153,44 @@ export function CadenceEditor({
   );
 }
 
+function SaveButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending} className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-navy disabled:opacity-60">
+      {pending ? "Saving…" : "Save cadence"}
+    </button>
+  );
+}
+
+function TextCount({ count }: { count: number }) {
+  if (!count) return <span className="text-slate-300">—</span>;
+  return (
+    <span className="inline-flex items-center gap-2 text-slate-700">
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+        <TextIcon />
+      </span>
+      {count}
+    </span>
+  );
+}
+
 function Count({
   value,
-  tone,
   onChange,
 }: {
   value: number;
-  tone: "call" | "text";
   onChange: (count: number) => void;
 }) {
   return (
     <label className="inline-flex items-center gap-2">
-      <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${tone === "call" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
-        {tone === "call" ? <PhoneIcon /> : <TextIcon />}
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+        <PhoneIcon />
       </span>
       <select
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         className="rounded-md border border-slate-200 bg-white px-2 py-1.5"
-        aria-label={tone === "call" ? "Number of calls" : "Number of texts"}
+        aria-label="Number of calls"
       >
         {[0, 1, 2].map((count) => (
           <option key={count} value={count}>

@@ -25,7 +25,7 @@ type Step = {
 export default async function SequencesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sequence?: string }>;
+  searchParams: Promise<{ sequence?: string; saved?: string }>;
 }) {
   const params = await searchParams;
   const sequence: CallSequenceId = isCallSequence(params.sequence) ? params.sequence : "first_talk";
@@ -62,7 +62,7 @@ export default async function SequencesPage({
       </div>
 
       <div className="mt-4">
-        <CadenceEditor key={sequence} sequence={sequence} initial={cadenceFromSteps(rows)} />
+        <CadenceEditor key={`${sequence}-${params.saved ?? "edit"}`} sequence={sequence} initial={cadenceFromSteps(rows)} saved={Boolean(params.saved)} />
       </div>
 
       <details className="mt-4 rounded-xl border border-slate-200 bg-white px-5 py-4">

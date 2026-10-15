@@ -196,7 +196,7 @@ function Count({
         className="rounded-md border border-slate-200 bg-white px-2 py-1.5"
         aria-label={text ? "Number of texts" : "Number of calls"}
       >
-        {[0, 1, 2].map((count) => (
+        {(text ? [0, 1, 2] : [0, 1, 2, 3]).map((count) => (
           <option key={count} value={count}>
             {count}
           </option>

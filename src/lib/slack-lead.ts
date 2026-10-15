@@ -88,14 +88,15 @@ export function parseSlackLead(text: string): ParsedSlackLead {
   }
 
   const nameFrom = from?.replace(/\(.*\)/, "").replace(/<[^>]+>/g, "").trim() || null;
-  const phone = phonesIn(from ?? "") ?? phonesIn(body);
-  const email = body.match(EMAIL)?.[0] ?? null;
+  const phone = field(body, "Phone") ?? phonesIn(from ?? "") ?? phonesIn(body);
+  const email = field(body, "Email") ?? body.match(EMAIL)?.[0] ?? null;
   const named = nameFrom && !/^\+?\d/.test(nameFrom) && !JUNK.test(nameFrom) ? nameFrom : null;
+  const accident = field(body, "Type of Accident") || field(body, "Accident");
 
   return {
     kind,
     arrival,
-    name: named ?? nameFromSummary(summaryBlock ?? body.slice(0, 500)),
+    name: cleanName(field(body, "Name") ?? undefined) ?? named ?? nameFromSummary(summaryBlock ?? body.slice(0, 500)),
     phone,
     phoneE164: toE164(phone),
     email: email && !JUNK.test(email) ? email : null,
@@ -103,7 +104,7 @@ export function parseSlackLead(text: string): ParsedSlackLead {
     summary: summaryBlock ? summaryBlock.slice(0, 2000) : body.slice(0, 2000),
     quoLink: quo,
     tags,
-    caseType: null,
+    caseType: accident && !/^other$/i.test(accident) ? accident : null,
   };
 }
 

@@ -8,6 +8,7 @@ import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
 import { leadSequenceId } from "@/lib/sequences";
+import { phoneLikePattern, phoneTail } from "@/lib/phone";
 import { chicagoDay, formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -233,6 +234,32 @@ function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: 
   return query ? `/?${query}` : "/";
 }
 
+async function searchLeads(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  q: string,
+): Promise<ListLead[]> {
+  const digits = phoneTail(q);
+  const pattern = phoneLikePattern(q);
+  const safe = q.replace(/[%(),]/g, "").trim();
+  if (pattern && digits.length >= 7) {
+    const { data: matches } = await supabase
+      .from("leads")
+      .select(LIST_COLUMNS)
+      .or(`phone_e164.ilike.%${digits}%,phone.ilike.%${digits}%,phone.ilike.%${pattern}%`)
+      .limit(40);
+    return (matches ?? []) as ListLead[];
+  }
+  if (safe.length >= 2 && digits.length < 7) {
+    const { data: matches } = await supabase
+      .from("leads")
+      .select(LIST_COLUMNS)
+      .or(`lead_name.ilike.%${safe}%,email.ilike.%${safe}%,case_number.ilike.%${safe}%`)
+      .limit(40);
+    return (matches ?? []) as ListLead[];
+  }
+  return [];
+}
+
 export default async function LeadListPage({
   searchParams,
 }: {
@@ -290,7 +317,12 @@ export default async function LeadListPage({
   ]);
   const workLeads = (data ?? []) as ListLead[];
   const reviewLeads = (reviewResult.data ?? []) as ListLead[];
-  const leads = queue === "nonleads" ? [...workLeads, ...reviewLeads] : workLeads;
+  const searched = await searchLeads(supabase, q);
+  const merged = new Map<string, ListLead>();
+  for (const lead of [...searched, ...workLeads, ...(queue === "nonleads" ? reviewLeads : [])]) {
+    merged.set(lead.id, lead);
+  }
+  const leads = [...merged.values()];
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
   await attachCallrailSources(leads, async (id, source) => {
@@ -410,11 +442,11 @@ export default async function LeadListPage({
   ];
 
   const needle = q.toLowerCase();
-  const needleDigits = needle.replace(/\D/g, "");
+  const phoneSearch = phoneTail(q).length >= 7;
   const shown = combined
-    .filter((group) => arrivedInRange(group.row.age, range))
-    .filter((group) => matchesQueue(queue, group.row.cycle, group.row.attention))
-    .filter((group) => matchesLegacy(view, group.row.lead))
+    .filter((group) => phoneSearch || arrivedInRange(group.row.age, range))
+    .filter((group) => phoneSearch || matchesQueue(queue, group.row.cycle, group.row.attention))
+    .filter((group) => phoneSearch || matchesLegacy(view, group.row.lead))
     .filter((group) => {
       if (!needle) return true;
       return [group.row, ...group.others].some((item) => {
@@ -423,7 +455,9 @@ export default async function LeadListPage({
           (value || "").toLowerCase().includes(needle),
         );
         if (textHit) return true;
-        return needleDigits.length >= 7 && phoneKey(lead.phone || lead.phone_e164).includes(needleDigits.slice(-10));
+        const storedDigits = phoneTail(lead.phone || lead.phone_e164);
+        const typedDigits = phoneTail(q);
+        return typedDigits.length >= 7 && (storedDigits.includes(typedDigits) || typedDigits.includes(storedDigits));
       });
     })
     .sort((a, b) => {
@@ -527,7 +561,7 @@ export default async function LeadListPage({
           <input
             name="q"
             defaultValue={q}
-            placeholder="Name, phone, email, or case number"
+            placeholder="Name, phone, or part of a phone"
             className="w-64 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
           />
           <Link href="/" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">

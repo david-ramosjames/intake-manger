@@ -1,7 +1,7 @@
 import { scheduleCallback } from "@/lib/callbacks";
 import { formatCallWhen } from "@/lib/time";
 
-export type CallStep = { position: number; delay_minutes: number };
+export type CallStep = { position: number; delay_minutes: number; callback_window?: string | null };
 
 const REMINDER_CLOSED = new Set(["signed", "completed", "failed", "cancelled", "expired"]);
 
@@ -55,6 +55,7 @@ function nextCallAt(input: {
   if (Number.isNaN(start)) return null;
   return scheduleCallback({
     from: new Date(start + step.delay_minutes * 60_000),
+    window: step.callback_window,
     index: Math.max(0, input.callsMade),
     contactAt: input.contactAt ? new Date(input.contactAt) : null,
     priority: Boolean(input.priority),

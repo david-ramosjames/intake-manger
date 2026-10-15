@@ -11,9 +11,9 @@ export const CALL_SEQUENCE_LABEL: Record<CallSequenceId, string> = {
 };
 
 export const CALL_SEQUENCE_DETAIL: Record<CallSequenceId, string> = {
-  want_to_sign: "Starts when a contract is sent and not signed. The aim is to get it signed.",
-  first_talk: "Starts on its own for a missed call or a form fill, to make first contact.",
-  more_info: "Starts only when someone clicks Start follow-up sequence, after a conversation that still needs a callback.",
+  want_to_sign: "Day 1 is the day the contract was sent. It runs until the contract is signed or the last day of the cadence.",
+  first_talk: "Day 1 is the day the client contacted the firm.",
+  more_info: "Day 1 is the day of the consultation. Starting this sequence begins again at day 1.",
 };
 
 export function isCallSequence(value: string | null | undefined): value is CallSequenceId {
@@ -44,6 +44,51 @@ export function splitDelay(minutes: number): { days: number; hours: number } {
 
 export function delayMinutes(days: number, hours: number): number {
   return days * 1440 + hours * 60;
+}
+
+export type CallbackWindow = "morning" | "lunch" | "afternoon" | "contact";
+
+export function isCallbackWindow(value: string | null | undefined): value is CallbackWindow {
+  return value === "morning" || value === "lunch" || value === "afternoon" || value === "contact";
+}
+
+export type CadenceDay = {
+  calls: CallbackWindow[];
+  texts: CallbackWindow[];
+};
+
+/** The pictured 14-day plan. Reset loads this. New enrollments use whatever is saved. */
+export const NEW_LEAD_CADENCE: CadenceDay[] = [
+  { calls: ["morning", "afternoon"], texts: ["lunch", "afternoon"] },
+  { calls: ["morning", "afternoon"], texts: ["afternoon"] },
+  { calls: ["morning", "afternoon"], texts: ["afternoon"] },
+  { calls: ["morning"], texts: ["afternoon"] },
+  { calls: ["morning"], texts: ["afternoon"] },
+  { calls: ["morning"], texts: ["afternoon"] },
+  { calls: ["morning"], texts: ["afternoon"] },
+  { calls: ["morning"], texts: [] },
+  { calls: [], texts: ["afternoon"] },
+  { calls: ["morning"], texts: [] },
+  { calls: [], texts: ["afternoon"] },
+  { calls: ["morning"], texts: [] },
+  { calls: ["morning"], texts: [] },
+  { calls: [], texts: ["afternoon"] },
+];
+
+export function cadenceFromSteps(
+  steps: { queue: string; position: number; delay_minutes: number; callback_window: string | null }[],
+): CadenceDay[] {
+  const grouped = new Map<number, CadenceDay>();
+  for (const step of [...steps].sort((a, b) => a.position - b.position)) {
+    const day = Math.floor(Math.max(0, step.delay_minutes) / 1440);
+    const plan = grouped.get(day) ?? { calls: [], texts: [] };
+    const slot = isCallbackWindow(step.callback_window) ? step.callback_window : "morning";
+    if (step.queue === "text") plan.texts.push(slot);
+    else plan.calls.push(slot);
+    grouped.set(day, plan);
+  }
+  const last = Math.max(13, ...grouped.keys(), 0);
+  return Array.from({ length: last + 1 }, (_, day) => grouped.get(day) ?? { calls: [], texts: [] });
 }
 
 /** Minutes from midnight, Chicago. A null weekend window means that day is closed. */

@@ -1,6 +1,8 @@
 import { chicagoDay, chicagoLocalToIso, chicagoParts } from "./time";
 
-const BUCKETS = ["morning", "contact", "lunch", "afternoon"] as const;
+export const CALLBACK_WINDOWS = ["morning", "lunch", "afternoon", "contact"] as const;
+
+export type CallbackWindow = (typeof CALLBACK_WINDOWS)[number];
 
 const DAY_START = 8 * 60 + 30;
 const DAY_END = 17 * 60 + 30;
@@ -10,6 +12,27 @@ const WINDOW = {
   lunch: [11 * 60 + 30, 14 * 60 + 30],
   afternoon: [14 * 60 + 30, DAY_END],
 } as const;
+
+export function isCallbackWindow(value: string | null | undefined): value is CallbackWindow {
+  return value === "morning" || value === "lunch" || value === "afternoon" || value === "contact";
+}
+
+/** The window that contains a clock time. Times outside 8:30–5:30 use the nearest window. */
+export function windowForMinute(minute: number): "morning" | "lunch" | "afternoon" {
+  if (minute < WINDOW.lunch[0]) return "morning";
+  if (minute < WINDOW.afternoon[0]) return "lunch";
+  return "afternoon";
+}
+
+export function windowForContact(contactAt: Date | null): "morning" | "lunch" | "afternoon" {
+  if (!contactAt || Number.isNaN(contactAt.getTime())) return "morning";
+  const parts = chicagoParts(contactAt);
+  return windowForMinute(parts.hour * 60 + parts.minute);
+}
+
+export function windowForIndex(index: number): CallbackWindow {
+  return CALLBACK_WINDOWS[Math.max(0, index) % CALLBACK_WINDOWS.length];
+}
 
 function vary(key: string, span: number): number {
   if (span <= 1) return 0;
@@ -28,25 +51,41 @@ function shiftDay(day: string, days: number): string {
   return next.toISOString().slice(0, 10);
 }
 
-function contactWindow(contactAt: Date | null): { start: number; end: number } {
-  if (!contactAt || Number.isNaN(contactAt.getTime())) return { start: WINDOW.morning[0], end: WINDOW.morning[1] };
-  const parts = chicagoParts(contactAt);
-  const minute = parts.hour * 60 + parts.minute;
-  const start = Math.min(DAY_END - 50, Math.max(DAY_START, minute - 20));
-  return { start, end: Math.min(DAY_END, start + 50) };
+/** A minute inside the window. The same lead keeps its minute; different leads land on different minutes. */
+function minuteInWindow(start: number, end: number, key: string, avoid: number[]): number {
+  const span = Math.max(1, end - start);
+  const first = start + vary(key, span);
+  if (!avoid.length) return first;
+  let best = first;
+  let bestGap = Math.min(...avoid.map((taken) => Math.abs(taken - first)));
+  for (let offset = 0; offset < span; offset += 5) {
+    const minute = start + ((first - start + offset) % span);
+    const gap = Math.min(...avoid.map((taken) => Math.abs(taken - minute)));
+    if (gap > bestGap) {
+      best = minute;
+      bestGap = gap;
+    }
+  }
+  return best;
 }
 
-/** Earliest callbacks favor morning and the original contact time, then the buckets rotate. The minute varies inside the bucket. Priority calls can land on a weekend. */
+/**
+ * Place a callback inside Morning, Lunch, Afternoon, or the same window as the last contact.
+ * The minute varies inside that window. Priority calls can land on a weekend.
+ */
 export function scheduleCallback(input: {
   from: Date;
-  index: number;
+  window?: string | null;
+  index?: number;
   contactAt: Date | null;
   priority: boolean;
   varyKey: string;
+  avoid?: number[];
 }): string {
-  const bucket = BUCKETS[Math.max(0, input.index) % BUCKETS.length];
-  const window = bucket === "contact" ? contactWindow(input.contactAt) : { start: WINDOW[bucket][0], end: WINDOW[bucket][1] };
-  const minute = window.start + vary(`${input.varyKey}:${bucket}`, Math.max(1, window.end - window.start));
+  const chosen = isCallbackWindow(input.window) ? input.window : windowForIndex(input.index ?? 0);
+  const bucket = chosen === "contact" ? windowForContact(input.contactAt) : chosen;
+  const [start, end] = WINDOW[bucket];
+  const minute = minuteInWindow(start, end, `${input.varyKey}:${bucket}`, input.avoid ?? []);
   let day = chicagoDay(input.from);
   for (let hop = 0; hop < 14; hop += 1) {
     const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
@@ -66,4 +105,11 @@ export function weekendCallAllowed(date: Date, priority: boolean): boolean {
   const dow = chicagoParts(date).dow;
   if (dow !== 0 && dow !== 6) return true;
   return priority;
+}
+
+export function chicagoMinute(iso: string): number | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = chicagoParts(date);
+  return parts.hour * 60 + parts.minute;
 }

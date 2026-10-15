@@ -7,6 +7,7 @@ import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAct
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
+import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
 import { phoneLikePattern, phoneMatches, phoneTail } from "@/lib/phone";
 import { chicagoDay, formatCallWhen } from "@/lib/time";
@@ -19,6 +20,8 @@ type HistoryTouch = {
   type: string | null;
   direction: string | null;
   occurred_at: string | null;
+  quo_link: string | null;
+  slack_permalink: string | null;
 };
 
 function recentCutoff(): string {
@@ -74,7 +77,7 @@ async function loadTouches(
   for (let from = 0; from < 20000; from += page) {
     const { data } = await supabase
       .from("intake_interactions")
-      .select("lead_id, phone, type, direction, occurred_at")
+      .select("lead_id, phone, type, direction, occurred_at, quo_link, slack_permalink")
       .in("lead_id", ids)
       .order("occurred_at", { ascending: false })
       .range(from, from + page - 1);
@@ -95,7 +98,7 @@ async function loadTouchesByPhone(
   for (let from = 0; from < 20000; from += page) {
     const { data } = await supabase
       .from("intake_interactions")
-      .select("lead_id, phone, type, direction, occurred_at")
+      .select("lead_id, phone, type, direction, occurred_at, quo_link, slack_permalink")
       .in("phone", phones)
       .order("occurred_at", { ascending: false })
       .range(from, from + page - 1);
@@ -314,7 +317,7 @@ export default async function LeadListPage({
       .in("lead_status", ["Lost", "Referred", "Promoted"])
       .eq("signed_case", false)
       .gte("lead_date", since),
-    supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
+    supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
   ]);
   const workLeads = (data ?? []) as ListLead[];
   const reviewLeads = (reviewResult.data ?? []) as ListLead[];
@@ -334,6 +337,13 @@ export default async function LeadListPage({
   const contact = new Map<string, { calls: number; texts: number }>();
   const nextCall = new Map<string, string>();
   const lastOutreach = new Map<string, string>();
+  const outsideLinks = new Map<string, { quo: string | null; slack: string | null }>();
+  const rememberLinks = (leadId: string, touch: HistoryTouch) => {
+    const current = outsideLinks.get(leadId) ?? { quo: null, slack: null };
+    if (!current.quo && touch.quo_link) current.quo = touch.quo_link;
+    if (!current.slack && touch.slack_permalink) current.slack = touch.slack_permalink;
+    outsideLinks.set(leadId, current);
+  };
   const ids = leads.map((lead) => lead.id);
   const idSet = new Set(ids);
   const idsByPhone = new Map<string, string[]>();
@@ -366,6 +376,7 @@ export default async function LeadListPage({
           const current = lastOutreach.get(leadId);
           if (!current || touch.occurred_at > current) lastOutreach.set(leadId, touch.occurred_at);
         }
+        rememberLinks(leadId, touch);
       }
     }
     const missingPhones = [...idsByPhone.keys()].filter((phone) =>
@@ -378,6 +389,7 @@ export default async function LeadListPage({
       for (const leadId of idsByPhone.get(phoneKey(touch.phone)) ?? []) {
         const current = lastOutreach.get(leadId);
         if (!current || touch.occurred_at > current) lastOutreach.set(leadId, touch.occurred_at);
+        rememberLinks(leadId, touch);
       }
     }
     for (const job of calls ?? []) {
@@ -502,8 +514,8 @@ export default async function LeadListPage({
       waiting: row.waiting,
       automationLabel: automation.label,
       automationBad: automation.bad,
-      quoUrl: row.lead.quo_link,
-      slackUrl: slackMessageUrl(row.lead),
+      quoUrl: row.lead.quo_link || outsideLinks.get(row.lead.id)?.quo || null,
+      slackUrl: slackMessageUrl(row.lead) || outsideLinks.get(row.lead.id)?.slack || null,
       phone: displayPhone(row.lead.phone),
       email: row.lead.email,
       summary: row.lead.summary,
@@ -527,7 +539,13 @@ export default async function LeadListPage({
         textNextAt: row.lead.text_next_at,
         reminderAt: row.lead.agreement_next_reminder_at,
         agreementStatus: row.lead.agreement_status,
-        callStart: row.lead.lead_date ?? row.lead.created_at,
+        callStart: dayOneFor(row.lead, {
+          closed: row.cycle === "signed" || row.cycle === "closed",
+          talked: talked.has(row.lead.id),
+          kind: row.lead.kind,
+          agreementStatus: row.lead.agreement_status,
+          agreementSentAt: row.lead.agreement_sent_at,
+        }),
         callsMade: row.tally.calls,
         pendingCallAt: row.nextAt ?? null,
         callSteps: stepsForLead(callSteps, {
@@ -694,6 +712,21 @@ export default async function LeadListPage({
       </p>
     </main>
   );
+}
+
+function dayOneFor(
+  lead: ListLead,
+  input: {
+    closed: boolean;
+    talked: boolean;
+    kind: string | null;
+    agreementStatus: string | null;
+    agreementSentAt: string | null;
+  },
+): string | null {
+  const sequence = leadSequenceId(input);
+  if (!sequence) return lead.created_at;
+  return sequenceDayOne(sequence, lead).toISOString();
 }
 
 function stepsForLead(

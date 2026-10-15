@@ -1,9 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { scheduleCallback } from "./callbacks";
+import { chicagoMinute, scheduleCallback } from "./callbacks";
 import { contractSent } from "./desired";
 import type { LeadKind } from "./leads";
 import { type CallSequenceId, type WorkHours } from "./sequences";
-import { formatChicago } from "./time";
+import { chicagoLocalToIso, formatChicago } from "./time";
 
 type LeadBits = {
   id: string;
@@ -21,7 +21,31 @@ type LeadBits = {
   priority?: boolean | null;
   created_at?: string | null;
   consultation_date?: string | null;
+  lead_date?: string | null;
 };
+
+/** Day 1 of a sequence. A later sequence starts over from its own day 1. */
+export function sequenceDayOne(sequence: CallSequenceId, lead: LeadBits): Date {
+  if (sequence === "want_to_sign" && lead.agreement_sent_at) {
+    const sent = new Date(lead.agreement_sent_at);
+    if (!Number.isNaN(sent.getTime())) return sent;
+  }
+  if (sequence === "more_info") {
+    const consult = dayStart(lead.consultation_date);
+    if (consult) return consult;
+  }
+  if (sequence === "first_talk") {
+    const arrived = dayStart(lead.lead_date) ?? (lead.created_at ? new Date(lead.created_at) : null);
+    if (arrived && !Number.isNaN(arrived.getTime())) return arrived;
+  }
+  return new Date();
+}
+
+function dayStart(value: string | null | undefined): Date | null {
+  const day = value?.slice(0, 10) ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  return new Date(chicagoLocalToIso(`${day}T00:01`));
+}
 
 export function renderStep(body: string, lead: { lead_name: string | null; case_type: string | null }): string {
   const name = lead.lead_name?.trim().split(/\s+/)[0] || "there";
@@ -60,7 +84,7 @@ export async function enrollFollowUp(
 
   const { data: steps, error } = await supabase
     .from("sequence_steps")
-    .select("queue, position, delay_minutes, body")
+    .select("queue, position, delay_minutes, body, callback_window")
     .eq("sequence", sequence)
     .eq("queue", "call")
     .order("position");
@@ -69,30 +93,50 @@ export async function enrollFollowUp(
 
   const priority = Boolean(lead.priority) || sequence === "want_to_sign";
   const contactAt = lead.created_at ? new Date(lead.created_at) : null;
-  const now = Date.now();
-  const rows = (steps ?? []).map((step) => {
+  const dayOne = sequenceDayOne(sequence, lead).getTime();
+  const usedByDay = new Map<number, number[]>();
+  const rows = (steps ?? []).flatMap((step) => {
     const position = step.position as number;
-    const from = new Date(now + Number(step.delay_minutes) * 60_000);
+    const delay = Number(step.delay_minutes);
+    const from = new Date(dayOne + delay * 60_000);
     const caller = proposedCaller(sequence, position, lead.owner_name);
-    return {
+    const dueAt = scheduleCallback({
+      from,
+      window: typeof step.callback_window === "string" ? step.callback_window : null,
+      index: Math.max(0, position - 1),
+      contactAt,
+      priority,
+      varyKey: `${lead.id}:${position}`,
+      avoid: usedByDay.get(delay) ?? [],
+    });
+    const minute = chicagoMinute(dueAt);
+    if (minute != null) {
+      const taken = usedByDay.get(delay) ?? [];
+      taken.push(minute);
+      usedByDay.set(delay, taken);
+    }
+    if (new Date(dueAt).getTime() < Date.now() - 5 * 60_000) return [];
+    return [{
       lead_id: lead.id,
       queue: step.queue as string,
+      sequence,
       position,
-      due_at: scheduleCallback({
-        from,
-        index: Math.max(0, position - 1),
-        contactAt,
-        priority,
-        varyKey: `${lead.id}:${position}`,
-      }),
+      due_at: dueAt,
       body: renderStep(String(step.body), lead),
       assigned_name: caller,
       detail: caller && sequence === "want_to_sign" ? `Proposed owner: ${caller}. Change the tag if someone else should call.` : null,
-    };
+    }];
   });
+  await supabase
+    .from("lead_jobs")
+    .update({ status: "skipped", detail: "Moved to another sequence." })
+    .eq("lead_id", lead.id)
+    .eq("queue", "call")
+    .eq("status", "pending")
+    .neq("sequence", sequence);
   if (!rows.length) return;
   const { error: insertError } = await supabase.from("lead_jobs").upsert(rows, {
-    onConflict: "lead_id,queue,position",
+    onConflict: "lead_id,queue,sequence,position",
     ignoreDuplicates: true,
   });
   if (insertError) throw new Error(insertError.message);
@@ -102,7 +146,7 @@ export async function enrollFollowUp(
 export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from("leads")
-    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at")
+    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, lead_date")
     .eq("signed_case", false)
     .is("case_id", null)
     .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
@@ -115,8 +159,9 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   if (!leads.length) return 0;
   const { data: existing, error: jobsError } = await supabase
     .from("lead_jobs")
-    .select("lead_id")
+    .select("lead_id, sequence")
     .eq("queue", "call")
+    .eq("sequence", "want_to_sign")
     .in(
       "lead_id",
       leads.map((lead) => lead.id),

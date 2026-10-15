@@ -3,6 +3,7 @@ import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified } f
 import { priorityReasonText, daysSince, leadTitle, listAccident, slackMessageUrl, type Lead } from "@/lib/leads";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
 import { reviewPrioritySuggestion } from "@/lib/ops-actions";
+import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
 import { leadCycle, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, type PriorityPlace } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
@@ -77,7 +78,7 @@ export default async function PriorityPage() {
       .or("and(signed_case.eq.false,case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed),and(signed_case.eq.false,agreement_status.in.(signed,completed))")
       .order("lead_date", { ascending: false, nullsFirst: false })
       .limit(300),
-    supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
+    supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
   ]);
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
@@ -136,7 +137,16 @@ export default async function PriorityPage() {
         textNextAt: lead.text_next_at,
         reminderAt: lead.agreement_next_reminder_at,
         agreementStatus: lead.agreement_status,
-        callStart: lead.lead_date ?? lead.created_at,
+        callStart: (() => {
+          const sequence = leadSequenceId({
+            closed: false,
+            talked: talked.has(lead.id),
+            kind: lead.kind,
+            agreementStatus: lead.agreement_status,
+            agreementSentAt: lead.agreement_sent_at,
+          });
+          return sequence ? sequenceDayOne(sequence, lead).toISOString() : lead.created_at;
+        })(),
         callsMade: calls.get(lead.id) ?? 0,
         pendingCallAt: nextCall.get(lead.id) ?? null,
         callSteps: callSteps.filter((step) => step.sequence === leadSequenceId({

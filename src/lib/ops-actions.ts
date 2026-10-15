@@ -9,7 +9,7 @@ import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
 import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
-import { clockToMinutes, delayMinutes, isCallSequence } from "./sequences";
+import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -123,7 +123,7 @@ export async function startFollowUp(leadId: string) {
   const { supabase, email } = await requireStaff();
   const { data: lead, error } = await supabase
     .from("leads")
-    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at")
+    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !lead) throw new Error(error?.message ?? "Lead not found");
@@ -506,6 +506,57 @@ function dayWindow(formData: FormData, name: string, open: boolean): { start: nu
     throw new Error(`${label} needs an open time and a later close time.`);
   }
   return { start, end };
+}
+
+function stepBody(sequence: CallSequenceId, queue: "call" | "text"): string {
+  if (queue === "text") return "Text";
+  if (sequence === "more_info") return "Call to reconnect after the consultation.";
+  if (sequence === "want_to_sign") return "Call to get the contract signed.";
+  return "Call to establish first contact.";
+}
+
+export async function saveCadence(formData: FormData) {
+  const { supabase } = await requireStaff();
+  const sequence = text(formData, "sequence");
+  if (!isCallSequence(sequence)) throw new Error("Choose a callback sequence.");
+  let days: CadenceDay[];
+  try {
+    days = JSON.parse(String(formData.get("days") ?? "")) as CadenceDay[];
+  } catch {
+    throw new Error("The cadence could not be read.");
+  }
+  if (!Array.isArray(days) || days.length < 1 || days.length > 21) {
+    throw new Error("Use between 1 and 21 days.");
+  }
+  const rows: { sequence: string; queue: "call" | "text"; position: number; delay_minutes: number; callback_window: string; body: string }[] = [];
+  const positions = { call: 0, text: 0 };
+  days.forEach((day, index) => {
+    for (const queue of ["call", "text"] as const) {
+      const slots = queue === "call" ? day?.calls : day?.texts;
+      if (!Array.isArray(slots) || slots.length > 3) throw new Error("Each day can have up to three calls and three texts.");
+      for (const slot of slots) {
+        if (!isCallbackWindow(slot)) throw new Error("Choose morning, lunch, afternoon, or match last contact.");
+        positions[queue] += 1;
+        rows.push({
+          sequence,
+          queue,
+          position: positions[queue],
+          delay_minutes: index * 1440,
+          callback_window: slot,
+          body: stepBody(sequence, queue),
+        });
+      }
+    }
+  });
+  const { error: deleteError } = await supabase.from("sequence_steps").delete().eq("sequence", sequence);
+  if (deleteError) throw new Error(deleteError.message);
+  if (rows.length) {
+    const { error } = await supabase.from("sequence_steps").insert(rows);
+    if (error) throw new Error(error.message);
+  }
+  revalidatePath("/sequences");
+  revalidatePath("/");
+  revalidatePath("/priority");
 }
 
 export async function saveSequenceStep(formData: FormData) {

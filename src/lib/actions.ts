@@ -282,6 +282,8 @@ export async function updateLead(leadId: string, formData: FormData) {
           agreement_sent_at: before.agreement_sent_at,
           priority: before.priority,
           created_at: before.created_at,
+          consultation_date: fields.consultation_date ?? before.consultation_date,
+          lead_date: fields.lead_date ?? before.lead_date,
         });
         revalidatePath(`/leads/${leadId}`);
         revalidatePath("/queues");
@@ -392,6 +394,8 @@ export async function updateLead(leadId: string, formData: FormData) {
       agreement_sent_at: before.agreement_sent_at,
       priority: Boolean(patch.priority ?? before.priority),
       created_at: before.created_at,
+      consultation_date: fields.consultation_date ?? before.consultation_date,
+      lead_date: fields.lead_date ?? before.lead_date,
     });
   } else if (before.follow_up) {
     await stopFollowUp(supabase, leadId, "Follow-up was turned off.");

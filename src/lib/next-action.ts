@@ -1,5 +1,5 @@
-import { DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/sequences";
-import { formatCallWhen, snapToWorkHours } from "@/lib/time";
+import { scheduleCallback } from "@/lib/callbacks";
+import { formatCallWhen } from "@/lib/time";
 
 export type CallStep = { position: number; delay_minutes: number };
 
@@ -18,7 +18,8 @@ export function nextActionLines(input: {
   callsMade: number;
   pendingCallAt: string | null;
   callSteps: CallStep[];
-  hours?: WorkHours;
+  priority?: boolean;
+  contactAt?: string | null;
 }): NextActionLine[] {
   const lines: NextActionLine[] = [];
   if (!input.closed && (input.textStatus || "").toLowerCase() === "active" && input.textNextAt) {
@@ -41,17 +42,22 @@ function nextCallAt(input: {
   callsMade: number;
   pendingCallAt: string | null;
   callSteps: CallStep[];
-  hours?: WorkHours;
+  priority?: boolean;
+  contactAt?: string | null;
 }): string | null {
   if (input.closed || input.sequence === "stop") return null;
-  const hours = input.hours ?? DEFAULT_WORK_HOURS;
+  if (input.pendingCallAt) return input.pendingCallAt;
   const steps = [...input.callSteps].sort((a, b) => a.position - b.position);
-  if (!steps.length) return input.pendingCallAt;
+  if (!steps.length) return null;
   const step = steps[Math.max(0, input.callsMade)] ?? null;
   if (!step || !input.callStart) return null;
   const start = new Date(input.callStart).getTime();
   if (Number.isNaN(start)) return null;
-  const due = snapToWorkHours(new Date(start + step.delay_minutes * 60_000).toISOString(), hours);
-  if (new Date(due).getTime() <= Date.now()) return snapToWorkHours(new Date().toISOString(), hours);
-  return due;
+  return scheduleCallback({
+    from: new Date(start + step.delay_minutes * 60_000),
+    index: Math.max(0, input.callsMade),
+    contactAt: input.contactAt ? new Date(input.contactAt) : null,
+    priority: Boolean(input.priority),
+    varyKey: `${input.callStart}:${input.callsMade}`,
+  });
 }

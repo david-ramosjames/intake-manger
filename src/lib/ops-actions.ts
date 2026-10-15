@@ -7,13 +7,15 @@ import { LEAD_TAGS, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
+import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
-import { isPriorityReason } from "./leads";
-import { desiredCase } from "./desired";
 import { clockToMinutes, delayMinutes, isCallSequence } from "./sequences";
-import { chicagoLocalToIso } from "./time";
+import { chicagoDay, chicagoLocalToIso } from "./time";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
+import { toE164 } from "./phone";
+import { sendQuoText } from "./quo";
+import { DEFAULT_REFERRAL_SMS, isPracticeArea, renderReferralSms } from "./referrals";
 import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
 import { loadSlackSettings } from "./slack-settings";
 
@@ -26,24 +28,63 @@ export async function savePriority(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const priority = formData.getAll("priority").includes("yes");
   const reason = text(formData, "priority_reason");
-  if (priority && !isPriorityReason(reason)) {
-    throw new Error("Choose why this lead is on Jon's list.");
-  }
-  const { error } = await supabase
-    .from("leads")
-    .update({
-      priority,
-      priority_reason: priority ? reason : null,
-      last_action: text(formData, "last_action"),
-      next_action: text(formData, "next_action"),
-    })
-    .eq("id", leadId);
+  const patch: {
+    priority: boolean;
+    priority_reason: string | null;
+    last_action: string | null;
+    next_action: string | null;
+    priority_suggestion?: null;
+  } = {
+    priority,
+    priority_reason: priority ? reason : null,
+    last_action: text(formData, "last_action"),
+    next_action: text(formData, "next_action"),
+  };
+  if (priority) patch.priority_suggestion = null;
+  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
   if (error) throw new Error(error.message);
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: priority ? "priority_set" : "priority_cleared",
     actor: email,
     payload: { reason },
+  });
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
+}
+
+export async function reviewPrioritySuggestion(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  const decision = text(formData, "decision");
+  if (!leadId) throw new Error("Missing the lead.");
+  if (decision === "dismiss") {
+    const { error } = await supabase
+      .from("leads")
+      .update({ priority_suggestion: null, priority_suggestion_dismissed: true })
+      .eq("id", leadId);
+    if (error) throw new Error(error.message);
+  } else if (decision === "confirm") {
+    const { data, error } = await supabase.from("leads").select("priority_suggestion").eq("id", leadId).maybeSingle();
+    if (error || !data) throw new Error(error?.message ?? "Lead not found");
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({
+        priority: true,
+        priority_reason: data.priority_suggestion,
+        priority_suggestion: null,
+      })
+      .eq("id", leadId);
+    if (updateError) throw new Error(updateError.message);
+  } else {
+    throw new Error("Choose confirm or not now.");
+  }
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: decision === "confirm" ? "priority_set" : "priority_dismissed",
+    actor: email,
+    payload: { source: "suggestion" },
   });
   revalidatePath("/");
   revalidatePath("/priority");
@@ -82,20 +123,62 @@ export async function startFollowUp(leadId: string) {
   const { supabase, email } = await requireStaff();
   const { data: lead, error } = await supabase
     .from("leads")
-    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status")
+    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !lead) throw new Error(error?.message ?? "Lead not found");
-  if (!lead.follow_up) throw new Error("Turn follow-up on and save before starting the steps.");
-  await enrollFollowUp(supabase, lead);
+  if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status)) {
+    throw new Error("This lead is closed.");
+  }
+  if (contractSent(lead)) {
+    throw new Error("The contract follow-up starts on its own.");
+  }
+  const { error: followError } = await supabase.from("leads").update({ follow_up: true }).eq("id", leadId);
+  if (followError) throw new Error(followError.message);
+  await enrollFollowUp(supabase, { ...lead, follow_up: true }, undefined, "post_consult");
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: "enrolled",
     actor: email,
-    payload: {},
+    payload: { sequence: "post_consult" },
   });
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/queues");
+}
+
+export async function saveCallbackPlan(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const jobId = text(formData, "job_id");
+  const due = text(formData, "due_at");
+  const assigned = text(formData, "assigned_name");
+  if (!jobId || !due) throw new Error("Choose when the Slack reminder should post.");
+  const { data: job, error } = await supabase
+    .from("lead_jobs")
+    .select("id, lead_id, status, queue")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error || !job) throw new Error(error?.message ?? "That callback is missing.");
+  if (job.queue !== "call" || (job.status !== "pending" && job.status !== "failed")) {
+    throw new Error("That reminder already went out.");
+  }
+  const { error: updateError } = await supabase
+    .from("lead_jobs")
+    .update({
+      due_at: chicagoLocalToIso(due),
+      assigned_name: assigned,
+      mention: null,
+      detail: assigned ? `Tag ${assigned}.` : "Any available intake person.",
+    })
+    .eq("id", jobId);
+  if (updateError) throw new Error(updateError.message);
+  await supabase.from("lead_events").insert({
+    lead_id: job.lead_id,
+    event_type: "callback_edited",
+    actor: email,
+    payload: { due, assigned },
+  });
+  revalidatePath(`/leads/${job.lead_id}`);
+  revalidatePath("/");
 }
 
 export async function mergeIntoLead(formData: FormData) {
@@ -191,16 +274,6 @@ export async function markNotALead(leadId: string) {
       follow_up: false,
       sequence: "stop",
       close_reason: "not_a_lead",
-      desired_case: desiredCase({
-        consultationDate: data.consultation_date,
-        grade: data.grade,
-        tags: data.callrail_tags ?? [],
-        declineReason: data.decline_reason,
-        closeReason: "not_a_lead",
-        leadStatus: "Lost",
-        signed: false,
-        qualified: data.qualified,
-      }),
       text_sequence_status: data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status,
     })
     .eq("id", leadId);
@@ -217,66 +290,140 @@ export async function markNotALead(leadId: string) {
   revalidatePath("/queues");
 }
 
+export async function markReferralOpportunity(leadId: string, formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const area = text(formData, "practice_area");
+  if (!isPracticeArea(area)) throw new Error("Choose the legal practice area.");
+  const outside = area !== "personal_injury";
+  const { data: current } = await supabase.from("leads").select("callrail_tags").eq("id", leadId).maybeSingle();
+  const tags = ((current?.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES");
+  if (outside) {
+    if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
+    if (!tags.includes("NQ: Non-PI Legal Matter")) tags.push("NQ: Non-PI Legal Matter");
+  }
+  const patch: { practice_area: string; referral_opportunity: boolean; caller_class: string | null; close_suggestion: null; qualified?: boolean; callrail_tags?: string[] } = {
+    practice_area: area,
+    referral_opportunity: true,
+    caller_class: outside ? "non_pi" : null,
+    close_suggestion: null,
+  };
+  if (outside) {
+    patch.qualified = false;
+    patch.callrail_tags = tags;
+  }
+  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "referral_opportunity",
+    actor: email,
+    payload: { practice_area: area },
+  });
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/");
+}
+
 export async function sendReferral(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
-  if (!destinationId) throw new Error("Pick where this lead should go.");
+  const language = text(formData, "language") === "es" ? "es" : "en";
+  const area = text(formData, "practice_area");
+  if (!destinationId) throw new Error("Pick the attorney to refer.");
+  if (!isPracticeArea(area)) throw new Error("Choose the legal practice area.");
   const { data: destination, error: loadError } = await supabase
     .from("referral_destinations")
-    .select("id, name, phone")
+    .select("id, name, phone, address, email, website, practice_areas, spanish, notes")
     .eq("id", destinationId)
     .maybeSingle();
   if (loadError || !destination) throw new Error(loadError?.message ?? "That referral destination is missing.");
+  if (!(destination.practice_areas ?? []).includes(area)) throw new Error("That attorney is not listed for this practice area.");
 
   const { data: lead, error: leadError } = await supabase
     .from("leads")
-    .select("lead_name, phone, case_type, summary, slack_channel_id, slack_thread_ts")
+    .select("lead_name, phone, phone_e164, case_type, summary, slack_channel_id, slack_thread_ts")
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) throw new Error(leadError?.message ?? "Lead not found");
+  const to = lead.phone_e164 || toE164(lead.phone);
+  if (!to) throw new Error("This lead needs a phone number before the text can go out.");
+
+  const { data: templates } = await supabase.from("referral_templates").select("language, body");
+  const stored = (templates ?? []).find((row) => row.language === language)?.body;
+  const message = renderReferralSms({
+    language,
+    template: stored || DEFAULT_REFERRAL_SMS[language],
+    leadName: lead.lead_name,
+    area,
+    destination,
+  });
+  const sent = await sendQuoText(to, message);
+  if (!sent.ok) throw new Error(`${sent.error} The lead is still open.`);
 
   const note = text(formData, "note");
+  const outside = area !== "personal_injury";
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      lead_status: "Referred",
+      follow_up: false,
+      sequence: "stop",
+      close_reason: "referred",
+      close_suggestion: null,
+      practice_area: area,
+      referral_opportunity: true,
+      caller_class: outside ? "non_pi" : null,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(`The text was sent. The lead did not close: ${updateError.message}`);
+  await stopFollowUp(supabase, leadId, "Referred out.");
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
     destination_id: destination.id,
     actor: email,
     note,
+    language,
+    message,
   });
-  if (error) throw new Error(error.message);
-
-  await supabase
-    .from("leads")
-    .update({ lead_status: "Referred", follow_up: false })
-    .eq("id", leadId);
-  await stopFollowUp(supabase, leadId, "Referred out.");
+  if (error) throw new Error(`The text was sent and the lead was closed. The referral log did not save: ${error.message}`);
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: "referred",
     actor: email,
-    payload: { destination: destination.name, phone: destination.phone, note },
+    payload: { destination: destination.name, phone: destination.phone, language, message },
   });
 
   const who = lead.lead_name || "Unnamed lead";
   const slack = await loadSlackSettings();
   if (slack.posting) {
-  await postToSlack({
-    token: slack.token,
-    channel: lead.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID,
-    threadTs: lead.slack_thread_ts,
-    text: [
-      `Referral: ${who}${lead.phone ? ` ${lead.phone}` : ""}`,
-      lead.case_type ? `Case type: ${lead.case_type}` : null,
-      `Send to ${destination.name}${destination.phone ? ` ${destination.phone}` : ""}.`,
-      note,
-      lead.summary ? `Summary: ${lead.summary}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  });
+    await postToSlack({
+      token: slack.token,
+      channel: lead.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID,
+      threadTs: lead.slack_thread_ts,
+      text: [
+        `Referral sent: ${who}${lead.phone ? ` ${lead.phone}` : ""}`,
+        `${language === "es" ? "Spanish" : "English"} text to the lead with ${destination.name}${destination.phone ? ` ${destination.phone}` : ""}.`,
+        message,
+      ].join("\n"),
+    });
   }
 
   revalidatePath("/");
   revalidatePath(`/leads/${leadId}`);
+}
+
+export async function saveReferralTemplate(formData: FormData) {
+  const { supabase } = await requireStaff();
+  const language = text(formData, "language");
+  const body = text(formData, "body");
+  if (language !== "en" && language !== "es") throw new Error("Choose English or Spanish.");
+  if (!body) throw new Error("Write the text template.");
+  const { error } = await supabase.from("referral_templates").upsert({
+    language,
+    body,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath("/referrals");
 }
 
 export async function saveDestination(formData: FormData) {
@@ -287,11 +434,18 @@ export async function saveDestination(formData: FormData) {
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
+  const area = text(formData, "practice_area");
   const { error } = await supabase.from("referral_destinations").insert({
     name,
     phone: text(formData, "phone"),
     notes: text(formData, "notes"),
-    case_types: caseTypes,
+    case_types: area ? [area] : caseTypes,
+    practice_areas: area ? [area] : caseTypes,
+    address: text(formData, "address"),
+    email: text(formData, "email"),
+    website: text(formData, "website"),
+    spanish: formData.get("spanish") === "yes",
+    matters: text(formData, "matters"),
   });
   if (error) throw new Error(error.message);
   revalidatePath("/referrals");
@@ -406,22 +560,125 @@ export async function removeSequenceStep(formData: FormData) {
   revalidatePath("/sequences");
 }
 
+export async function confirmCloseSuggestion(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  const suggestion = text(formData, "suggestion");
+  const decision = text(formData, "decision");
+  if (!leadId || !suggestion) throw new Error("Missing the close suggestion.");
+  if (decision === "dismiss") {
+    const { error } = await supabase.from("leads").update({ close_suggestion: null }).eq("id", leadId);
+    if (error) throw new Error(error.message);
+  } else if (suggestion === "decline" && decision === "refer") {
+    await closeLead(supabase, leadId, email, { lead_status: "Referred", close_reason: "referred", event: "referred" });
+  } else if (suggestion === "decline" && decision === "decline") {
+    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "declined", event: "declined" });
+  } else if (suggestion === "not_interested" && decision === "confirm") {
+    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "not_interested", event: "not_interested" });
+  } else if (suggestion === "not_a_lead" && decision === "confirm") {
+    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "not_a_lead", event: "not_a_lead" });
+  } else {
+    throw new Error("Choose confirm or keep open.");
+  }
+  revalidatePath("/");
+  revalidatePath(`/leads/${leadId}`);
+}
+
+async function closeLead(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+  email: string,
+  change: { lead_status: string; close_reason: string; event: string },
+) {
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      lead_status: change.lead_status,
+      close_reason: change.close_reason,
+      close_suggestion: null,
+      follow_up: false,
+      sequence: "stop",
+    })
+    .eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_jobs").update({ status: "skipped", detail: change.close_reason }).eq("lead_id", leadId).eq("status", "pending");
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: change.event,
+    actor: email,
+    payload: { close_reason: change.close_reason },
+  });
+}
+
+export async function confirmSigned(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const { data: before, error } = await supabase
+    .from("leads")
+    .select("id, signed_case, callrail_call_id, callrail_tags, desired_source, date_signed")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !before) throw new Error(error?.message ?? "Lead not found");
+  const tags = Array.from(new Set([...(before.callrail_tags ?? []), "CVR DESIRED", "CVR SIGNED"]));
+  const now = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      signed_case: true,
+      lead_status: "Signed",
+      close_reason: "signed",
+      close_suggestion: null,
+      follow_up: false,
+      sequence: "stop",
+      signed_at: now,
+      date_signed: before.date_signed ?? chicagoDay(new Date()),
+      desired_case: true,
+      desired_source: before.desired_source === "staff" ? "staff" : "contract",
+      callrail_tags: tags,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  await supabase.from("lead_jobs").update({ status: "skipped", detail: "Signed" }).eq("lead_id", leadId).eq("status", "pending");
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "signed",
+    actor: email,
+    payload: { confirmed: true },
+  });
+  if (callrailConfigured() && before.callrail_call_id) {
+    try {
+      await pushCallrailTags(before.callrail_call_id, tags, LEAD_TAGS);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
+      throw new Error(`Signed on the lead. CallRail did not take the tags. ${message}`);
+    }
+  }
+  revalidatePath("/");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function saveLeadTags(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const { data: before, error } = await supabase
     .from("leads")
-    .select("id, signed_case, callrail_call_id, callrail_tags, qualified, decline_reason, consultation_date, grade, close_reason, lead_status")
+    .select("id, signed_case, desired_case, caller_class, callrail_call_id, callrail_tags, qualified, decline_reason, consultation_date, grade, close_reason, lead_status")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
 
   const signed = Boolean(before.signed_case);
-  const coverage = ["CVR DESIRED", "CVR SIGNED"].filter((tag) => String(formData.get(tag) ?? "") === "yes");
+  const coverage = ["CVR DESIRED", "CVR SIGNED"].filter((tag) => (before.callrail_tags ?? []).includes(tag));
   const tagged = tagsFromSelection({
     qualified: String(formData.get("qualified_tag") ?? ""),
     coverage,
     decline: String(formData.get("decline_tag") ?? ""),
     signed,
+    desired: Boolean(before.desired_case) || signed,
+    nonPi: before.caller_class === "non_pi",
+    size: String(formData.get("size_tag") ?? ""),
+    injuryType: String(formData.get("injury_type") ?? ""),
+    notQualified: String(formData.get("not_qualified_tag") ?? ""),
   });
   const { error: updateError } = await supabase
     .from("leads")
@@ -429,16 +686,6 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
       callrail_tags: tagged.tags,
       qualified: tagged.qualified,
       decline_reason: tagged.decline_reason,
-      desired_case: desiredCase({
-        consultationDate: before.consultation_date,
-        grade: before.grade,
-        tags: tagged.tags,
-        declineReason: tagged.decline_reason,
-        closeReason: before.close_reason,
-        leadStatus: before.lead_status,
-        signed,
-        qualified: tagged.qualified,
-      }),
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);

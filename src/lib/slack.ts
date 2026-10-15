@@ -52,16 +52,34 @@ export async function channelLeadMention(channel: string, token?: string | null)
   return mention;
 }
 
-async function lookupChannelLead(channel: string, token: string): Promise<string> {
-  if (!token) return "";
-  const info = await slackApi(token, "conversations.info", { channel });
-  const topic = String((info.channel as { topic?: { value?: string } } | undefined)?.topic?.value ?? "");
-  const linked = topic.match(/Lead\s+<@([A-Z0-9]+)(?:\|[^>]+)?>/i)?.[1];
+async function topicMention(topic: string, label: string, token: string): Promise<string> {
+  const linked = topic.match(new RegExp(`${label}\\s+<@([A-Z0-9]+)(?:\\|[^>]+)?>`, "i"))?.[1];
   if (linked) return `<@${linked}>`;
-  const named = topic.match(/Lead\s+@([^\s|]+)/i)?.[1];
-  if (!named) return "";
+  const named = topic.match(new RegExp(`${label}\\s+@([^\\s|]+)`, "i"))?.[1];
+  if (!named || !token) return "";
   const userId = await findUserId(token, named);
   return userId ? `<@${userId}>` : "";
+}
+
+async function channelTopic(channel: string, token: string): Promise<string> {
+  if (!token) return "";
+  const info = await slackApi(token, "conversations.info", { channel });
+  return String((info.channel as { topic?: { value?: string } } | undefined)?.topic?.value ?? "");
+}
+
+async function lookupChannelLead(channel: string, token: string): Promise<string> {
+  return topicMention(await channelTopic(channel, token), "Lead", token);
+}
+
+export async function channelOutboundMention(channel: string, token?: string | null): Promise<string> {
+  const slackToken = token || process.env.SLACK_BOT_TOKEN || "";
+  const topic = await channelTopic(channel, slackToken);
+  return (await topicMention(topic, "Outbound", slackToken)) || (await topicMention(topic, "Lead", slackToken));
+}
+
+export async function mentionForName(name: string, token?: string | null): Promise<string> {
+  const id = await findUserId(token || process.env.SLACK_BOT_TOKEN || "", name);
+  return id ? `<@${id}>` : "";
 }
 
 async function findUserId(token: string, name: string): Promise<string | null> {

@@ -32,8 +32,9 @@ export default async function SequencesPage() {
     <main className="mx-auto max-w-5xl px-4 py-6">
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Sequences</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Call timing for each kind of lead. Texts are listed here, and SMS Follow-Up still sends them. A Slack
-        reminder waits until that sequence’s hours.
+        Three call sequences. Contract follow-up and uncontacted leads start on their own. Post-consultation
+        starts from the lead. Texts stay with SMS Follow-Up. Slack reminders post one at a time, about 15
+        minutes apart, during these hours. Priority callbacks can still post on a weekend.
       </p>
       {error ? <p className="mt-3 text-sm text-red-700">{error.message}</p> : null}
 

@@ -32,8 +32,18 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   },
   {
     capability: "Contract sending and follow-up",
-    owner: "Sign Flow sends the contract and the signing reminders, and writes the send time, reminder count, last reminder, and next reminder onto the lead. A completed contract marks that lead signed.",
-    here: "Signed on the lead means the client signed. Promote in Docket is a later step and does not happen on its own.",
+    owner: "Sign Flow sends the contract and the signing reminders, and writes the send time, reminder count, last reminder, and next reminder onto the lead.",
+    here: "Sending the contract marks the lead desired. Signed is a person confirming the contract is complete, including matters that need more than one signature. Promote in Docket is a later step.",
+  },
+  {
+    capability: "Priority queue",
+    owner: "Quo Router can recommend a clear injury matter. Sign Flow records that a contract was sent.",
+    here: "A lead is priority when a contract is out and unsigned, a person flags it, or someone confirms Quo's recommendation. A sent contract stays priority until the lead is signed or closed. Every open lead shows a next action.",
+  },
+  {
+    capability: "Intake funnel",
+    owner: "Quo Router records the first consultation when a call is a real back-and-forth about an injury. Sign Flow records that a contract was sent.",
+    here: "Lead, consultation, qualified, conversion desired, and signed are separate milestones. A lead can leave at any step. Qualified means the firm could handle it. Desired means the firm wants to sign it. Signed waits for a person.",
   },
   {
     capability: "Centralized lead pipeline",
@@ -43,7 +53,7 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   {
     capability: "Human call queue",
     owner: "A person dials. The outbound caller is a separate service and is not placing these calls.",
-    here: "The call sequence creates the due calls. Slack gets an alert. The call stays open until someone records the outcome on Queues.",
+    here: "Contract follow-up and missed-call or form-fill sequences start on their own. Post-consultation starts when someone clicks Start follow-up sequence. Slack gets one tagged reminder at a time. A person can change the time and who is tagged before it posts.",
   },
   {
     capability: "Intake tasks and accountability",
@@ -68,7 +78,7 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   {
     capability: "Referral tracking and follow-up",
     owner: "SMS Follow-Up has a referral text track when the Slack post itself says Referral.",
-    here: "The referral tree picks where a case we cannot take should go, posts that to Slack, and stops follow-up.",
+    here: "A non-PI legal matter stays a lead. Staff pick the practice area, tag it as a referral opportunity, and text the attorney’s contact details in English or Spanish. Sending the text records the referral and closes the lead.",
   },
   {
     capability: "Marketing attribution and ROI",
@@ -118,7 +128,7 @@ const QUESTIONS: { q: string; a: string }[] = [
   },
   {
     q: "What if we cannot take the case?",
-    a: "Use the referral tree on the lead. It matches the case type to a destination, posts the handoff in Slack, and stops texts and calls. The two starting destinations are Texas Lawyer Referral Service and Central Texas Lawyer Referral. Add or change destinations on the Referrals page.",
+    a: "On the lead, choose the practice area and tag it as a referral opportunity. Pick the attorney and English or Spanish. Sending the text gives the lead that attorney’s phone and address, records the referral, and closes the lead. The directory and the text templates live on the Referrals page.",
   },
   {
     q: "Why do Intake Engine and Site-chat have their own databases?",

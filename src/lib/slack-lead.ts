@@ -107,6 +107,15 @@ export function parseSlackLead(text: string): ParsedSlackLead {
   };
 }
 
+/** Quo posts these after classifying a call. They must not open a new work-queue lead. */
+export function slackPostDisposition(text: string): "exclude" | "return" | "outside" | null {
+  const first = text.trim().split("\n")[0]?.replace(/\*/g, "").trim() ?? "";
+  if (first.startsWith("Excluded ·")) return "exclude";
+  if (first === "Return call") return "return";
+  if (/outside practice/i.test(first)) return "outside";
+  return null;
+}
+
 export function leadIsClosed(lead: {
   signed_case?: boolean | null;
   case_id?: string | null;

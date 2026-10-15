@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
-import { consultationWhen, desiredWord } from "@/lib/desired";
-import { daysSince, isLeadView, leadTitle, listAccident, PRIORITY_REASON_SHORT, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
-import { leadCycle, leadPriority, leadStatusLabel, nextCallPurpose, nextStepLabel, priorityBucket } from "@/lib/next-step";
+import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
+import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
+import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
-import { DEFAULT_WORK_HOURS, leadSequenceId, loadWorkHours } from "@/lib/sequences";
-import { qualifiedSummary } from "@/lib/tags";
-import { formatCallWhen } from "@/lib/time";
+import { leadSequenceId } from "@/lib/sequences";
+import { chicagoDay, formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -19,6 +19,11 @@ type HistoryTouch = {
   direction: string | null;
   occurred_at: string | null;
 };
+
+function recentCutoff(): string {
+  const [year, month, day] = chicagoDay(new Date()).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day - 30)).toISOString().slice(0, 10);
+}
 
 function phoneKey(value: string | null | undefined): string {
   const digits = (value ?? "").replace(/\D/g, "");
@@ -149,7 +154,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, priority_reason, callrail_tags, decline_reason, consultation_date, desired_case, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, lead_source, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -170,11 +175,20 @@ type ListLead = Pick<
   | "arrival"
   | "lead_status"
   | "close_reason"
+  | "close_suggestion"
+  | "caller_class"
+  | "practice_area"
+  | "referral_opportunity"
+  | "priority"
   | "priority_reason"
+  | "priority_suggestion"
+  | "next_action"
   | "callrail_tags"
   | "decline_reason"
   | "consultation_date"
   | "desired_case"
+  | "desired_source"
+  | "qualified"
   | "agreement_status"
   | "agreement_sent_at"
   | "agreement_signing_url"
@@ -202,8 +216,11 @@ type ListLead = Pick<
   | "slack_thread_ts"
 >;
 
-function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: string; range?: LeadRange }): string {
+type Funnel = "open" | "closed";
+
+function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: string; range?: LeadRange; funnel?: Funnel }): string {
   const params = new URLSearchParams();
+  if (input.funnel === "closed") params.set("funnel", "closed");
   if (input.queue && input.queue !== "all") params.set("queue", input.queue);
   if (input.view && input.view !== "all") params.set("view", input.view);
   if (input.range && input.range !== "all") params.set("range", input.range);
@@ -216,10 +233,11 @@ function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: 
 export default async function LeadListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; view?: string; queue?: string; lead?: string; range?: string }>;
+  searchParams: Promise<{ q?: string; view?: string; queue?: string; lead?: string; range?: string; funnel?: string }>;
 }) {
   const params = await searchParams;
   const view: LeadView = isLeadView(params.view) ? params.view : "all";
+  const funnel: Funnel = params.funnel === "closed" ? "closed" : "open";
   const requested = params.queue === "fresh" ? "contact" : params.queue;
   const queue: QueueId = isQueue(requested) ? requested : "all";
   const range: LeadRange = isLeadRange(params.range) ? params.range : "all";
@@ -228,12 +246,48 @@ export default async function LeadListPage({
   const { supabase } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, { data: stepRows }, workHours] = await Promise.all([
-    supabase.from("leads").select(LIST_COLUMNS).order("lead_date", { ascending: false, nullsFirst: false }).limit(300),
+  let leadQuery = supabase
+    .from("leads")
+    .select(LIST_COLUMNS)
+    .or("caller_class.is.null,caller_class.eq.non_pi")
+    .order("lead_date", { ascending: false, nullsFirst: false })
+    .limit(300);
+  leadQuery = funnel === "closed"
+    ? leadQuery.or("lead_status.in.(Signed,Promoted,Lost,Referred),signed_case.eq.true,case_id.not.is.null")
+    : leadQuery.not("lead_status", "in", "(Signed,Promoted,Lost,Referred)").eq("signed_case", false).is("case_id", null);
+  const since = recentCutoff();
+  const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, { data: stepRows }] = await Promise.all([
+    leadQuery,
+    queue === "nonleads"
+      ? supabase
+          .from("leads")
+          .select(LIST_COLUMNS)
+          .in("caller_class", ["spam", "vendor", "employment", "existing_client", "insurance", "other_law_office", "wrong_number", "return_call"])
+          .order("lead_date", { ascending: false, nullsFirst: false })
+          .limit(300)
+      : Promise.resolve({ data: [] as ListLead[], error: null }),
+    supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .in("caller_class", ["spam", "vendor", "employment", "existing_client", "insurance", "other_law_office", "wrong_number", "return_call"]),
+    supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .or("caller_class.is.null,caller_class.eq.non_pi")
+      .or("signed_case.eq.true,lead_status.eq.Signed")
+      .gte("lead_date", since),
+    supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .or("caller_class.is.null,caller_class.eq.non_pi")
+      .in("lead_status", ["Lost", "Referred", "Promoted"])
+      .eq("signed_case", false)
+      .gte("lead_date", since),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
-    loadWorkHours(supabase),
   ]);
-  const leads = (data ?? []) as ListLead[];
+  const workLeads = (data ?? []) as ListLead[];
+  const reviewLeads = (reviewResult.data ?? []) as ListLead[];
+  const leads = queue === "nonleads" ? [...workLeads, ...reviewLeads] : workLeads;
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
   await attachCallrailSources(leads, async (id, source) => {
@@ -324,22 +378,24 @@ export default async function LeadListPage({
       inWindow: age != null && age <= 30,
       label: leadStatusLabel(lead, cycle),
       step: nextStepLabel(nextCallPurpose(cycle, tally.calls)),
+      actionTitle: openLeadAction(lead, cycle, tally.calls),
       accident: listAccident(lead),
-      priority: leadPriority(lead, cycle),
-      bucket: priorityBucket(lead, cycle, talked.has(lead.id)),
+      priority: priorityPlace(lead),
     };
   });
 
-  const combined = combineByPhone(rows);
-  const windowRows = combined.filter((group) => group.row.inWindow);
+  const workRows = rows.filter((row) => isWorkLead(row.lead));
+  const listed = queue === "nonleads" ? rows.filter((row) => !isWorkLead(row.lead)) : workRows;
+  const combined = combineByPhone(listed);
+  const windowRows = combineByPhone(workRows).filter((group) => group.row.inWindow);
   const metrics = {
     contact: windowRows.filter((group) => group.row.cycle === "contact").length,
     information: windowRows.filter((group) => group.row.cycle === "information").length,
     signing: windowRows.filter((group) => group.row.cycle === "signing").length,
     attention: windowRows.filter((group) => group.row.attention).length,
-    signed: windowRows.filter((group) => group.row.cycle === "signed").length,
-    closed: windowRows.filter((group) => group.row.cycle === "closed").length,
-    total: windowRows.length,
+    signed: funnel === "open" ? (signedCount.count ?? 0) : windowRows.filter((group) => group.row.cycle === "signed").length,
+    closed: funnel === "open" ? (closedCount.count ?? 0) : windowRows.filter((group) => group.row.cycle === "closed").length,
+    total: funnel === "open" ? windowRows.length + (signedCount.count ?? 0) : windowRows.length,
   };
   const conversion = metrics.total ? Math.round((metrics.signed / metrics.total) * 100) : 0;
   const pipeline = [
@@ -387,20 +443,25 @@ export default async function LeadListPage({
         title: leadTitle(other.lead),
         label: other.label,
       })),
+      closeSuggestion: row.lead.close_suggestion,
       identityStatus: row.lead.identity_status,
       accident: row.accident,
       when: receivedLabel(row.age),
-      priority: row.bucket ? PRIORITY_REASON_SHORT[row.bucket] : row.priority,
-      label: row.label,
+      priority: row.priority ? PRIORITY_PLACE_LABEL[row.priority] : null,
+      prioritySuggestion: row.lead.priority_suggestion,
+      actionTitle: row.actionTitle,
+      label: callerClassLabel(row.lead.caller_class) ?? row.label,
       stageClassName: stageClass(row.label),
       step: row.step,
       tags: row.lead.callrail_tags ?? [],
       callrail: Boolean(row.lead.callrail_call_id),
       declineReason: row.lead.decline_reason,
-      qualifiedLabel: qualifiedSummary(row.lead.callrail_tags ?? [], row.lead.decline_reason),
+      qualifiedLabel: desiredWord(milestoneQualified(row.lead)),
       consultWhen: consultationWhen(row.lead.consultation_date),
-      desired: desiredWord(row.lead.desired_case),
-      signed: row.lead.signed_case || ["signed", "completed"].includes((row.lead.agreement_status || "").toLowerCase()),
+      desired: desiredWord(milestoneDesired(row.lead)),
+      signed: milestoneSigned(row.lead),
+      nonPi: row.lead.caller_class === "non_pi",
+      confirmSigned: signatureNeedsConfirm(row.lead),
       lastLabel: lastContacted(row.outreach),
       waiting: row.waiting,
       automationLabel: automation.label,
@@ -439,16 +500,8 @@ export default async function LeadListPage({
           agreementStatus: row.lead.agreement_status,
           agreementSentAt: row.lead.agreement_sent_at,
         }),
-        hours:
-          workHours[
-            leadSequenceId({
-              closed: row.cycle === "signed" || row.cycle === "closed",
-              talked: talked.has(row.lead.id),
-              kind: row.lead.kind,
-              agreementStatus: row.lead.agreement_status,
-              agreementSentAt: row.lead.agreement_sent_at,
-            }) ?? "want_to_sign"
-          ] ?? DEFAULT_WORK_HOURS,
+        priority: row.priority === "contract" || row.priority === "flagged",
+        contactAt: row.lead.created_at,
       }),
     };
   });
@@ -458,9 +511,12 @@ export default async function LeadListPage({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-navy">Work queue</h1>
-          <p className="mt-1 text-sm text-slate-600">What to work on next. Counts are the last 30 days.</p>
+          <p className="mt-1 text-sm text-slate-600">
+            {funnel === "closed" ? "Closed leads." : "Open leads."} A lead stays open until it is signed, declined, referred, rejected, or the sequence ends with no reply. Counts are the last 30 days.
+          </p>
         </div>
         <form action="/" className="flex items-center gap-2">
+          {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
           {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
           {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
           {range !== "all" ? <input type="hidden" name="range" value={range} /> : null}
@@ -479,11 +535,11 @@ export default async function LeadListPage({
       {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
 
       <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <Metric href={listHref({ queue: "contact", q, range })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} hint="Not reached yet" tone="text-amber-700" />
-        <Metric href={listHref({ queue: "information", q, range })} active={queue === "information"} label="Need more information" value={String(metrics.information)} hint="Talked, still open" tone="text-sky-700" />
-        <Metric href={listHref({ queue: "signing", q, range })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} hint="Contract is out" tone="text-violet-700" />
-        <Metric href={listHref({ queue: "signed", q, range })} active={queue === "signed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
-        <Metric href={listHref({ queue: "attention", q, range })} active={queue === "attention"} label="Needs attention" value={String(metrics.attention)} hint="Waiting, review, or failed contract" tone="text-red-700" />
+        <Metric href={listHref({ queue: "contact", q, range, funnel })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} hint="Not reached yet" tone="text-amber-700" />
+        <Metric href={listHref({ queue: "information", q, range, funnel })} active={queue === "information"} label="Need more information" value={String(metrics.information)} hint="Talked, still open" tone="text-sky-700" />
+        <Metric href={listHref({ queue: "signing", q, range, funnel })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} hint="Contract is out" tone="text-violet-700" />
+        <Metric href={listHref({ queue: "signed", q, range, funnel: "closed" })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
+        <Metric href={listHref({ queue: "attention", q, range, funnel })} active={queue === "attention"} label="Needs attention" value={String(metrics.attention)} hint="Waiting, review, or failed contract" tone="text-red-700" />
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-navy">{conversion}%</p>
@@ -501,7 +557,7 @@ export default async function LeadListPage({
             part.count ? (
               <Link
                 key={part.id}
-                href={listHref({ queue: part.id, q, range })}
+                href={listHref({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel })}
                 title={`${part.label}: ${part.count}`}
                 className={part.className}
                 style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
@@ -511,7 +567,7 @@ export default async function LeadListPage({
         </div>
         <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600">
           {pipeline.map((part) => (
-            <Link key={part.id} href={listHref({ queue: part.id, q, range })} className="hover:text-slate-900">
+            <Link key={part.id} href={listHref({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel })} className="hover:text-slate-900">
               {part.label} ({part.count})
             </Link>
           ))}
@@ -523,7 +579,7 @@ export default async function LeadListPage({
         {RANGES.map((item) => (
           <Link
             key={item.id}
-            href={listHref({ queue, view, q, range: item.id })}
+            href={listHref({ queue, view, q, range: item.id, funnel })}
             className={`rounded-full px-3 py-1 text-sm ${
               range === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
@@ -533,11 +589,26 @@ export default async function LeadListPage({
         ))}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</span>
+        <Link
+          href={listHref({ queue: queue === "signed" || queue === "closed" ? "all" : queue, view, q, range, funnel: "open" })}
+          className={`rounded-full px-3 py-1 text-sm ${funnel === "open" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
+        >
+          Open
+        </Link>
+        <Link
+          href={listHref({ queue, view, q, range, funnel: "closed" })}
+          className={`rounded-full px-3 py-1 text-sm ${funnel === "closed" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
+        >
+          Closed
+        </Link>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Stage</span>
         {STAGES.map((item) => (
           <Link
             key={item.id}
-            href={listHref({ queue: item.id, view, q, range })}
+            href={listHref({ queue: item.id, view, q, range, funnel })}
             className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
               queue === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
@@ -548,7 +619,7 @@ export default async function LeadListPage({
         ))}
         <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         <Link
-          href={listHref({ queue: "attention", view, q, range })}
+          href={listHref({ queue: "attention", view, q, range, funnel })}
           className={`rounded-full px-3 py-1 text-sm ${
             queue === "attention" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
           }`}
@@ -556,6 +627,17 @@ export default async function LeadListPage({
           Needs attention
         </Link>
         <span className="text-xs text-slate-500">Waiting too long, identity needs review, or the contract failed.</span>
+        <Link
+          href={listHref({ queue: "nonleads", view, q, range, funnel })}
+          className={`rounded-full px-3 py-1 text-sm ${
+            queue === "nonleads" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
+          }`}
+        >
+          Non-leads{reviewCount.count ? ` (${reviewCount.count})` : ""}
+        </Link>
+        <span className="text-xs text-slate-500">
+          Spam, vendors, employment, existing clients, insurance, other law offices, wrong numbers, and return calls. A legal question outside personal injury stays open until someone confirms the decline.
+        </span>
       </div>
 
       <WorkQueue rows={queueRows} initialId={selectedId} />
@@ -563,12 +645,12 @@ export default async function LeadListPage({
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>
         {LEGACY.map((item) => (
-          <Link key={item.id} href={listHref({ view: item.id, q, range })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
+          <Link key={item.id} href={listHref({ view: item.id, q, range, funnel })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
             {item.label}
           </Link>
         ))}
         {view !== "all" ? (
-          <Link href={listHref({ queue, q, range })} className="hover:text-slate-900">
+          <Link href={listHref({ queue, q, range, funnel })} className="hover:text-slate-900">
             Clear that filter
           </Link>
         ) : null}

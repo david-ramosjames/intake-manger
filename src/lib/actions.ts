@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
-import { desiredCase } from "./desired";
+import { contractSent } from "./desired";
 import { displayContact } from "./leads";
 import { LEAD_TAGS, tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
@@ -25,6 +25,7 @@ const EDITABLE = [
   "consultation",
   "consultation_date",
   "desired_case",
+  "desired_source",
   "signed_case",
   "case_number",
   "date_signed",
@@ -90,19 +91,31 @@ function arrivalFromForm(formData: FormData): LeadArrival | null {
   return null;
 }
 
-function tagsFromForm(formData: FormData, signed: boolean) {
-  const coverage = ["CVR DESIRED", "CVR SIGNED"].filter((tag) => String(formData.get(tag) ?? "") === "yes");
+function tagsFromForm(formData: FormData) {
+  const signed = String(formData.get("signed_case") ?? "") === "yes";
   return tagsFromSelection({
     qualified: String(formData.get("qualified_tag") ?? ""),
-    coverage,
+    coverage: [],
     decline: String(formData.get("decline_tag") ?? ""),
     signed,
+    desired: String(formData.get("desired_case") ?? "") === "yes" || signed,
+    nonPi: formData.get("non_pi") === "yes",
+    size: String(formData.get("size_tag") ?? ""),
+    injuryType: String(formData.get("injury_type") ?? ""),
+    notQualified: String(formData.get("not_qualified_tag") ?? ""),
   });
+}
+
+function triState(formData: FormData, name: string): boolean | null {
+  const value = String(formData.get(name) ?? "");
+  if (value === "yes") return true;
+  if (value === "no") return false;
+  return null;
 }
 
 function fieldsFromForm(formData: FormData) {
   const signed = String(formData.get("signed_case") ?? "") === "yes";
-  const tagged = tagsFromForm(formData, signed);
+  const tagged = tagsFromForm(formData);
   return {
     lead_date: dateOrNull(formData, "lead_date"),
     lead_name: text(formData, "lead_name"),
@@ -117,7 +130,8 @@ function fieldsFromForm(formData: FormData) {
     lead_status: text(formData, "lead_status") ?? "New",
     consultation: null as string | null,
     consultation_date: dateOrNull(formData, "consultation_date"),
-    desired_case: null as boolean | null,
+    desired_case: triState(formData, "desired_case"),
+    desired_source: null as "staff" | "contract" | null,
     signed_case: signed,
     case_number: text(formData, "case_number"),
     date_signed: dateOrNull(formData, "date_signed"),
@@ -151,30 +165,33 @@ function changedFields(before: Lead, after: ReturnType<typeof fieldsFromForm>) {
   return changes;
 }
 
-function applyDesired(
-  fields: ReturnType<typeof fieldsFromForm>,
-  before: { consultation: string | null; consultation_date: string | null; close_reason: string | null } | null,
-) {
+function applyMilestones(fields: ReturnType<typeof fieldsFromForm>, before: Lead | null) {
   const previousDate = before?.consultation_date?.slice(0, 10) ?? null;
   if (!fields.consultation_date) fields.consultation = null;
   else if (!before || fields.consultation_date !== previousDate) fields.consultation = "staff";
   else fields.consultation = before.consultation;
-  fields.desired_case = desiredCase({
-    consultationDate: fields.consultation_date,
-    grade: fields.grade,
-    tags: fields.callrail_tags,
-    declineReason: fields.decline_reason,
-    closeReason: fields.lead_status === "Lost" ? before?.close_reason ?? "not_a_lead" : null,
-    leadStatus: fields.lead_status,
-    signed: fields.signed_case,
-    qualified: fields.qualified,
-  });
+
+  const contract = before ? contractSent(before) : false;
+  if (fields.signed_case || contract) {
+    fields.desired_case = true;
+    fields.desired_source = before?.desired_source === "staff" ? "staff" : contract ? "contract" : "staff";
+  } else if (fields.desired_case === true || fields.desired_case === false) {
+    fields.desired_source = "staff";
+  } else {
+    fields.desired_case = null;
+    fields.desired_source = null;
+  }
+
+  const tags = fields.callrail_tags.filter((tag) => tag !== "CVR DESIRED" && tag !== "CVR SIGNED");
+  if (fields.desired_case) tags.push("CVR DESIRED");
+  if (fields.signed_case) tags.push("CVR SIGNED");
+  fields.callrail_tags = tags;
 }
 
 export async function createLead(formData: FormData) {
   const { supabase, email } = await requireStaff();
   const fields = fieldsFromForm(formData);
-  applyDesired(fields, null);
+  applyMilestones(fields, null);
   const now = new Date().toISOString();
   const signedExtras = fields.signed_case
     ? {
@@ -211,6 +228,9 @@ export async function createLead(formData: FormData) {
       signed_case: false,
       case_id: null,
       lead_status: signedExtras.lead_status ?? fields.lead_status,
+      arrival: fields.arrival ?? "manual",
+      owner_name: fields.owner_name,
+      created_at: new Date().toISOString(),
     });
   }
 
@@ -231,7 +251,7 @@ export async function updateLead(leadId: string, formData: FormData) {
 
   const before = existing as Lead;
   const fields = fieldsFromForm(formData);
-  applyDesired(fields, before);
+  applyMilestones(fields, before);
   const changes = changedFields(before, fields);
   const statusNow = fields.lead_status;
   const closed =
@@ -256,6 +276,12 @@ export async function updateLead(leadId: string, formData: FormData) {
           signed_case: fields.signed_case,
           case_id: before.case_id,
           lead_status: statusNow,
+          arrival: fields.arrival ?? before.arrival,
+          owner_name: fields.owner_name ?? before.owner_name,
+          agreement_status: before.agreement_status,
+          agreement_sent_at: before.agreement_sent_at,
+          priority: before.priority,
+          created_at: before.created_at,
         });
         revalidatePath(`/leads/${leadId}`);
         revalidatePath("/queues");
@@ -360,6 +386,12 @@ export async function updateLead(leadId: string, formData: FormData) {
       signed_case: signed,
       case_id: before.case_id,
       lead_status: status,
+      arrival: fields.arrival ?? before.arrival,
+      owner_name: fields.owner_name ?? before.owner_name,
+      agreement_status: before.agreement_status,
+      agreement_sent_at: before.agreement_sent_at,
+      priority: Boolean(patch.priority ?? before.priority),
+      created_at: before.created_at,
     });
   } else if (before.follow_up) {
     await stopFollowUp(supabase, leadId, "Follow-up was turned off.");

@@ -54,6 +54,7 @@ export type Lead = {
   consultation: string | null;
   consultation_date: string | null;
   desired_case: boolean | null;
+  desired_source: "staff" | "contract" | null;
   signed_case: boolean;
   case_number: string | null;
   date_signed: string | null;
@@ -82,7 +83,11 @@ export type Lead = {
   needs_verification: boolean;
   identity_status: "ok" | "needs_review" | "confirmed";
   identity_evidence: string | null;
-  close_reason: "not_a_lead" | null;
+  close_reason: "signed" | "declined" | "referred" | "not_interested" | "no_response" | "not_a_lead" | "outside_practice" | null;
+  close_suggestion: "decline" | "not_interested" | "not_a_lead" | null;
+  caller_class: string | null;
+  practice_area: string | null;
+  referral_opportunity: boolean;
   agreement_status: string | null;
   agreement_sent_at: string | null;
   agreement_last_reminder_at: string | null;
@@ -93,7 +98,9 @@ export type Lead = {
   text_sequence_status: string | null;
   text_next_at: string | null;
   priority: boolean;
-  priority_reason: PriorityReason | null;
+  priority_reason: string | null;
+  priority_suggestion: string | null;
+  priority_suggestion_dismissed: boolean;
   last_action: string | null;
   next_action: string | null;
   slack_channel_id: string | null;
@@ -133,6 +140,12 @@ export const PRIORITY_REASON_SHORT: Record<PriorityReason, string> = {
 
 export function isPriorityReason(value: string | null | undefined): value is PriorityReason {
   return value === "contract_out" || value === "send_contract" || value === "high_potential";
+}
+
+export function priorityReasonText(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (isPriorityReason(value)) return PRIORITY_REASON_LABEL[value];
+  return value;
 }
 
 export function daysOpen(start: string | null, closedOn: string | null): number | null {

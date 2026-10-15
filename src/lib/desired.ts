@@ -1,23 +1,64 @@
-/** A consultation is a phone call Quo Router marked as the consultation. Desired is unanswered until that date exists. */
-export function desiredCase(input: {
-  consultationDate: string | null;
-  grade: string | null;
-  tags: string[];
-  declineReason: string | null;
-  closeReason: string | null;
-  leadStatus: string | null;
-  signed: boolean;
-  qualified: boolean | null;
+/** Intake milestones. Each one is recorded on its own. */
+
+const SENT = new Set(["sent", "viewed", "signed", "completed"]);
+
+export function contractSent(input: {
+  agreement_sent_at?: string | null;
+  agreement_status?: string | null;
+}): boolean {
+  const status = (input.agreement_status || "").toLowerCase();
+  if (status === "failed") return false;
+  if (SENT.has(status)) return true;
+  return Boolean(input.agreement_sent_at);
+}
+
+export function milestoneConsultation(date: string | null | undefined): boolean {
+  return Boolean(date);
+}
+
+export function milestoneQualified(input: {
+  qualified?: boolean | null;
+  callrail_tags?: string[] | null;
 }): boolean | null {
-  if (!input.consultationDate) return null;
-  const declined = Boolean(input.declineReason) || input.tags.some((tag) => tag.startsWith("DEC:"));
-  const qualifiedNo = input.tags.includes("QUALIFIED NO") || input.qualified === false;
-  const qualifiedYes = input.tags.includes("QUALIFIED YES") || input.qualified === true;
-  const notALead = input.closeReason === "not_a_lead" || input.leadStatus === "Lost";
-  const grade = (input.grade || "").toUpperCase();
-  if (notALead || declined || qualifiedNo || grade === "C") return false;
-  if (input.signed || qualifiedYes || grade === "A" || grade === "B") return true;
+  if (input.qualified === true || input.qualified === false) return input.qualified;
+  const tags = input.callrail_tags ?? [];
+  if (tags.includes("QUALIFIED YES")) return true;
+  if (tags.includes("QUALIFIED NO")) return false;
   return null;
+}
+
+/** A sent contract marks the case desired. A stored value counts only after a person or that contract set it. */
+export function milestoneDesired(input: {
+  desired_case?: boolean | null;
+  desired_source?: string | null;
+  agreement_sent_at?: string | null;
+  agreement_status?: string | null;
+  callrail_tags?: string[] | null;
+}): boolean | null {
+  if (contractSent(input)) return true;
+  if (input.desired_source === "staff" || input.desired_source === "contract") {
+    return input.desired_case === true ? true : input.desired_case === false ? false : null;
+  }
+  if ((input.callrail_tags ?? []).includes("CVR DESIRED")) return true;
+  return null;
+}
+
+/** Signed is a person confirming the contract is complete. */
+export function milestoneSigned(input: {
+  signed_case?: boolean | null;
+  lead_status?: string | null;
+}): boolean {
+  return Boolean(input.signed_case) || input.lead_status === "Signed";
+}
+
+export function signatureNeedsConfirm(input: {
+  signed_case?: boolean | null;
+  lead_status?: string | null;
+  agreement_status?: string | null;
+}): boolean {
+  if (milestoneSigned(input)) return false;
+  const status = (input.agreement_status || "").toLowerCase();
+  return status === "signed" || status === "completed";
 }
 
 export function consultationWhen(value: string | null | undefined): string {

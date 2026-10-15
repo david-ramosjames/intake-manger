@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enrollFollowUp } from "./followup";
-import { parseSlackLead, leadIsClosed } from "./slack-lead";
+import { parseSlackLead, leadIsClosed, slackPostDisposition } from "./slack-lead";
 import { LEAD_CHANNEL_ID } from "./slack";
 
 type SlackEvent = {
@@ -62,6 +62,27 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
   if (existing) return { ignored: "already_captured", id: existing.id };
 
   const parsed = parseSlackLead(text);
+  const disposition = slackPostDisposition(text);
+  if (disposition) {
+    if (parsed.phoneE164) {
+      const { data: prior } = await supabase
+        .from("leads")
+        .select("id")
+        .eq("phone_e164", parsed.phoneE164)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (prior) {
+        await supabase.from("lead_events").insert({
+          lead_id: prior.id,
+          event_type: "slack_touch",
+          actor: "slack",
+          payload: { disposition, ts: event.ts },
+        });
+      }
+    }
+    return { ignored: disposition };
+  }
   if (parsed.phoneE164) {
     const { data: openLeads } = await supabase
       .from("leads")
@@ -140,6 +161,10 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
     signed_case: created.signed_case,
     case_id: created.case_id,
     lead_status: created.lead_status,
+    arrival: parsed.arrival,
+    owner_name: parsed.handledBy,
+    created_at: new Date().toISOString(),
+    priority: false,
   });
   return { created: created.id };
 }

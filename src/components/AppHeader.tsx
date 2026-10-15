@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/priority", label: "Priority" },
   { href: "/verify", label: "Verify" },
   { href: "/sequences", label: "Sequences" },
+  { href: "/calls", label: "Call log" },
   { href: "/referrals", label: "Referrals" },
   { href: "/leads/new", label: "Add lead" },
 ];

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { LeadTagFields } from "@/components/LeadTagFields";
-import { consultationWhen, desiredWord } from "@/lib/desired";
+import { milestoneDesired } from "@/lib/desired";
 import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
@@ -89,6 +89,9 @@ export function LeadForm({
             </option>
           ))}
         </select>
+        <span className="mt-1 block text-xs leading-5 text-slate-500">
+          Open or closed. Consultation, qualified, desired, and signed are separate milestones below.
+        </span>
       </label>
       <Field
         label="Consultation date"
@@ -96,17 +99,21 @@ export function LeadForm({
         type="date"
         defaultValue={dateValue(lead?.consultation_date)}
       />
-      <p className="text-xs leading-5 text-slate-500">
-        Quo Router fills this when a phone call was the consultation. Desired case is{" "}
-        {lead?.consultation_date ? desiredWord(lead.desired_case) : "unanswered until that call"}
-        {lead?.consultation_date ? ` · ${consultationWhen(lead.consultation_date)}` : ""}. It uses that date plus the
-        grade, the qualified tag, and whether the lead was declined.
+      <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
+        A consultation is a real back-and-forth about an injury, not a short question or a call that only scheduled one.
+        It can be a later day than the lead. Quo Router fills the first date. Leave it blank until that conversation happens.
       </p>
+      <Tri
+        label="Conversion desired"
+        name="desired_case"
+        defaultValue={triValue(lead ? milestoneDesired(lead) : null)}
+        hint="Yes when the firm wants to sign. Sending a contract sets this to yes. You can mark yes before a contract goes out."
+      />
       <Tri
         label="Signed"
         name="signed_case"
         defaultValue={lead?.signed_case ? "yes" : "no"}
-        hint="Yes when the client signed in Sign Flow. A case loaded into Docket is promoted, and that stays separate."
+        hint="Yes only after a person confirms the contract is complete. Some matters need more than one signature, so a contract marked complete is not enough on its own."
       />
       <Field label="Case number" name="case_number" defaultValue={lead?.case_number ?? ""} />
       <Field
@@ -194,12 +201,14 @@ export function LeadForm({
           tags={lead?.callrail_tags ?? []}
           declineReason={lead?.decline_reason ?? null}
           signed={Boolean(lead?.signed_case)}
+          desired={Boolean(lead?.desired_case) || Boolean(lead?.signed_case)}
+          nonPi={lead?.caller_class === "non_pi"}
           callrail={Boolean(lead?.callrail_call_id)}
         />
       </div>
       <label className="flex items-center gap-2 text-sm sm:col-span-2">
         <input type="checkbox" name="follow_up" value="yes" defaultChecked={lead ? lead.follow_up : true} />
-        <span>Run the follow-up sequence. Want-to-sign leads get texts and calls. Need-more-info leads get calls only.</span>
+        <span>Keep this lead in follow-up. Missed calls and form fills get the uncontacted call sequence. Texts stay with SMS Follow-Up.</span>
       </label>
       <label className="block text-sm sm:col-span-2">
         <span className="font-medium text-slate-700">Why this grade</span>

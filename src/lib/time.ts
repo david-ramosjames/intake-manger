@@ -55,6 +55,15 @@ export function chicagoDay(value: string | Date): string {
   }).format(value instanceof Date ? value : new Date(value));
 }
 
+export function chicagoLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = chicagoParts(date);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
 /** datetime-local values are Central wall time. The server clock is not. */
 export function chicagoLocalToIso(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value.trim());
@@ -79,9 +88,9 @@ export function chicagoLocalToIso(value: string): string {
   return new Date(utcGuess - (shown - utcGuess)).toISOString();
 }
 
-type ChicagoParts = { year: number; month: number; day: number; hour: number; minute: number; dow: number };
+export type ChicagoParts = { year: number; month: number; day: number; hour: number; minute: number; dow: number };
 
-function chicagoParts(date: Date): ChicagoParts {
+export function chicagoParts(date: Date): ChicagoParts {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago",
     hourCycle: "h23",

@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { scheduleCallback } from "./callbacks";
+import { contractSent } from "./desired";
 import type { LeadKind } from "./leads";
-import { loadWorkHours, type CallSequenceId, type WorkHours } from "./sequences";
-import { formatChicago, snapToWorkHours } from "./time";
+import { type CallSequenceId, type WorkHours } from "./sequences";
+import { formatChicago } from "./time";
 
 type LeadBits = {
   id: string;
@@ -12,6 +14,13 @@ type LeadBits = {
   signed_case: boolean;
   case_id: string | null;
   lead_status: string;
+  arrival?: string | null;
+  owner_name?: string | null;
+  agreement_status?: string | null;
+  agreement_sent_at?: string | null;
+  priority?: boolean | null;
+  created_at?: string | null;
+  consultation_date?: string | null;
 };
 
 export function renderStep(body: string, lead: { lead_name: string | null; case_type: string | null }): string {
@@ -20,16 +29,35 @@ export function renderStep(body: string, lead: { lead_name: string | null; case_
   return body.replaceAll("{{name}}", name).replaceAll("{{case_type}}", caseType);
 }
 
+function closedLead(lead: LeadBits): boolean {
+  return lead.signed_case || Boolean(lead.case_id) || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status);
+}
+
+export function sequenceForLead(lead: LeadBits, manual: "post_consult" | "auto"): CallSequenceId | null {
+  if (closedLead(lead)) return null;
+  if (contractSent(lead)) return "want_to_sign";
+  if (manual === "post_consult") return "more_info";
+  if (lead.arrival === "missed" || lead.arrival === "form") return "first_talk";
+  return null;
+}
+
+function proposedCaller(sequence: CallSequenceId, position: number, owner: string | null | undefined): string | null {
+  if (!owner) return null;
+  if (sequence === "want_to_sign") return owner;
+  if (sequence === "more_info" && position <= 2) return owner;
+  return null;
+}
+
 export async function enrollFollowUp(
   supabase: SupabaseClient,
   lead: LeadBits,
   hoursBySequence?: Record<CallSequenceId, WorkHours>,
+  manual: "post_consult" | "auto" = "auto",
 ) {
-  if (!lead.follow_up) return;
-  if (lead.signed_case || lead.case_id) return;
-  if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.lead_status === "Promoted") return;
+  if (!lead.follow_up && manual !== "post_consult") return;
+  const sequence = sequenceForLead(lead, manual);
+  if (!sequence) return;
 
-  const sequence: CallSequenceId = lead.kind === "needs_info" ? "more_info" : "first_talk";
   const { data: steps, error } = await supabase
     .from("sequence_steps")
     .select("queue, position, delay_minutes, body")
@@ -39,50 +67,56 @@ export async function enrollFollowUp(
   if (error) throw new Error(error.message);
   if (!steps?.length) return;
 
-  const hours = hoursBySequence?.[sequence] ?? (await loadWorkHours(supabase))[sequence];
+  const priority = Boolean(lead.priority) || sequence === "want_to_sign";
+  const contactAt = lead.created_at ? new Date(lead.created_at) : null;
   const now = Date.now();
-  const rows = (steps ?? []).map((step) => ({
-    lead_id: lead.id,
-    queue: step.queue as string,
-    position: step.position as number,
-    due_at: snapToWorkHours(new Date(now + Number(step.delay_minutes) * 60_000).toISOString(), hours),
-    body: renderStep(String(step.body), lead),
-  }));
+  const rows = (steps ?? []).map((step) => {
+    const position = step.position as number;
+    const from = new Date(now + Number(step.delay_minutes) * 60_000);
+    const caller = proposedCaller(sequence, position, lead.owner_name);
+    return {
+      lead_id: lead.id,
+      queue: step.queue as string,
+      position,
+      due_at: scheduleCallback({
+        from,
+        index: Math.max(0, position - 1),
+        contactAt,
+        priority,
+        varyKey: `${lead.id}:${position}`,
+      }),
+      body: renderStep(String(step.body), lead),
+      assigned_name: caller,
+      detail: caller && sequence === "want_to_sign" ? `Proposed owner: ${caller}. Change the tag if someone else should call.` : null,
+    };
+  });
   if (!rows.length) return;
   const { error: insertError } = await supabase.from("lead_jobs").upsert(rows, {
     onConflict: "lead_id,queue,position",
     ignoreDuplicates: true,
   });
   if (insertError) throw new Error(insertError.message);
-
-  if (lead.kind === "needs_info") {
-    await supabase
-      .from("lead_jobs")
-      .update({ status: "skipped", detail: "Need-more-info leads are calls only." })
-      .eq("lead_id", lead.id)
-      .eq("queue", "text")
-      .eq("status", "pending");
-  }
+  void hoursBySequence;
 }
 
 export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from("leads")
-    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status")
-    .eq("follow_up", true)
+    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at")
     .eq("signed_case", false)
     .is("case_id", null)
     .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
-    .order("created_at", { ascending: false })
-    .limit(80);
+    .or("agreement_sent_at.not.is.null,agreement_status.in.(sent,viewed)")
+    .order("agreement_sent_at", { ascending: false, nullsFirst: false })
+    .limit(20);
   if (error) throw new Error(error.message);
 
-  const leads = (data ?? []) as LeadBits[];
+  const leads = ((data ?? []) as LeadBits[]).filter((lead) => contractSent(lead));
   if (!leads.length) return 0;
-  const hoursBySequence = await loadWorkHours(supabase);
   const { data: existing, error: jobsError } = await supabase
     .from("lead_jobs")
     .select("lead_id")
+    .eq("queue", "call")
     .in(
       "lead_id",
       leads.map((lead) => lead.id),
@@ -93,7 +127,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   let enrolled = 0;
   for (const lead of leads) {
     if (started.has(lead.id)) continue;
-    await enrollFollowUp(supabase, lead, hoursBySequence);
+    await enrollFollowUp(supabase, { ...lead, follow_up: true });
     enrolled += 1;
   }
   return enrolled;

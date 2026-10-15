@@ -8,6 +8,7 @@ export type QueueId =
   | "signing"
   | "signed"
   | "closed"
+  | "nonleads"
   | "fresh"
   | "working";
 
@@ -20,6 +21,7 @@ export function isQueue(value: string | undefined): value is QueueId {
     value === "signing" ||
     value === "signed" ||
     value === "closed" ||
+    value === "nonleads" ||
     value === "fresh" ||
     value === "working"
   );
@@ -60,14 +62,16 @@ export function matchesQueue(queue: QueueId, cycle: LeadCycle, attention: boolea
   if (queue === "working") return cycle === "information" || cycle === "signing";
   if (queue === "signed") return cycle === "signed";
   if (queue === "closed") return cycle === "closed";
+  if (queue === "nonleads") return true;
   return true;
 }
 
 export function stageClass(label: string): string {
   if (label === "Signed") return "bg-emerald-50 text-emerald-800";
-  if (label === "Finish signing") return "bg-violet-50 text-violet-800";
+  if (label === "Finish signing" || label === "Confirm signature") return "bg-violet-50 text-violet-800";
   if (label === "Need more information") return "bg-sky-50 text-sky-800";
   if (label === "Need to contact") return "bg-amber-50 text-amber-900";
+  if (label === "Outside practice") return "bg-orange-50 text-orange-900";
   return "bg-slate-100 text-slate-600";
 }
 
@@ -79,7 +83,7 @@ export function automationLine(lead: {
 }): { label: string; bad: boolean } {
   const agreement = (lead.agreement_status || "").toLowerCase();
   if (agreement === "failed") return { label: "Contract failed", bad: true };
-  if (agreement === "signed" || agreement === "completed") return { label: "Contract signed", bad: false };
+  if (agreement === "signed" || agreement === "completed") return { label: "Contract complete", bad: false };
   if (agreement === "sent" || agreement === "viewed" || lead.agreement_sent_at) {
     return { label: "Contract sent", bad: false };
   }

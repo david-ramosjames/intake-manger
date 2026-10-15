@@ -5,15 +5,15 @@ export const CALL_SEQUENCES = ["want_to_sign", "first_talk", "more_info"] as con
 export type CallSequenceId = (typeof CALL_SEQUENCES)[number];
 
 export const CALL_SEQUENCE_LABEL: Record<CallSequenceId, string> = {
-  want_to_sign: "Want to sign",
-  first_talk: "First conversation",
-  more_info: "Need more information",
+  want_to_sign: "Contract follow-up",
+  first_talk: "Uncontacted lead",
+  more_info: "Post-consultation",
 };
 
 export const CALL_SEQUENCE_DETAIL: Record<CallSequenceId, string> = {
-  want_to_sign: "A lead we want to sign. The call times here are the next call.",
-  first_talk: "A lead we still need to talk to for the first time.",
-  more_info: "A lead we already talked to, and we still need more information.",
+  want_to_sign: "Starts when a contract is sent and not signed. The aim is to get it signed.",
+  first_talk: "Starts on its own for a missed call or a form fill, to make first contact.",
+  more_info: "Starts only when someone clicks Start follow-up sequence, after a conversation that still needs a callback.",
 };
 
 export function isCallSequence(value: string | null | undefined): value is CallSequenceId {
@@ -30,13 +30,11 @@ export function leadSequenceId(input: {
   if (input.closed) return null;
   const agreement = (input.agreementStatus || "").toLowerCase();
   const contractOut =
-    agreement === "sent" ||
-    agreement === "viewed" ||
-    (Boolean(input.agreementSentAt) && !["failed", "signed", "completed"].includes(agreement));
+    ["sent", "viewed", "signed", "completed"].includes(agreement) ||
+    (Boolean(input.agreementSentAt) && agreement !== "failed");
   if (contractOut) return "want_to_sign";
   if (!input.talked) return "first_talk";
-  if (input.kind === "needs_info") return "more_info";
-  return "want_to_sign";
+  return null;
 }
 
 export function splitDelay(minutes: number): { days: number; hours: number } {

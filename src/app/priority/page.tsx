@@ -1,22 +1,14 @@
 import Link from "next/link";
-import { consultationWhen, desiredWord } from "@/lib/desired";
-import {
-  daysSince,
-  leadTitle,
-  listAccident,
-  PRIORITY_REASON_LABEL,
-  PRIORITY_REASONS,
-  slackMessageUrl,
-  type Lead,
-  type PriorityReason,
-} from "@/lib/leads";
+import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified } from "@/lib/desired";
+import { priorityReasonText, daysSince, leadTitle, listAccident, slackMessageUrl, type Lead } from "@/lib/leads";
 import { nextActionLines, type CallStep } from "@/lib/next-action";
-import { DEFAULT_WORK_HOURS, leadSequenceId, loadWorkHours } from "@/lib/sequences";
-import { leadCycle, priorityBucket, textSequenceLive } from "@/lib/next-step";
+import { reviewPrioritySuggestion } from "@/lib/ops-actions";
+import { leadSequenceId } from "@/lib/sequences";
+import { leadCycle, openLeadAction, PRIORITY_PLACE_LABEL, priorityPlace, textSequenceLive, type PriorityPlace } from "@/lib/next-step";
 import { requireStaff } from "@/lib/session";
 
 const COLUMNS =
-  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, agreement_status, agreement_sent_at, agreement_next_reminder_at, priority_reason, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_name, phone, grade, kind, sequence, follow_up, arrival, source_channel, lead_date, created_at, case_type, case_detail, lead_status, signed_case, case_id, close_reason, consultation_date, desired_case, desired_source, qualified, callrail_tags, agreement_status, agreement_sent_at, agreement_next_reminder_at, priority, priority_reason, priority_suggestion, last_action, next_action, text_sequence_status, text_next_at, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type PriorityLead = Pick<
   Lead,
@@ -39,10 +31,15 @@ type PriorityLead = Pick<
   | "close_reason"
   | "consultation_date"
   | "desired_case"
+  | "desired_source"
+  | "qualified"
+  | "callrail_tags"
   | "agreement_status"
   | "agreement_sent_at"
   | "agreement_next_reminder_at"
+  | "priority"
   | "priority_reason"
+  | "priority_suggestion"
   | "last_action"
   | "next_action"
   | "text_sequence_status"
@@ -69,22 +66,22 @@ function countsAsContact(type: string): boolean {
 
 export default async function PriorityPage() {
   const { supabase } = await requireStaff();
-  const [{ data, error }, { data: stepRows }, workHours] = await Promise.all([
+  const [{ data, error }, { data: stepRows }] = await Promise.all([
     supabase
       .from("leads")
       .select(COLUMNS)
       .eq("signed_case", false)
       .is("case_id", null)
       .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
+      .or("priority.eq.true,priority_suggestion.not.is.null,agreement_sent_at.not.is.null,agreement_status.in.(sent,viewed,signed,completed)")
       .order("lead_date", { ascending: false, nullsFirst: false })
-      .limit(500),
+      .limit(300),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes").eq("queue", "call").order("position"),
-    loadWorkHours(supabase),
   ]);
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
   const leads = (data ?? []) as PriorityLead[];
-  const candidates = leads.filter(mightBePriority);
+  const candidates = leads.filter((lead) => priorityPlace(lead));
   const ids = candidates.map((lead) => lead.id);
   const touches = await loadTouches(supabase, ids);
   const talked = new Set<string>();
@@ -116,12 +113,12 @@ export default async function PriorityPage() {
     if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
   }
 
-  const grouped = new Map<PriorityReason, { lead: PriorityLead; calls: number; last: string; wait: number; textsLive: boolean; nextAction: ReturnType<typeof nextActionLines> }[]>();
-  for (const reason of PRIORITY_REASONS) grouped.set(reason, []);
+  const grouped = new Map<PriorityPlace, { lead: PriorityLead; calls: number; last: string; wait: number; textsLive: boolean; action: string | null; nextAction: ReturnType<typeof nextActionLines> }[]>();
+  for (const place of ["contract", "flagged", "suggested"] as const) grouped.set(place, []);
   for (const lead of candidates) {
     const connected = talked.has(lead.id);
     const cycle = leadCycle(lead, connected ? [{ type: "call", direction: "inbound" }] : []);
-    const bucket = priorityBucket(lead, cycle, connected);
+    const bucket = priorityPlace(lead);
     if (!bucket) continue;
     const wait = daysSince(lastOutreach.get(lead.id));
     grouped.get(bucket)?.push({
@@ -130,6 +127,7 @@ export default async function PriorityPage() {
       last: lastContacted(wait),
       wait: wait ?? 99,
       textsLive: textSequenceLive(lead.text_sequence_status),
+      action: openLeadAction(lead, cycle, calls.get(lead.id) ?? 0),
       nextAction: nextActionLines({
         closed: false,
         sequence: lead.sequence,
@@ -147,16 +145,8 @@ export default async function PriorityPage() {
           agreementStatus: lead.agreement_status,
           agreementSentAt: lead.agreement_sent_at,
         })),
-        hours:
-          workHours[
-            leadSequenceId({
-              closed: false,
-              talked: talked.has(lead.id),
-              kind: lead.kind,
-              agreementStatus: lead.agreement_status,
-              agreementSentAt: lead.agreement_sent_at,
-            }) ?? "want_to_sign"
-          ] ?? DEFAULT_WORK_HOURS,
+        priority: Boolean(lead.priority) || ["sent", "viewed", "signed", "completed"].includes((lead.agreement_status || "").toLowerCase()) || Boolean(lead.agreement_sent_at),
+        contactAt: lead.created_at,
       }),
     });
   }
@@ -170,8 +160,8 @@ export default async function PriorityPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-navy">Priority</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            The highest-priority leads. A contract that went out and is still unsigned, a lead we have
-            already talked to and want to send a contract, and a strong lead we still need to talk to.
+            A lead is priority when a contract is out and unsigned, someone flags it, or Quo recommends it and a person confirms.
+            A sent contract stays here until the lead is signed or closed. Every row shows the next action.
           </p>
         </div>
         <Link href="/" className="text-sm font-medium text-slate-900 underline">
@@ -181,12 +171,12 @@ export default async function PriorityPage() {
       {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
 
       <div className="mt-6 space-y-8">
-        {PRIORITY_REASONS.map((reason) => {
+        {(["contract", "flagged", "suggested"] as const).map((reason) => {
           const rows = grouped.get(reason) ?? [];
           return (
             <section key={reason}>
               <h2 className="text-sm font-semibold text-slate-900">
-                {PRIORITY_REASON_LABEL[reason]}
+                {PRIORITY_PLACE_LABEL[reason]}
                 <span className="ml-2 font-normal text-slate-500">{rows.length}</span>
               </h2>
               <p className="mt-1 text-sm text-slate-500">{groupDetail(reason)}</p>
@@ -218,8 +208,10 @@ export default async function PriorityPage() {
                               <p className="mt-0.5 text-xs text-slate-500">
                                 {listAccident(row.lead) !== "—" ? listAccident(row.lead) : "Accident not captured"}
                                 {row.lead.phone ? ` · ${row.lead.phone}` : ""}
-                                {` · ${consultationWhen(row.lead.consultation_date)}`}
-                                {row.lead.consultation_date ? ` · Desired ${desiredWord(row.lead.desired_case)}` : ""}
+                                {` · Consult ${consultationWhen(row.lead.consultation_date)}`}
+                                {` · Qualified ${desiredWord(milestoneQualified(row.lead))}`}
+                                {` · Desired ${desiredWord(milestoneDesired(row.lead))}`}
+                                {` · Signed ${row.lead.signed_case ? "Yes" : "—"}`}
                               </p>
                               <p className="mt-1 flex gap-3 text-xs">
                                 {row.lead.quo_link ? (
@@ -241,12 +233,32 @@ export default async function PriorityPage() {
                             </td>
                             <td className="px-4 py-3 text-slate-700">{row.last}</td>
                             <td className="max-w-xs px-4 py-3 text-slate-700">{row.lead.last_action || "No note yet."}</td>
-                            <td className="px-4 py-3 text-slate-700">
-                              {row.nextAction.map((line) => (
-                                <p key={line.label} className="whitespace-nowrap">
-                                  <span className="text-slate-500">{line.label}</span> {line.when}
-                                </p>
-                              ))}
+                            <td className="px-4 py-3 text-slate-800">
+                              <p className="font-medium text-slate-900">{row.action ?? "Choose the next step"}</p>
+                              {priorityReasonText(row.lead.priority_reason) && reason === "flagged" ? (
+                                <p className="text-xs text-slate-500">{priorityReasonText(row.lead.priority_reason)}</p>
+                              ) : null}
+                              {row.lead.priority_suggestion && reason === "suggested" ? (
+                                <p className="text-xs text-slate-500">{row.lead.priority_suggestion}</p>
+                              ) : null}
+                              {row.nextAction
+                                .filter((line) => line.when !== "None")
+                                .map((line) => (
+                                  <p key={line.label} className="whitespace-nowrap text-slate-600">
+                                    <span className="text-slate-500">{line.label}</span> {line.when}
+                                  </p>
+                                ))}
+                              {reason === "suggested" ? (
+                                <form action={reviewPrioritySuggestion} className="mt-2 flex flex-wrap gap-2">
+                                  <input type="hidden" name="lead_id" value={row.lead.id} />
+                                  <button name="decision" value="confirm" className="rounded-md bg-navy px-2.5 py-1 text-xs font-medium text-white">
+                                    Confirm
+                                  </button>
+                                  <button name="decision" value="dismiss" className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs">
+                                    Not now
+                                  </button>
+                                </form>
+                              ) : null}
                             </td>
                           </tr>
                         );
@@ -270,20 +282,10 @@ function gradeRank(grade: string | null): number {
   return 3;
 }
 
-function groupDetail(reason: PriorityReason): string {
-  if (reason === "contract_out") return "The contract has been sent and it is not signed yet.";
-  if (reason === "send_contract") return "We have talked with them and already know they should get a contract.";
-  return "We still need to talk to them. A strong lead, a good web form we have not reached, or one that may need a drop letter.";
-}
-
-function mightBePriority(lead: PriorityLead): boolean {
-  if (lead.priority_reason) return true;
-  const agreement = (lead.agreement_status || "").toLowerCase();
-  if (lead.agreement_sent_at || agreement === "sent" || agreement === "viewed" || agreement === "cancelled" || agreement === "expired") {
-    return true;
-  }
-  if (lead.grade === "A" || lead.grade === "B") return true;
-  return lead.source_channel === "Web form" && lead.grade !== "C";
+function groupDetail(reason: PriorityPlace): string {
+  if (reason === "contract") return "The contract has been sent and it is not signed. It stays here until the lead is signed or closed.";
+  if (reason === "flagged") return "Someone marked this lead. Promising web forms and high-quality referrals belong here.";
+  return "Quo recommended this lead. It stays off the list until someone confirms it.";
 }
 
 async function loadTouches(

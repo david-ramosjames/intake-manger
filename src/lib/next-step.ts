@@ -1,3 +1,4 @@
+import { contractSent, milestoneSigned, signatureNeedsConfirm } from "./desired";
 import type { Lead } from "./leads";
 
 export type ClientTouch = {
@@ -17,7 +18,21 @@ export const CYCLE_LABEL: Record<LeadCycle, string> = {
   closed: "Closed",
 };
 
-export function leadStatusLabel(lead: { close_reason?: string | null }, cycle: LeadCycle): string {
+export function leadStatusLabel(
+  lead: {
+    close_reason?: string | null;
+    signed_case?: boolean | null;
+    lead_status?: string | null;
+    agreement_status?: string | null;
+  },
+  cycle: LeadCycle,
+): string {
+  if (cycle === "signed" || lead.close_reason === "signed") return "Signed";
+  if (signatureNeedsConfirm(lead)) return "Confirm signature";
+  if (lead.close_reason === "declined") return "Declined";
+  if (lead.close_reason === "referred" || lead.close_reason === "outside_practice") return "Referred";
+  if (lead.close_reason === "not_interested") return "Not interested";
+  if (lead.close_reason === "no_response") return "No response";
   if (lead.close_reason === "not_a_lead") return "Not a lead";
   return CYCLE_LABEL[cycle];
 }
@@ -46,11 +61,9 @@ function reachedClient(lead: CycleLead, touches: ClientTouch[]): boolean {
 }
 
 export function leadCycle(lead: CycleLead, touches: ClientTouch[] = []): LeadCycle {
-  if (lead.signed_case || lead.lead_status === "Signed" || lead.agreement_status === "signed" || lead.agreement_status === "completed") {
-    return "signed";
-  }
-  if (lead.lead_status === "Lost") return "closed";
-  if (contractIsOut(lead)) return "signing";
+  if (lead.signed_case || lead.lead_status === "Signed") return "signed";
+  if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.lead_status === "Promoted") return "closed";
+  if (contractIsOut(lead) || signatureNeedsConfirm(lead)) return "signing";
   if (!reachedClient(lead, touches)) return "contact";
   return "information";
 }
@@ -65,40 +78,43 @@ function injuryStrength(lead: CycleLead): "strong" | "possible" | "weak" {
   return "weak";
 }
 
-export function priorityBucket(
-  lead: CycleLead & {
-    case_id?: string | null;
-    kind?: string | null;
-    source_channel?: string | null;
-    priority_reason?: string | null;
-  },
-  cycle: LeadCycle,
-  talked = false,
-): "contract_out" | "send_contract" | "high_potential" | null {
-  if (lead.signed_case || lead.case_id) return null;
-  if (cycle === "signed" || cycle === "closed") return null;
-  if (lead.lead_status === "Promoted" || lead.lead_status === "Referred") return null;
+export type PriorityPlace = "contract" | "flagged" | "suggested";
 
-  const agreement = (lead.agreement_status || "").toLowerCase();
-  const contractSent =
-    cycle === "signing" ||
-    agreement === "sent" ||
-    agreement === "viewed" ||
-    (Boolean(lead.agreement_sent_at) && agreement !== "failed" && agreement !== "signed" && agreement !== "completed");
-  if (contractSent || lead.priority_reason === "contract_out") return "contract_out";
+export const PRIORITY_PLACE_LABEL: Record<PriorityPlace, string> = {
+  contract: "Contract out",
+  flagged: "Flagged",
+  suggested: "Suggested",
+};
 
-  const wantsContract =
-    lead.priority_reason === "send_contract" ||
-    (lead.kind === "pursue" && (lead.grade === "A" || lead.grade === "B"));
-  if (wantsContract && talked) return "send_contract";
-
-  const webForm = lead.arrival === "form" || lead.source_channel === "Web form";
-  const strongWebForm = webForm && lead.grade !== "C" && injuryStrength(lead) === "strong";
-  const needToTalk = !talked && (wantsContract || lead.grade === "A" || strongWebForm || lead.priority_reason === "high_potential");
-  if (needToTalk || lead.priority_reason === "high_potential" || (lead.grade === "A" && cycle === "contact") || (strongWebForm && cycle === "contact")) {
-    return "high_potential";
-  }
+export function priorityPlace(lead: {
+  signed_case?: boolean | null;
+  lead_status?: string | null;
+  agreement_status?: string | null;
+  agreement_sent_at?: string | null;
+  case_id?: string | null;
+  priority?: boolean | null;
+  priority_suggestion?: string | null;
+}): PriorityPlace | null {
+  if (lead.case_id || lead.lead_status === "Promoted") return null;
+  if (milestoneSigned(lead) || lead.lead_status === "Lost" || lead.lead_status === "Referred") return null;
+  if (contractSent(lead)) return "contract";
+  if (lead.priority) return "flagged";
+  if (lead.priority_suggestion) return "suggested";
   return null;
+}
+
+export function openLeadAction(
+  lead: { next_action?: string | null; agreement_status?: string | null; agreement_sent_at?: string | null; signed_case?: boolean | null; lead_status?: string | null; referral_opportunity?: boolean | null },
+  cycle: LeadCycle,
+  calls: number,
+): string | null {
+  if (cycle === "signed" || cycle === "closed") return null;
+  const note = lead.next_action?.trim();
+  if (note) return note;
+  if (lead.referral_opportunity) return "Send the referral text";
+  if (signatureNeedsConfirm(lead)) return "Confirm the signature";
+  if (contractSent(lead) || cycle === "signing") return "Follow up on the signature";
+  return nextCallPurpose(cycle, calls);
 }
 
 export function leadPriority(lead: CycleLead, cycle: LeadCycle): "High" | "Medium" | "Low" | null {

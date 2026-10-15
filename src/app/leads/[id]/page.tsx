@@ -1,18 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { IdentityMark } from "@/components/IdentityMark";
+import { ReferralPanel } from "@/components/ReferralPanel";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
-import { confirmLead, markNotALead, resolveIdentity, savePriority, scheduleSlackPost, sendReferral, startFollowUp } from "@/lib/ops-actions";
+import { confirmLead, confirmSigned, markNotALead, resolveIdentity, saveCallbackPlan, savePriority, scheduleSlackPost, startFollowUp } from "@/lib/ops-actions";
 import { CallWork } from "@/components/CallWork";
 import { callOutcomeLabel } from "@/lib/calls";
 import { describeFollowUp } from "@/lib/followup";
-import { formatChicago } from "@/lib/time";
-import { consultationWhen, desiredWord } from "@/lib/desired";
-import { daysOpen, isPriorityReason, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, PRIORITY_REASON_LABEL, PRIORITY_REASONS, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
+import { chicagoLocalInput, formatChicago } from "@/lib/time";
+import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, signatureNeedsConfirm } from "@/lib/desired";
+import { daysOpen, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, priorityReasonText, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
-import { leadCycle, leadNeed, leadPriority, leadStatusLabel } from "@/lib/next-step";
-import { qualifiedLine } from "@/lib/tags";
+import { leadCycle, leadNeed, leadStatusLabel, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
+import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -21,7 +22,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, attemptsResult, staff, historyResult] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -31,7 +32,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .limit(30),
     supabase
       .from("lead_jobs")
-      .select("id, queue, position, due_at, body, status, detail, assigned_email, outcome, notified_at")
+      .select("id, queue, position, due_at, body, status, detail, assigned_email, assigned_name, mention, outcome, notified_at")
       .eq("lead_id", id)
       .order("queue")
       .order("position"),
@@ -41,7 +42,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .eq("lead_id", id)
       .order("due_at", { ascending: false })
       .limit(10),
-    supabase.from("referral_destinations").select("id, name, phone, case_types").eq("active", true).order("name"),
+    supabase.from("referral_destinations").select("id, name, phone, practice_areas, address, email, website, spanish, matters, notes, active").eq("active", true).order("name"),
+    supabase.from("referral_templates").select("language, body"),
     supabase
       .from("call_attempts")
       .select("id, job_id, outcome, note, actor, attempted_at")
@@ -74,6 +76,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     status: string;
     detail: string | null;
     assigned_email: string | null;
+    assigned_name: string | null;
+    mention: string | null;
     outcome: string | null;
     notified_at: string | null;
   }[];
@@ -84,17 +88,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     status: string;
     mention: string | null;
   }[];
-  const destinations = (destinationsResult.data ?? []) as {
-    id: string;
-    name: string;
-    phone: string | null;
-    case_types: string[];
-  }[];
-  const suggested = destinations.find((destination) =>
-    destination.case_types.some((phrase) =>
-      (lead.case_type ?? "").toLowerCase().includes(phrase.toLowerCase()),
-    ),
-  );
+  const destinations = (destinationsResult.data ?? []) as ReferralDestination[];
+  const templateRows = (templatesResult.data ?? []) as { language: string; body: string }[];
+  const templates = {
+    en: templateRows.find((row) => row.language === "en")?.body || DEFAULT_REFERRAL_SMS.en,
+    es: templateRows.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es,
+  };
   const promoteHref = lead.intake_call_id
     ? `${docket}/intakes/${encodeURIComponent(lead.intake_call_id)}/promote`
     : null;
@@ -106,7 +105,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const openFor = daysOpen(lead.lead_date ?? lead.created_at, lead.date_signed ?? lead.signed_at);
   const touches = (historyResult.data ?? []) as { type: string | null; direction: string | null }[];
   const cycle = leadCycle(lead, touches);
-  const priority = leadPriority(lead, cycle);
+  const priority = priorityPlace(lead);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
@@ -121,15 +120,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </h1>
           <p className="mt-1 text-sm text-slate-600">
             {leadStatusLabel(lead, cycle)}
-            {priority ? ` · Priority ${priority}` : ""}
+            {priority ? ` · ${PRIORITY_PLACE_LABEL[priority]}` : ""}
             {` · ${LEAD_KIND_LABEL[lead.kind]}`}
             {lead.arrival ? ` · ${LEAD_ARRIVAL_LABEL[lead.arrival as LeadArrival] ?? lead.arrival}` : ""}
             {listAccident(lead) !== "—" ? ` · ${listAccident(lead)}` : ""}
             {lead.owner_name ? ` · handled by ${lead.owner_name}` : " · nobody assigned"}
-            {` · ${qualifiedLine(lead.callrail_tags ?? [], lead.decline_reason)}`}
             {lead.grade ? ` · Grade ${lead.grade}` : " · no grade"}
-            {` · ${lead.consultation_date ? `Consult ${consultationWhen(lead.consultation_date)}` : "No consult"}`}
-            {lead.consultation_date ? ` · Desired ${desiredWord(lead.desired_case)}` : ""}
             {openFor != null ? ` · ${openFor} day${openFor === 1 ? "" : "s"} open` : ""}
             {lead.sentiment ? ` · ${LEAD_SENTIMENT_LABEL[lead.sentiment as LeadSentiment]}` : ""}
           </p>
@@ -166,6 +162,33 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         </div>
       </div>
 
+      <dl className="mt-4 grid gap-2 sm:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Consultation</dt>
+          <dd className="mt-1 text-sm text-slate-900">{lead.consultation_date ? consultationWhen(lead.consultation_date) : "—"}</dd>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</dt>
+          <dd className="mt-1 text-sm text-slate-900">{desiredWord(milestoneQualified(lead))}</dd>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</dt>
+          <dd className="mt-1 text-sm text-slate-900">{desiredWord(milestoneDesired(lead))}</dd>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Signed</dt>
+          <dd className="mt-1 text-sm text-slate-900">{lead.signed_case ? "Yes" : "—"}</dd>
+        </div>
+      </dl>
+      {signatureNeedsConfirm(lead) ? (
+        <form action={confirmSigned} className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm">
+          <input type="hidden" name="lead_id" value={lead.id} />
+          <p className="font-medium text-violet-950">The contract looks complete.</p>
+          <p className="mt-1 text-violet-900">Signed stays open until someone confirms every required signature is done.</p>
+          <button className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Confirm signed</button>
+        </form>
+      ) : null}
+
       {lead.signed_case || lead.case_id || lead.lead_status === "Signed" || lead.lead_status === "Promoted" ? null : lead.close_reason === "not_a_lead" ? (
         <p className="mt-4 text-sm text-slate-600">Not a lead. Calls and texts are off.</p>
       ) : (
@@ -180,33 +203,27 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       )}
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Jon&apos;s list</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Priority</h2>
         <p className="mt-1 text-sm text-slate-600">
-          Highest priority is a contract already sent, a lead we have talked to and want to send a
-          contract, or a strong lead we still need to talk to — a good web form we have not reached,
-          or one that may need a drop letter. Write the last step and the next step the way you would
-          in the daily note.
+          A sent contract stays on the priority list until the lead is signed or closed. Flag a lead yourself for a promising web form, a high-quality referral, or another reason. Write the next action the way you would say it.
         </p>
+        {lead.priority_suggestion ? (
+          <p className="mt-3 text-sm text-sky-900">Quo suggested this lead: {lead.priority_suggestion}</p>
+        ) : null}
         <form action={savePriority.bind(null, lead.id)} className="mt-4 grid gap-3">
           <label className="flex items-center gap-2 text-sm">
             <input type="hidden" name="priority" value="no" />
             <input type="checkbox" name="priority" value="yes" defaultChecked={lead.priority} />
-            On the priority list
+            Flag as priority
           </label>
           <label className="block text-sm">
-            <span className="font-medium text-slate-700">Why it is priority</span>
-            <select
+            <span className="font-medium text-slate-700">Why it is flagged</span>
+            <input
               name="priority_reason"
-              defaultValue={isPriorityReason(lead.priority_reason) ? lead.priority_reason : ""}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-            >
-              <option value="">Choose one</option>
-              {PRIORITY_REASONS.map((reason) => (
-                <option key={reason} value={reason}>
-                  {PRIORITY_REASON_LABEL[reason]}
-                </option>
-              ))}
-            </select>
+              defaultValue={priorityReasonText(lead.priority_reason) ?? ""}
+              placeholder="Promising web form, high-quality referral"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            />
           </label>
           <label className="block text-sm">
             <span className="font-medium text-slate-700">Last action</span>
@@ -352,27 +369,21 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Refer this lead</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Referral</h2>
         <p className="mt-1 text-sm text-slate-600">
-          {suggested
-            ? `${suggested.name} matches this case type.`
-            : "Pick the firm from the referral tree. Sending stops texts and calls."}
+          A legal matter this firm does not handle stays a lead. Tag the practice area, then text the attorney’s contact details and close it.
+          {lead.referral_opportunity ? " Tagged as a referral opportunity." : ""}
+          {lead.caller_class === "non_pi" ? " Classified as a non-PI legal matter." : ""}
         </p>
-        <form action={sendReferral.bind(null, lead.id)} className="mt-3 grid gap-3">
-          <select name="destination_id" defaultValue={suggested?.id ?? ""} className="rounded-md border border-slate-300 px-3 py-2 text-sm" required>
-            <option value="">Choose a destination</option>
-            {destinations.map((destination) => (
-              <option key={destination.id} value={destination.id}>
-                {destination.name}
-                {destination.phone ? ` · ${destination.phone}` : ""}
-              </option>
-            ))}
-          </select>
-          <input name="note" placeholder="Anything the referral needs" className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
-            Send referral
-          </button>
-        </form>
+        <ReferralPanel
+          leadId={lead.id}
+          leadName={lead.lead_name}
+          practiceArea={lead.practice_area}
+          referralOpportunity={Boolean(lead.referral_opportunity)}
+          destinations={destinations}
+          templates={templates}
+          closed={lead.lead_status === "Referred" || lead.lead_status === "Lost" || lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.signed_case}
+        />
       </section>
 
       <section className="mt-6">
@@ -577,17 +588,22 @@ function FollowUpPanel({
     status: string;
     detail: string | null;
     assigned_email: string | null;
+    assigned_name: string | null;
+    mention: string | null;
   }[];
   viewerEmail: string;
   attempts: { id: string; outcome: string; note: string | null; actor: string | null; attempted_at: string }[];
 }) {
   const described = describeFollowUp(lead, jobs);
+  const closed = lead.signed_case || Boolean(lead.case_id) || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status);
+  const contract = contractSent(lead);
+  const pendingCalls = jobs.filter((job) => job.queue === "call" && (job.status === "pending" || job.status === "failed"));
   return (
     <>
       <p className="mt-1 text-sm text-slate-600">
-        {lead.kind === "needs_info"
-          ? "This lead was already spoken with. Calls are queued. Texts stay off."
-          : "This is a lead we want to sign. Texts are sent by SMS Follow-Up. Calls are queued here."}
+        {contract
+          ? "A contract is out. The contract follow-up proposes the person who handled it, and a reminder posts in the Slack thread."
+          : "Missed calls and form fills start the uncontacted sequence on their own. After a conversation, start the post-consultation sequence here."}
       </p>
       <p className="mt-3 text-sm">
         <span className="font-medium">{described.state}.</span>
@@ -600,10 +616,10 @@ function FollowUpPanel({
       <p className="mt-1 text-sm text-slate-500">
         A Slack post tells someone to call. It does not mean the call was completed.
       </p>
-      {described.state === "Not enrolled" && lead.follow_up ? (
+      {!closed && !contract && pendingCalls.length === 0 ? (
         <form action={startFollowUp.bind(null, lead.id)} className="mt-3">
           <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
-            Create the steps
+            Start follow-up sequence
           </button>
         </form>
       ) : null}
@@ -619,8 +635,36 @@ function FollowUpPanel({
             </span>
             <p className="mt-1 text-slate-700">{job.body}</p>
             {job.detail ? <p className="mt-1 text-slate-500">{job.detail}</p> : null}
+            {job.assigned_name ? <p className="mt-1 text-slate-500">Tag {job.assigned_name}</p> : null}
             {job.queue === "call" && (job.status === "pending" || job.status === "failed") ? (
-              <CallWork jobId={job.id} assignedEmail={job.assigned_email} viewerEmail={viewerEmail} />
+              <>
+                <form action={saveCallbackPlan} className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                  <input type="hidden" name="job_id" value={job.id} />
+                  <label className="block text-xs text-slate-500">
+                    Slack posts
+                    <input
+                      type="datetime-local"
+                      name="due_at"
+                      required
+                      defaultValue={chicagoLocalInput(job.due_at)}
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900"
+                    />
+                  </label>
+                  <label className="block text-xs text-slate-500">
+                    Who to tag
+                    <input
+                      name="assigned_name"
+                      defaultValue={job.assigned_name ?? ""}
+                      placeholder="Any available intake person"
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900"
+                    />
+                  </label>
+                  <button type="submit" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
+                    Save reminder
+                  </button>
+                </form>
+                <CallWork jobId={job.id} assignedEmail={job.assigned_email} viewerEmail={viewerEmail} />
+              </>
             ) : null}
           </li>
         ))}

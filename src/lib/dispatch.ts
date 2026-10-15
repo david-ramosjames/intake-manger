@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { weekendCallAllowed } from "./callbacks";
 import { leadSequenceId, loadWorkHours } from "./sequences";
 import { loadSlackSettings } from "./slack-settings";
-import { channelLeadMention, LEAD_CHANNEL_ID, postToSlack } from "./slack";
+import { channelOutboundMention, LEAD_CHANNEL_ID, mentionForName, postToSlack } from "./slack";
+import { sendQuoText } from "./quo";
 import { withinWorkHours } from "./time";
 
 type Job = {
@@ -11,6 +13,8 @@ type Job = {
   body: string;
   due_at: string;
   notified_at: string | null;
+  mention: string | null;
+  assigned_name: string | null;
 };
 
 type SlackPost = {
@@ -34,25 +38,13 @@ type LeadRow = {
   kind: string;
   agreement_status: string | null;
   agreement_sent_at: string | null;
+  priority: boolean;
+  owner_name: string | null;
+  consultation_date: string | null;
 };
 
 function textSendingLive(): boolean {
   return process.env.TEXT_SENDING === "live" && Boolean(process.env.QUO_API_KEY && process.env.QUO_FROM_NUMBER);
-}
-
-async function sendQuoText(to: string, content: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const key = process.env.QUO_API_KEY;
-  const from = process.env.QUO_FROM_NUMBER;
-  if (!key || !from) return { ok: false, error: "Quo sending is not configured." };
-  const base = (process.env.QUO_API_BASE || "https://api.quo.com/v1").replace(/\/$/, "");
-  const response = await fetch(`${base}/messages`, {
-    method: "POST",
-    headers: { Authorization: key, "Content-Type": "application/json" },
-    body: JSON.stringify({ content, from, to: [to] }),
-  });
-  if (response.ok) return { ok: true };
-  const raw = await response.text();
-  return { ok: false, error: `Quo returned ${response.status}: ${raw.slice(0, 240)}` };
 }
 
 function closed(lead: LeadRow): boolean {
@@ -67,7 +59,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
 
   const { data: jobs, error } = await supabase
     .from("lead_jobs")
-    .select("id, lead_id, queue, body, due_at, notified_at")
+    .select("id, lead_id, queue, body, due_at, notified_at, mention, assigned_name")
     .eq("status", "pending")
     .lte("due_at", now)
     .order("due_at")
@@ -78,11 +70,19 @@ export async function dispatchDue(supabase: SupabaseClient) {
   const { data: leads } = leadIds.length
     ? await supabase
         .from("leads")
-        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind, agreement_status, agreement_sent_at")
+        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind, agreement_status, agreement_sent_at, priority, owner_name, consultation_date")
         .in("id", leadIds)
     : { data: [] };
   const byId = new Map((leads ?? []).map((lead) => [lead.id as string, lead as LeadRow]));
   const talked = await talkedIds(supabase, leadIds);
+  const recentReminder = await supabase
+    .from("lead_jobs")
+    .select("id")
+    .eq("queue", "call")
+    .not("notified_at", "is", null)
+    .gte("notified_at", new Date(Date.now() - 15 * 60_000).toISOString())
+    .limit(1);
+  let holdSlack = (recentReminder.data ?? []).length > 0;
 
   for (const job of (jobs ?? []) as Job[]) {
     const lead = byId.get(job.lead_id);
@@ -122,16 +122,30 @@ export async function dispatchDue(supabase: SupabaseClient) {
         continue;
       }
       if (!slack.posting) continue;
-      const sequence = leadSequenceId({
-        closed: false,
-        talked: talked.has(lead.id),
-        kind: lead.kind,
-        agreementStatus: lead.agreement_status,
-        agreementSentAt: lead.agreement_sent_at,
-      });
-      if (sequence && !withinWorkHours(new Date(), hoursBySequence[sequence])) continue;
+      if (holdSlack) continue;
+      const sequence =
+        leadSequenceId({
+          closed: false,
+          talked: talked.has(lead.id),
+          kind: lead.kind,
+          agreementStatus: lead.agreement_status,
+          agreementSentAt: lead.agreement_sent_at,
+        }) ?? (talked.has(lead.id) ? "more_info" : "first_talk");
+      const priority = Boolean(lead.priority) || sequence === "want_to_sign";
+      const nowDate = new Date();
+      const weekend = !weekendCallAllowed(nowDate, false);
+      if (weekend && !priority) continue;
+      if (!weekend && sequence && !withinWorkHours(nowDate, hoursBySequence[sequence])) continue;
       const who = lead.lead_name || "Unnamed lead";
-      const mention = await channelLeadMention(channel, slack.token);
+      const consultWith = lead.consultation_date ? lead.owner_name : "";
+      const named = job.mention
+        ? (job.mention.startsWith("<@") ? job.mention : `<@${job.mention.replace(/[<@>]/g, "")}>`)
+        : job.assigned_name
+          ? await mentionForName(job.assigned_name, slack.token)
+          : consultWith
+            ? await mentionForName(consultWith, slack.token)
+            : "";
+      const mention = named || (await channelOutboundMention(channel, slack.token));
       const posted = await postToSlack({
         token: slack.token,
         channel: slack.channelId || channel,
@@ -147,6 +161,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
         .from("lead_jobs")
         .update({ notified_at: now, detail: "Slack alert posted. Waiting for a call in the call log." })
         .eq("id", job.id);
+      holdSlack = true;
       result.calls += 1;
       continue;
     }

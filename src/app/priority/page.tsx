@@ -6,6 +6,7 @@ import { reviewPrioritySuggestion } from "@/lib/ops-actions";
 import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
 import { leadCycle, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, type PriorityPlace } from "@/lib/next-step";
+import { phoneTail } from "@/lib/phone";
 import { requireStaff } from "@/lib/session";
 
 const COLUMNS =
@@ -55,7 +56,33 @@ type PriorityLead = Pick<
   | "slack_thread_ts"
 >;
 
-type Touch = { lead_id: string | null; type: string | null; direction: string | null; occurred_at: string | null };
+type Touch = {
+  id: string;
+  lead_id: string | null;
+  phone: string | null;
+  phone_e164: string | null;
+  type: string | null;
+  direction: string | null;
+  occurred_at: string | null;
+  content: string | null;
+};
+
+function phoneKey(value: string | null | undefined): string {
+  const tail = phoneTail(value);
+  return tail.length >= 10 ? tail : "";
+}
+
+function actionText(note: string | null, touch: Touch | undefined): string {
+  const written = note?.trim();
+  if (written) return written;
+  const summary = (touch?.content || "").replace(/\s+/g, " ").trim();
+  if (summary) return summary.length > 160 ? `${summary.slice(0, 157)}…` : summary;
+  const type = (touch?.type || "").toLowerCase();
+  if (type === "call" || type === "sona_call") return "Spoke on a call.";
+  if (type === "text") return "Text sent.";
+  if (type === "voicemail") return "Voicemail.";
+  return "No note yet.";
+}
 
 function lastContacted(days: number | null): string {
   if (days == null) return "Never";
@@ -84,25 +111,59 @@ export default async function PriorityPage() {
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
   const leads = (data ?? []) as PriorityLead[];
-  const candidates = leads.filter((lead) => priorityPlace(lead));
+  const placed = leads.filter((lead) => priorityPlace(lead));
+  const phones = [...new Set(placed.map((lead) => lead.phone).filter((phone): phone is string => Boolean(phone)))];
+  const signedSiblings = phones.length
+    ? await supabase.from("leads").select("phone, phone_e164").eq("signed_case", true).in("phone", phones)
+    : { data: [] };
+  const signedPhones = new Set<string>();
+  for (const row of signedSiblings.data ?? []) {
+    const key = phoneKey(row.phone) || phoneKey(row.phone_e164);
+    if (key) signedPhones.add(key);
+  }
+  const candidates = placed.filter((lead) => !signedPhones.has(phoneKey(lead.phone)));
   const ids = candidates.map((lead) => lead.id);
-  const touches = await loadTouches(supabase, ids);
+  const idSet = new Set(ids);
+  const idsByPhone = new Map<string, string[]>();
+  for (const lead of candidates) {
+    const key = phoneKey(lead.phone);
+    if (!key) continue;
+    const list = idsByPhone.get(key) ?? [];
+    list.push(lead.id);
+    idsByPhone.set(key, list);
+  }
+  const tails = [...idsByPhone.keys()];
+  const [linked, byPhone] = await Promise.all([loadTouches(supabase, ids), loadTouchesByPhone(supabase, tails)]);
+  const seen = new Set<string>();
+  const touches: Touch[] = [];
+  for (const touch of [...linked, ...byPhone]) {
+    if (seen.has(touch.id)) continue;
+    seen.add(touch.id);
+    touches.push(touch);
+  }
   const talked = new Set<string>();
   const calls = new Map<string, number>();
   const lastOutreach = new Map<string, string>();
+  const lastTouch = new Map<string, Touch>();
   for (const touch of touches) {
-    if (!touch.lead_id) continue;
     const type = String(touch.type || "").toLowerCase();
     const direction = String(touch.direction || "").toLowerCase();
-    if (type === "call" || type === "sona_call" || type === "missed_call") {
-      calls.set(touch.lead_id, (calls.get(touch.lead_id) ?? 0) + 1);
-    }
-    if (type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"))) {
-      talked.add(touch.lead_id);
-    }
-    if (touch.occurred_at && countsAsContact(type)) {
-      const current = lastOutreach.get(touch.lead_id);
-      if (!current || touch.occurred_at > current) lastOutreach.set(touch.lead_id, touch.occurred_at);
+    const owners = new Set<string>();
+    if (touch.lead_id && idSet.has(touch.lead_id)) owners.add(touch.lead_id);
+    const key = phoneKey(touch.phone) || phoneKey(touch.phone_e164);
+    for (const id of idsByPhone.get(key) ?? []) owners.add(id);
+    const isCall = type === "call" || type === "sona_call" || type === "missed_call";
+    const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
+    for (const leadId of owners) {
+      if (isCall) calls.set(leadId, (calls.get(leadId) ?? 0) + 1);
+      if (reached) talked.add(leadId);
+      if (touch.occurred_at && countsAsContact(type)) {
+        const current = lastOutreach.get(leadId);
+        if (!current || touch.occurred_at > current) {
+          lastOutreach.set(leadId, touch.occurred_at);
+          lastTouch.set(leadId, touch);
+        }
+      }
     }
   }
 
@@ -116,7 +177,7 @@ export default async function PriorityPage() {
     if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
   }
 
-  const grouped = new Map<PriorityPlace, { lead: PriorityLead; calls: number; last: string; wait: number; sequence: ReturnType<typeof outreachSequence>; action: string | null; nextAction: ReturnType<typeof nextActionLines> }[]>();
+  const grouped = new Map<PriorityPlace, { lead: PriorityLead; calls: number; last: string; actionNote: string; wait: number; sequence: ReturnType<typeof outreachSequence>; action: string | null; nextAction: ReturnType<typeof nextActionLines> }[]>();
   for (const place of ["contract", "flagged", "suggested"] as const) grouped.set(place, []);
   for (const lead of candidates) {
     const connected = talked.has(lead.id);
@@ -128,6 +189,7 @@ export default async function PriorityPage() {
       lead,
       calls: calls.get(lead.id) ?? 0,
       last: lastContacted(wait),
+      actionNote: actionText(lead.last_action, lastTouch.get(lead.id)),
       wait: wait ?? 99,
       sequence: outreachSequence(lead),
       action: openLeadAction(lead, cycle, calls.get(lead.id) ?? 0),
@@ -246,7 +308,7 @@ export default async function PriorityPage() {
                               {row.sequence.label}
                             </td>
                             <td className="px-4 py-3 text-slate-700">{row.last}</td>
-                            <td className="max-w-xs px-4 py-3 text-slate-700">{row.lead.last_action || "No note yet."}</td>
+                            <td className="max-w-xs px-4 py-3 text-slate-700">{row.actionNote}</td>
                             <td className="px-4 py-3 text-slate-800">
                               <p className="font-medium text-slate-900">{row.action ?? "Choose the next step"}</p>
                               {priorityReasonText(row.lead.priority_reason) && reason === "flagged" ? (
@@ -312,8 +374,41 @@ async function loadTouches(
   for (let from = 0; from < 20000; from += page) {
     const { data } = await supabase
       .from("intake_interactions")
-      .select("lead_id, type, direction, occurred_at")
+      .select("id, lead_id, phone, phone_e164, type, direction, occurred_at, content")
       .in("lead_id", ids)
+      .order("occurred_at", { ascending: false })
+      .range(from, from + page - 1);
+    const batch = (data ?? []) as Touch[];
+    rows.push(...batch);
+    if (batch.length < page) break;
+  }
+  return rows;
+}
+
+async function loadTouchesByPhone(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  phones: string[],
+): Promise<Touch[]> {
+  if (!phones.length) return [];
+  const [byDigits, byE164] = await Promise.all([
+    loadTouchPage(supabase, "phone", phones),
+    loadTouchPage(supabase, "phone_e164", phones.map((phone) => `+1${phone}`)),
+  ]);
+  return [...byDigits, ...byE164];
+}
+
+async function loadTouchPage(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  column: "phone" | "phone_e164",
+  values: string[],
+): Promise<Touch[]> {
+  const rows: Touch[] = [];
+  const page = 1000;
+  for (let from = 0; from < 20000; from += page) {
+    const { data } = await supabase
+      .from("intake_interactions")
+      .select("id, lead_id, phone, phone_e164, type, direction, occurred_at, content")
+      .in(column, values)
       .order("occurred_at", { ascending: false })
       .range(from, from + page - 1);
     const batch = (data ?? []) as Touch[];

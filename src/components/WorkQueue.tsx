@@ -6,7 +6,7 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags, setConsultation, setDesired, setQualified } from "@/lib/ops-actions";
 import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
 
@@ -30,6 +30,7 @@ export type QueueRow = {
   qualifiedLabel: string;
   consultWhen: string;
   desired: string;
+  desiredLocked: boolean;
   signed: boolean;
   nonPi: boolean;
   callerClass: string | null;
@@ -74,12 +75,12 @@ type Touch = {
 type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "signed" | "last" | "automation";
 
 const COLUMNS: { id: Column; label: string; width: string }[] = [
-  { id: "stage", label: "Stage", width: "11%" },
+  { id: "stage", label: "Stage", width: "10%" },
   { id: "priority", label: "Priority", width: "8%" },
   { id: "grade", label: "Grade", width: "5%" },
-  { id: "consult", label: "Consult", width: "7%" },
-  { id: "qualified", label: "Qualified", width: "8%" },
-  { id: "desired", label: "Desired", width: "6%" },
+  { id: "consult", label: "Consult", width: "6%" },
+  { id: "qualified", label: "Qualified", width: "9%" },
+  { id: "desired", label: "Desired", width: "9%" },
   { id: "signed", label: "Signed", width: "6%" },
   { id: "last", label: "Last contacted", width: "11%" },
   { id: "automation", label: "Automation", width: "8%" },
@@ -120,12 +121,12 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
     });
 
   return (
-    <div className={`mt-4 grid items-start gap-4 ${selected ? "xl:grid-cols-[minmax(0,1fr)_20rem]" : ""}`}>
+    <div className={`mt-4 grid items-start gap-4 ${selected ? "xl:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
       <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
         <table className="w-full table-fixed text-left text-xs">
           <colgroup>
-            <col style={{ width: "14%" }} />
-            <col style={{ width: "11%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "10%" }} />
             {COLUMNS.map((column) => (
               <col key={column.id} style={{ width: column.width }} />
             ))}
@@ -209,8 +210,16 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   </span>
                 </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.consultWhen}</td>
-                <td className="px-2 py-2 text-center text-slate-700">{row.qualifiedLabel}</td>
-                <td className="px-2 py-2 text-center text-slate-700">{row.desired}</td>
+                <td className="px-1 py-2 text-center">
+                  <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} />
+                </td>
+                <td className="px-1 py-2 text-center">
+                  {row.desiredLocked ? (
+                    <span className="font-medium text-slate-900">{row.desired}</span>
+                  ) : (
+                    <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} />
+                  )}
+                </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—"}</td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.lastLabel}</td>
                 <td className={`px-2 py-2 text-center ${row.automationBad ? "font-medium text-red-700" : "text-slate-600"}`}>
@@ -307,6 +316,45 @@ function MenuChoice({ current, onPick, children }: { current: boolean; onPick: (
     <button type="button" onClick={onPick} className={`block w-full px-3 py-1.5 text-left hover:bg-slate-50 ${current ? "font-medium text-navy" : ""}`}>
       {children}
     </button>
+  );
+}
+
+function YesNoCell({
+  row,
+  field,
+  value,
+  action,
+}: {
+  row: QueueRow;
+  field: "qualified" | "desired";
+  value: string;
+  action: (formData: FormData) => Promise<void>;
+}) {
+  const label = field === "qualified" ? "Qualified" : "Desired";
+  return (
+    <form action={action} className="flex items-center justify-center gap-1">
+      <input type="hidden" name="lead_id" value={row.id} />
+      <button
+        name="decision"
+        value="yes"
+        aria-label={`${label} yes`}
+        className={`rounded-md px-1.5 py-1 text-[11px] font-medium ${
+          value === "Yes" ? "bg-navy text-white" : "border border-slate-300 bg-white text-slate-700"
+        }`}
+      >
+        Yes
+      </button>
+      <button
+        name="decision"
+        value="no"
+        aria-label={`${label} no`}
+        className={`rounded-md px-1.5 py-1 text-[11px] font-medium ${
+          value === "No" ? "bg-navy text-white" : "border border-slate-300 bg-white text-slate-700"
+        }`}
+      >
+        No
+      </button>
+    </form>
   );
 }
 
@@ -425,17 +473,24 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           {row.priority ? ` · ${row.priority}` : ""}
         </p>
         <dl className="grid grid-cols-2 gap-2 text-sm">
-          <FunnelMark label="Consultation" value={row.consultWhen === "No consult" ? "—" : row.consultWhen} />
+          <ConsultDate row={row} />
           <FunnelMark label="Qualified" value={row.qualifiedLabel} />
-          <FunnelMark label="Desired" value={row.desired} />
+          <div className="rounded-md bg-slate-50 px-3 py-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</dt>
+            <dd className="mt-1">
+              {row.desiredLocked ? (
+                <span className="text-slate-900">{row.desired}</span>
+              ) : (
+                <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} />
+              )}
+            </dd>
+          </div>
           <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
         </dl>
         {row.confirmSigned ? (
           <form action={confirmSigned} className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm">
             <input type="hidden" name="lead_id" value={row.id} />
-            <p className="font-medium text-violet-950">The contract looks complete.</p>
-            <p className="mt-1 text-violet-900">Confirm signed after every required signature is done.</p>
-            <button className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Confirm signed</button>
+            <button className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Confirm signed</button>
           </form>
         ) : null}
         {row.samePhone.length > 0 ? (
@@ -458,9 +513,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         {row.signed ? null : <NonLeadChoice row={row} />}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-800">
-            {row.summary?.trim() || "No call summary yet. Quo writes one after the conversation."}
-          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
         <TagEditor row={row} />
         <section>
@@ -548,6 +601,25 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
   );
 }
 
+function ConsultDate({ row }: { row: QueueRow }) {
+  return (
+    <form action={setConsultation} className="rounded-md bg-slate-50 px-3 py-2">
+      <input type="hidden" name="lead_id" value={row.id} />
+      <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+        Consultation
+        <input
+          key={`${row.id}:${row.consultKey}`}
+          type="date"
+          name="consultation_date"
+          defaultValue={row.consultKey.slice(0, 10)}
+          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+        />
+      </label>
+    </form>
+  );
+}
+
 function FunnelMark({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-slate-50 px-3 py-2">
@@ -583,7 +655,6 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
       <input type="hidden" name="lead_id" value={row.id} />
       <input type="hidden" name="suggestion" value={suggestion} />
       <p className="font-medium text-orange-950">Suggested close: {CLOSE_SUGGESTION_LABEL[suggestion]}</p>
-      <p className="mt-1 text-orange-900">The lead stays open until someone confirms this.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {suggestion === "decline" ? (
           <>
@@ -659,6 +730,7 @@ function TagEditor({ row }: { row: QueueRow }) {
         desired={row.desired === "Yes" || row.signed}
         nonPi={row.nonPi}
         callrail={row.callrail}
+        quiet
       />
       {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
       <button

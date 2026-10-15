@@ -42,8 +42,8 @@ export default async function SequencesPage({
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Sequences</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
         {CALL_SEQUENCE_LABEL[sequence]}. {CALL_SEQUENCE_DETAIL[sequence]} A lead can move to another sequence,
-        and that sequence starts over at its own day 1. A callback stays inside the chosen window, and the
-        minute changes from lead to lead.
+        and that sequence starts over at its own day 1. A callback stays inside the chosen window. Match last
+        contact keeps that time when it was during business hours.
       </p>
       {error ? <p className="mt-3 text-sm text-red-700">{error.message}</p> : null}
 

@@ -79,6 +79,116 @@ export async function markPriority(formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
 }
 
+export async function setQualified(formData: FormData) {
+  const decision = text(formData, "decision");
+  if (decision !== "yes" && decision !== "no") throw new Error("Choose yes or no.");
+  const qualified = decision === "yes";
+  await saveQueueMilestone(formData, {
+    event: "qualified_set",
+    payload: { qualified },
+    patch: { qualified },
+    tags(current) {
+      const tags = current.filter((tag) => tag !== "QUALIFIED YES" && tag !== "QUALIFIED NO");
+      tags.push(qualified ? "QUALIFIED YES" : "QUALIFIED NO");
+      return tags;
+    },
+  });
+}
+
+export async function setConsultation(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const raw = text(formData, "consultation_date");
+  const consultationDate = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      consultation_date: consultationDate,
+      consultation: consultationDate ? "staff" : null,
+    })
+    .eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "consultation_set",
+    actor: email,
+    payload: { consultation_date: consultationDate },
+  });
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
+}
+
+export async function setDesired(formData: FormData) {
+  const decision = text(formData, "decision");
+  if (decision !== "yes" && decision !== "no") throw new Error("Choose yes or no.");
+  const { supabase } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const { data: before, error } = await supabase
+    .from("leads")
+    .select("agreement_status, agreement_sent_at, signed_case")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !before) throw new Error(error?.message ?? "Lead not found");
+  if (before.signed_case || contractSent(before)) throw new Error("A sent or signed contract is already a desired case.");
+  const desired = decision === "yes";
+  await saveQueueMilestone(formData, {
+    event: "desired_set",
+    payload: { desired },
+    patch: { desired_case: desired, desired_source: "staff" },
+    tags(current) {
+      const tags = current.filter((tag) => tag !== "CVR DESIRED");
+      if (desired) tags.push("CVR DESIRED");
+      return tags;
+    },
+  });
+}
+
+async function saveQueueMilestone(
+  formData: FormData,
+  change: {
+    event: string;
+    payload: Record<string, unknown>;
+    patch: Record<string, unknown>;
+    tags: (current: string[]) => string[];
+  },
+) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const { data: before, error } = await supabase
+    .from("leads")
+    .select("callrail_call_id, callrail_tags")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !before) throw new Error(error?.message ?? "Lead not found");
+  const tags = change.tags(before.callrail_tags ?? []);
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({ ...change.patch, callrail_tags: tags })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: change.event,
+    actor: email,
+    payload: change.payload,
+  });
+  if (callrailConfigured() && before.callrail_call_id) {
+    try {
+      await pushCallrailTags(before.callrail_call_id, tags, LEAD_TAGS);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
+      throw new Error(`Saved on the lead. CallRail did not take the tags. ${message}`);
+    }
+  }
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function reviewPrioritySuggestion(formData: FormData) {
   const { supabase, email } = await requireStaff();
   const leadId = text(formData, "lead_id");

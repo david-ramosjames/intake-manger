@@ -2,7 +2,7 @@ import Link from "next/link";
 import { QueueHelp } from "@/components/QueueHelp";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
-import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
+import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
 import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
@@ -507,6 +507,7 @@ export default async function LeadListPage({
       qualifiedLabel: desiredWord(milestoneQualified(row.lead)),
       consultWhen: consultationWhen(row.lead.consultation_date),
       desired: desiredWord(milestoneDesired(row.lead)),
+      desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead),
       signed: milestoneSigned(row.lead),
       nonPi: row.lead.caller_class === "non_pi",
       callerClass: row.lead.caller_class,

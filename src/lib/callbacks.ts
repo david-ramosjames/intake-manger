@@ -17,19 +17,6 @@ export function isCallbackWindow(value: string | null | undefined): value is Cal
   return value === "morning" || value === "lunch" || value === "afternoon" || value === "contact";
 }
 
-/** The window that contains a clock time. Times outside 8:30–5:30 use the nearest window. */
-export function windowForMinute(minute: number): "morning" | "lunch" | "afternoon" {
-  if (minute < WINDOW.lunch[0]) return "morning";
-  if (minute < WINDOW.afternoon[0]) return "lunch";
-  return "afternoon";
-}
-
-export function windowForContact(contactAt: Date | null): "morning" | "lunch" | "afternoon" {
-  if (!contactAt || Number.isNaN(contactAt.getTime())) return "morning";
-  const parts = chicagoParts(contactAt);
-  return windowForMinute(parts.hour * 60 + parts.minute);
-}
-
 export function windowForIndex(index: number): CallbackWindow {
   return CALLBACK_WINDOWS[Math.max(0, index) % CALLBACK_WINDOWS.length];
 }
@@ -69,9 +56,29 @@ function minuteInWindow(start: number, end: number, key: string, avoid: number[]
   return best;
 }
 
+function contactMinute(contactAt: Date | null): number | null {
+  if (!contactAt || Number.isNaN(contactAt.getTime())) return null;
+  const parts = chicagoParts(contactAt);
+  return parts.hour * 60 + parts.minute;
+}
+
 /**
- * Place a callback inside Morning, Lunch, Afternoon, or the same window as the last contact.
- * The minute varies inside that window. Priority calls can land on a weekend.
+ * Match last contact keeps the contact's clock time when it falls in business hours.
+ * A time before 8:30 AM or after 5:30 PM moves to the next window, morning, and a minute is chosen there.
+ */
+function minuteForLastContact(contactAt: Date | null, varyKey: string, avoid: number[]): number {
+  const contact = contactMinute(contactAt);
+  if (contact != null && contact >= DAY_START && contact < DAY_END) {
+    if (!avoid.some((taken) => Math.abs(taken - contact) < 5)) return contact;
+    return minuteInWindow(Math.max(DAY_START, contact - 20), Math.min(DAY_END, contact + 21), `${varyKey}:contact`, avoid);
+  }
+  const [start, end] = WINDOW.morning;
+  return minuteInWindow(start, end, `${varyKey}:morning`, avoid);
+}
+
+/**
+ * Place a callback inside Morning, Lunch, or Afternoon.
+ * Match last contact keeps that time during business hours. Priority calls can land on a weekend.
  */
 export function scheduleCallback(input: {
   from: Date;
@@ -83,9 +90,11 @@ export function scheduleCallback(input: {
   avoid?: number[];
 }): string {
   const chosen = isCallbackWindow(input.window) ? input.window : windowForIndex(input.index ?? 0);
-  const bucket = chosen === "contact" ? windowForContact(input.contactAt) : chosen;
-  const [start, end] = WINDOW[bucket];
-  const minute = minuteInWindow(start, end, `${input.varyKey}:${bucket}`, input.avoid ?? []);
+  const avoid = input.avoid ?? [];
+  const minute =
+    chosen === "contact"
+      ? minuteForLastContact(input.contactAt, input.varyKey, avoid)
+      : minuteInWindow(...WINDOW[chosen], `${input.varyKey}:${chosen}`, avoid);
   let day = chicagoDay(input.from);
   for (let hop = 0; hop < 14; hop += 1) {
     const dow = new Date(`${day}T12:00:00Z`).getUTCDay();

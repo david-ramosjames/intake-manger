@@ -22,6 +22,7 @@ export function LeadTagFields({
   desired = false,
   nonPi = false,
   callrail = false,
+  quiet = false,
 }: {
   tags: string[];
   declineReason?: string | null;
@@ -29,6 +30,7 @@ export function LeadTagFields({
   desired?: boolean;
   nonPi?: boolean;
   callrail?: boolean;
+  quiet?: boolean;
 }) {
   const [qualified, setQualified] = useState(qualifiedChoice(tags));
   const [decline, setDecline] = useState(signed ? "" : selectedDecline(tags));
@@ -42,9 +44,11 @@ export function LeadTagFields({
   return (
     <fieldset className="space-y-3 text-sm">
       <legend className="font-medium text-slate-700">Qualified</legend>
-      <p className="text-slate-500">
-        Every lead is Qualified YES or Qualified NO. A non-PI matter, a case outside the service area, and an unresponsive lead are Qualified NO.
-      </p>
+      {quiet ? null : (
+        <p className="text-slate-500">
+          Every lead is Qualified YES or Qualified NO. A non-PI matter, a case outside the service area, and an unresponsive lead are Qualified NO.
+        </p>
+      )}
       {nonPi ? <input type="hidden" name="non_pi" value="yes" /> : null}
       <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-2">
@@ -85,9 +89,11 @@ export function LeadTagFields({
           ))}
         </select>
       </label>
-      <p className="text-slate-600">
-        Decline reason: {reason || "Only filled when a DEC tag is used. DEC means declined."}
-      </p>
+      {quiet ? null : (
+        <p className="text-slate-600">
+          Decline reason: {reason || "Only filled when a DEC tag is used. DEC means declined."}
+        </p>
+      )}
       <label className="block">
         <span className="font-medium text-slate-700">Not qualified</span>
         <select
@@ -143,11 +149,13 @@ export function LeadTagFields({
           </select>
         </label>
       ) : null}
-      <p className="text-slate-500">
-        {callrail
-          ? "Saving writes these tags onto the CallRail call and leaves its other tags in place."
-          : "This lead has no CallRail call stored, so the tags stay in Intake Manager."}
-      </p>
+      {quiet ? null : (
+        <p className="text-slate-500">
+          {callrail
+            ? "Saving writes these tags onto the CallRail call and leaves its other tags in place."
+            : "This lead has no CallRail call stored, so the tags stay in Intake Manager."}
+        </p>
+      )}
     </fieldset>
   );
 }

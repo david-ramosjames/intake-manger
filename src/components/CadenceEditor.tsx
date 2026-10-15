@@ -137,16 +137,15 @@ export function CadenceEditor({
             <WindowCard tone="bg-emerald-50 text-emerald-900" title="Morning" detail="8:30 AM – 11:30 AM" />
             <WindowCard tone="bg-amber-50 text-amber-950" title="Lunch" detail="11:30 AM – 2:30 PM" />
             <WindowCard tone="bg-sky-50 text-sky-950" title="Afternoon" detail="2:30 PM – 5:30 PM" />
-            <WindowCard tone="bg-violet-50 text-violet-950" title="Match last contact" detail="The same window as the last call or text." />
+            <WindowCard tone="bg-violet-50 text-violet-950" title="Match last contact" detail="The last call or text's time, when that time was during business hours." />
           </ul>
         </section>
         <section className="rounded-xl border border-sky-100 bg-sky-50 p-4 text-sm text-sky-950">
           <h3 className="font-semibold">Recommended timing</h3>
           <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5">
             <li>If a day has two calls, they stay at least 2 hours apart.</li>
-            <li>Morning and afternoon are the strongest windows.</li>
             <li>Nothing is placed before 8:30 AM or after 5:30 PM.</li>
-            <li>Match last contact uses that whole window, then picks a minute inside it.</li>
+            <li>Match last contact keeps that time when it was during business hours. Outside those hours, it moves to the next window and a minute is picked inside it.</li>
           </ul>
         </section>
         <section className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-950">

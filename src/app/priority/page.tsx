@@ -75,7 +75,8 @@ export default async function PriorityPage() {
       .from("leads")
       .select(COLUMNS)
       .not("lead_status", "in", "(Lost,Referred)")
-      .or("and(signed_case.eq.false,case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed),and(signed_case.eq.false,agreement_status.in.(signed,completed))")
+      .eq("signed_case", false)
+      .or("and(case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed,signed,completed)")
       .order("lead_date", { ascending: false, nullsFirst: false })
       .limit(300),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
@@ -144,6 +145,7 @@ export default async function PriorityPage() {
             kind: lead.kind,
             agreementStatus: lead.agreement_status,
             agreementSentAt: lead.agreement_sent_at,
+            signedCase: lead.signed_case,
           });
           return sequence ? sequenceDayOne(sequence, lead).toISOString() : lead.created_at;
         })(),
@@ -155,6 +157,7 @@ export default async function PriorityPage() {
           kind: lead.kind,
           agreementStatus: lead.agreement_status,
           agreementSentAt: lead.agreement_sent_at,
+          signedCase: lead.signed_case,
         })),
         priority: Boolean(lead.priority) || ["sent", "viewed", "signed", "completed"].includes((lead.agreement_status || "").toLowerCase()) || Boolean(lead.agreement_sent_at),
         contactAt: lead.created_at,

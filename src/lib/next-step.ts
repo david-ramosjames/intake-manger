@@ -153,6 +153,7 @@ export function textSequenceLive(status: string | null | undefined): boolean {
 
 /** The contract reminder sequence is on while the contract is still out. SMS Follow-Up is a separate text sequence. */
 export function outreachSequence(lead: {
+  signed_case?: boolean | null;
   agreement_status?: string | null;
   agreement_sent_at?: string | null;
   agreement_via_sms?: boolean | null;

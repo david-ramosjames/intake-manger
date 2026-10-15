@@ -26,12 +26,14 @@ export function leadSequenceId(input: {
   kind: string | null;
   agreementStatus: string | null;
   agreementSentAt: string | null;
+  signedCase?: boolean | null;
 }): CallSequenceId | null {
-  if (input.closed) return null;
+  if (input.closed || input.signedCase) return null;
   const agreement = (input.agreementStatus || "").toLowerCase();
   const contractOut =
-    ["sent", "viewed", "signed", "completed"].includes(agreement) ||
-    (Boolean(input.agreementSentAt) && agreement !== "failed");
+    agreement === "sent" ||
+    agreement === "viewed" ||
+    (Boolean(input.agreementSentAt) && !["failed", "signed", "completed", "cancelled", "expired"].includes(agreement));
   if (contractOut) return "want_to_sign";
   if (!input.talked) return "first_talk";
   return null;

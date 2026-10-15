@@ -20,7 +20,7 @@ function receivedSigned(content: string): boolean {
   return /received your signed documents/i.test(content);
 }
 
-/** The contract text is the official name, and a later unsigned link means the contract is still out. */
+/** The contract text is the official name. A later link for another document does not reopen the contract. */
 export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<{ names: number; reopened: number }> {
   const since = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
@@ -28,28 +28,34 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     .select("phone_e164, content, occurred_at")
     .eq("type", "text")
     .gte("occurred_at", since)
-    .ilike("content", `%${HOST}%`)
+    .or(`content.ilike.%${HOST}%,content.ilike.%received your signed documents%`)
     .order("occurred_at", { ascending: false })
-    .limit(500);
+    .limit(800);
   if (error) throw new Error(error.message);
 
-  const latest = new Map<string, { name: string | null; slug: string | null; open: boolean }>();
+  const latest = new Map<string, { name: string | null; openAt: string | null; openSlug: string | null; signedAt: string | null }>();
   for (const row of (data ?? []) as TextRow[]) {
     const phone = row.phone_e164;
     const content = row.content || "";
-    if (!phone || latest.has(phone) || !content.includes(HOST)) continue;
-    const slug = signingSlug(content);
-    latest.set(phone, {
-      name: officialName(content),
-      slug,
-      open: Boolean(slug) && !receivedSigned(content),
-    });
+    if (!phone) continue;
+    const signal = latest.get(phone) ?? { name: null, openAt: null, openSlug: null, signedAt: null };
+    if (!signal.name) signal.name = officialName(content);
+    if (receivedSigned(content)) {
+      if (!signal.signedAt) signal.signedAt = row.occurred_at;
+    } else if (content.includes("ramos-james-law-document")) {
+      const slug = signingSlug(content);
+      if (slug && !signal.openAt) {
+        signal.openAt = row.occurred_at;
+        signal.openSlug = slug;
+      }
+    }
+    latest.set(phone, signal);
   }
   if (!latest.size) return { names: 0, reopened: 0 };
 
   const { data: leads, error: leadError } = await supabase
     .from("leads")
-    .select("id, lead_name, phone_e164, agreement_status, agreement_signing_url, agreement_reminder_count, created_at")
+    .select("id, lead_name, phone_e164, signed_case, agreement_status, agreement_signing_url, agreement_reminder_count, created_at")
     .in("phone_e164", [...latest.keys()])
     .order("created_at", { ascending: false });
   if (leadError) throw new Error(leadError.message);
@@ -74,10 +80,28 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     }
     const status = String(lead.agreement_status || "").toLowerCase();
     const storedSlug = String(lead.agreement_signing_url || "").match(LINK)?.[1] ?? "";
-    if (signal.open && signal.slug && (status === "completed" || status === "signed" || storedSlug !== signal.slug)) {
+    const contractSigned = Boolean(lead.signed_case) || status === "signed" || status === "completed";
+    const confirmationForThisContract = Boolean(
+      signal.signedAt && storedSlug && signal.openSlug === storedSlug && (!signal.openAt || signal.signedAt > signal.openAt),
+    );
+    if (contractSigned || confirmationForThisContract) {
+      if (status === "sent" || status === "viewed" || !status) {
+        patch.agreement_status = "completed";
+        patch.agreement_next_reminder_at = null;
+      }
+    } else if (signal.openSlug && !storedSlug) {
       patch.agreement_status = "sent";
-      patch.agreement_signing_url = `https://${HOST}${signal.slug}`;
+      patch.agreement_signing_url = `https://${HOST}${signal.openSlug}`;
       if (!lead.agreement_reminder_count) patch.agreement_reminder_count = 1;
+    }
+    if (contractSigned || confirmationForThisContract) {
+      await supabase
+        .from("lead_jobs")
+        .update({ status: "skipped", detail: "Contract is signed." })
+        .eq("lead_id", lead.id)
+        .eq("queue", "call")
+        .eq("sequence", "want_to_sign")
+        .eq("status", "pending");
     }
     if (!Object.keys(patch).length) continue;
     const { error: updateError } = await supabase.from("leads").update(patch).eq("id", lead.id);
@@ -97,7 +121,10 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
         lead_id: lead.id,
         event_type: "agreement_sent",
         actor: "sign-flow",
-        payload: { signing_url: patch.agreement_signing_url, reason: "later_unsigned_contract" },
+        payload: {
+          signing_url: patch.agreement_signing_url ?? null,
+          reason: patch.agreement_status === "completed" ? "contract_signed" : "contract_link",
+        },
       });
     }
   }

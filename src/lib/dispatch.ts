@@ -130,6 +130,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
           kind: lead.kind,
           agreementStatus: lead.agreement_status,
           agreementSentAt: lead.agreement_sent_at,
+          signedCase: lead.signed_case,
         }) ?? (talked.has(lead.id) ? "more_info" : "first_talk");
       const priority = Boolean(lead.priority) || sequence === "want_to_sign";
       const nowDate = new Date();

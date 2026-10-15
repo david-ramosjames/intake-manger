@@ -545,6 +545,7 @@ export default async function LeadListPage({
           kind: row.lead.kind,
           agreementStatus: row.lead.agreement_status,
           agreementSentAt: row.lead.agreement_sent_at,
+          signedCase: row.lead.signed_case,
         }),
         callsMade: row.tally.calls,
         pendingCallAt: row.nextAt ?? null,
@@ -554,6 +555,7 @@ export default async function LeadListPage({
           kind: row.lead.kind,
           agreementStatus: row.lead.agreement_status,
           agreementSentAt: row.lead.agreement_sent_at,
+          signedCase: row.lead.signed_case,
         }),
         priority: row.priority === "contract" || row.priority === "flagged",
         contactAt: row.lead.created_at,
@@ -722,6 +724,7 @@ function dayOneFor(
     kind: string | null;
     agreementStatus: string | null;
     agreementSentAt: string | null;
+    signedCase?: boolean | null;
   },
 ): string | null {
   const sequence = leadSequenceId(input);
@@ -737,6 +740,7 @@ function stepsForLead(
     kind: string | null;
     agreementStatus: string | null;
     agreementSentAt: string | null;
+    signedCase?: boolean | null;
   },
 ): CallStep[] {
   const sequence = leadSequenceId(lead);

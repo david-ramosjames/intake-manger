@@ -30,14 +30,14 @@ export async function closeFinishedLeads(
   return { signed, expired, signSeries };
 }
 
-/** Sign Flow's default contract series is six reminders. Count 6 with no next reminder means it finished. */
+/** Sign Flow's default contract series is six reminders. Count 6 with no next reminder means it finished, including after the request is cancelled. */
 const SIGN_SERIES_LENGTH = 6;
 
 async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<number> {
   const { data, error } = await supabase
     .from("leads")
     .select("id, callrail_tags")
-    .in("agreement_status", ["sent", "viewed"])
+    .in("agreement_status", ["sent", "viewed", "cancelled", "expired"])
     .is("agreement_next_reminder_at", null)
     .gte("agreement_reminder_count", SIGN_SERIES_LENGTH)
     .eq("signed_case", false)

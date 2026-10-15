@@ -450,7 +450,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
   const contract = contractLabel(row);
 
   return (
-    <aside className="flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-4">
+    <aside className="flex max-h-[calc(100vh-5rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-16">
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">

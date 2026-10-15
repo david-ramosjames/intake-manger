@@ -142,15 +142,6 @@ const RANGES: { id: LeadRange; label: string }[] = [
   { id: "7", label: "Last 7 days" },
 ];
 
-const STAGES: { id: QueueId; label: string; dot: string }[] = [
-  { id: "all", label: "All", dot: "" },
-  { id: "contact", label: "Need to contact", dot: "bg-amber-400" },
-  { id: "information", label: "Need more information", dot: "bg-sky-500" },
-  { id: "signing", label: "Finish signing", dot: "bg-violet-500" },
-  { id: "signed", label: "Signed", dot: "bg-emerald-500" },
-  { id: "closed", label: "Closed", dot: "bg-slate-300" },
-];
-
 const LEGACY: { id: LeadView; label: string }[] = [
   { id: "pursue", label: "Want to sign" },
   { id: "needs_info", label: "Need more info" },
@@ -511,6 +502,8 @@ export default async function LeadListPage({
       nonPi: row.lead.caller_class === "non_pi",
       confirmSigned: signatureNeedsConfirm(row.lead),
       lastLabel: lastContacted(row.outreach),
+      lastDays: row.outreach,
+      consultKey: row.lead.consultation_date ?? "",
       waiting: row.waiting,
       automationLabel: automation.label,
       automationBad: automation.bad,
@@ -591,12 +584,11 @@ export default async function LeadListPage({
 
       {error ? <p className="mt-6 text-sm text-red-700">{error.message}</p> : null}
 
-      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Metric href={listHref({ queue: "contact", q, range, funnel })} active={queue === "contact"} label="Need to contact" value={String(metrics.contact)} hint="Not reached yet" tone="text-amber-700" />
         <Metric href={listHref({ queue: "information", q, range, funnel })} active={queue === "information"} label="Need more information" value={String(metrics.information)} hint="Talked, still open" tone="text-sky-700" />
         <Metric href={listHref({ queue: "signing", q, range, funnel })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} hint="Contract is out" tone="text-violet-700" />
         <Metric href={listHref({ queue: "signed", q, range, funnel: "closed" })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} hint="Signed in 30 days" tone="text-emerald-700" />
-        <Metric href={listHref({ queue: "attention", q, range, funnel })} active={queue === "attention"} label="Needs attention" value={String(metrics.attention)} hint="Waiting, review, or failed contract" tone="text-red-700" />
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Conversion</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-navy">{conversion}%</p>
@@ -661,29 +653,6 @@ export default async function LeadListPage({
         </Link>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Stage</span>
-        {STAGES.map((item) => (
-          <Link
-            key={item.id}
-            href={listHref({ queue: item.id, view, q, range, funnel })}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
-              queue === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
-            }`}
-          >
-            {item.dot ? <span className={`h-2 w-2 rounded-full ${item.dot}`} /> : null}
-            {item.label}
-          </Link>
-        ))}
-        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
-        <Link
-          href={listHref({ queue: "attention", view, q, range, funnel })}
-          className={`rounded-full px-3 py-1 text-sm ${
-            queue === "attention" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
-          }`}
-        >
-          Needs attention
-        </Link>
-        <span className="text-xs text-slate-500">Waiting too long, identity needs review, or the contract failed.</span>
         <Link
           href={listHref({ queue: "nonleads", view, q, range, funnel })}
           className={`rounded-full px-3 py-1 text-sm ${

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
-import { confirmCloseSuggestion, confirmSigned, reviewPrioritySuggestion, saveLeadTags } from "@/lib/ops-actions";
+import { confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags } from "@/lib/ops-actions";
 import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
 
@@ -33,6 +33,8 @@ export type QueueRow = {
   nonPi: boolean;
   confirmSigned: boolean;
   lastLabel: string;
+  lastDays: number | null;
+  consultKey: string;
   waiting: boolean;
   automationLabel: string;
   automationBad: boolean;
@@ -67,32 +69,85 @@ type Touch = {
   occurred_at: string | null;
 };
 
+type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "signed" | "last" | "automation";
+
+const COLUMNS: { id: Column; label: string }[] = [
+  { id: "stage", label: "Stage" },
+  { id: "priority", label: "Priority" },
+  { id: "grade", label: "Grade" },
+  { id: "consult", label: "Consult" },
+  { id: "qualified", label: "Qualified" },
+  { id: "desired", label: "Desired" },
+  { id: "signed", label: "Signed" },
+  { id: "last", label: "Last contacted" },
+  { id: "automation", label: "Automation" },
+];
+
+function columnValue(row: QueueRow, column: Column): string {
+  if (column === "stage") return row.label;
+  if (column === "priority") return row.priority ?? "—";
+  if (column === "grade") return row.grade ?? "—";
+  if (column === "consult") return row.consultWhen;
+  if (column === "qualified") return row.qualifiedLabel;
+  if (column === "desired") return row.desired;
+  if (column === "signed") return row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—";
+  if (column === "last") return row.lastLabel;
+  return row.automationLabel;
+}
+
+function sortValue(row: QueueRow, column: Column): string | number {
+  if (column === "grade") return row.grade === "A" ? 0 : row.grade === "B" ? 1 : row.grade === "C" ? 2 : 3;
+  if (column === "last") return row.lastDays ?? 9999;
+  if (column === "consult") return row.consultKey || "9999-99-99";
+  return columnValue(row, column).toLowerCase();
+}
+
 export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: string }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
+  const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
+  const [sort, setSort] = useState<{ column: Column; dir: "asc" | "desc" } | null>(null);
   const selected = rows.find((row) => row.id === selectedId) ?? null;
+  const shown = rows
+    .filter((row) => COLUMNS.every((column) => !filters[column.id] || columnValue(row, column.id) === filters[column.id]))
+    .sort((a, b) => {
+      if (!sort) return 0;
+      const left = sortValue(a, sort.column);
+      const right = sortValue(b, sort.column);
+      const compared = left < right ? -1 : left > right ? 1 : 0;
+      return sort.dir === "asc" ? compared : -compared;
+    });
 
   return (
     <div className={`mt-4 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}>
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 border-b border-slate-200 bg-white text-xs uppercase tracking-wide text-slate-500">
+          <thead className="sticky top-0 border-b border-slate-200 bg-white text-xs text-slate-500">
             <tr>
-              <th className="px-4 py-3 font-medium">Lead</th>
-              <th className="px-4 py-3 font-medium">Next action</th>
-              <th className="px-4 py-3 font-medium">Stage</th>
-              <th className="px-4 py-3 font-medium">Priority</th>
-              <th className="px-4 py-3 font-medium">Grade</th>
-              <th className="px-4 py-3 font-medium">Consult</th>
-              <th className="px-4 py-3 font-medium">Qualified</th>
-              <th className="px-4 py-3 font-medium">Desired</th>
-              <th className="px-4 py-3 font-medium">Signed</th>
-              <th className="px-4 py-3 font-medium">Last contacted</th>
-              <th className="px-4 py-3 font-medium">Automation</th>
-              <th className="px-4 py-3 font-medium">Links</th>
+              <th className="px-4 py-3 font-medium uppercase tracking-wide">Lead</th>
+              <th className="px-4 py-3 font-medium uppercase tracking-wide">Next action</th>
+              {COLUMNS.map((column) => (
+                <HeadSort
+                  key={column.id}
+                  label={column.label}
+                  column={column.id}
+                  rows={rows}
+                  filter={filters[column.id] ?? ""}
+                  sort={sort}
+                  onChange={(value) => {
+                    if (value === "sort:asc" || value === "sort:desc") {
+                      setSort({ column: column.id, dir: value === "sort:asc" ? "asc" : "desc" });
+                      return;
+                    }
+                    if (!value) setSort((current) => (current?.column === column.id ? null : current));
+                    setFilters((current) => ({ ...current, [column.id]: value }));
+                  }}
+                />
+              ))}
+              <th className="px-4 py-3 font-medium uppercase tracking-wide">Links</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {shown.map((row) => (
               <tr
                 key={row.id}
                 className={`border-b border-slate-100 last:border-0 ${
@@ -134,8 +189,8 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                     {row.label}
                   </span>
                 </td>
-                <td className={`px-4 py-3 ${row.priority ? "font-medium text-slate-900" : "text-slate-500"}`}>
-                  {row.priority ?? "—"}
+                <td className="px-4 py-3">
+                  <PriorityCell row={row} />
                 </td>
                 <td className="px-4 py-3">
                   <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${gradeClass(row.grade)}`}>
@@ -155,7 +210,7 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                 </td>
               </tr>
             ))}
-            {rows.length === 0 ? (
+            {shown.length === 0 ? (
               <tr>
                 <td colSpan={12} className="px-4 py-10 text-center text-slate-500">
                   Nothing in this queue.
@@ -168,6 +223,104 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
       {selected ? <LeadDrawer row={selected} onClose={() => setSelectedId("")} /> : null}
     </div>
   );
+}
+
+function HeadSort({
+  label,
+  column,
+  rows,
+  filter,
+  sort,
+  onChange,
+}: {
+  label: string;
+  column: Column;
+  rows: QueueRow[];
+  filter: string;
+  sort: { column: Column; dir: "asc" | "desc" } | null;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const values = [...new Set(rows.map((row) => columnValue(row, column)).filter((value) => value && value !== "—"))].sort();
+  const recent = column === "last" || column === "consult";
+  const sortedHere = sort?.column === column;
+  const pick = (value: string) => {
+    onChange(value);
+    setOpen(false);
+  };
+  return (
+    <th className="relative px-3 py-2 font-medium">
+      <button
+        type="button"
+        aria-label={`${label} filter`}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wide ${filter || sortedHere ? "text-navy" : "text-slate-500"}`}
+      >
+        {label}
+        <span aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <>
+          <button type="button" aria-label="Close filter" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg">
+            <MenuChoice current={!filter && !sortedHere} onPick={() => pick("")}>
+              All
+            </MenuChoice>
+            <MenuChoice current={sortedHere && sort?.dir === "asc"} onPick={() => pick("sort:asc")}>
+              {recent ? "Most recent" : "Sort A–Z"}
+            </MenuChoice>
+            <MenuChoice current={sortedHere && sort?.dir === "desc"} onPick={() => pick("sort:desc")}>
+              {recent ? "Least recent" : "Sort Z–A"}
+            </MenuChoice>
+            {values.map((value) => (
+              <MenuChoice key={value} current={filter === value} onPick={() => pick(value)}>
+                {value}
+              </MenuChoice>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </th>
+  );
+}
+
+function MenuChoice({ current, onPick, children }: { current: boolean; onPick: () => void; children: string }) {
+  return (
+    <button type="button" onClick={onPick} className={`block w-full px-3 py-1.5 text-left hover:bg-slate-50 ${current ? "font-medium text-navy" : ""}`}>
+      {children}
+    </button>
+  );
+}
+
+function PriorityCell({ row }: { row: QueueRow }) {
+  if (row.priority === "Suggested") {
+    return (
+      <form action={reviewPrioritySuggestion} className="flex flex-col items-start gap-1">
+        <input type="hidden" name="lead_id" value={row.id} />
+        <span className="text-xs font-medium text-slate-700">Suggested</span>
+        <span className="flex gap-1">
+          <button name="decision" value="confirm" className="rounded-md bg-navy px-2 py-1 text-xs font-medium text-white" aria-label="Add to priority">
+            Yes
+          </button>
+          <button name="decision" value="dismiss" className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs" aria-label="Not a priority">
+            No
+          </button>
+        </span>
+      </form>
+    );
+  }
+  if (!row.priority) {
+    return (
+      <form action={markPriority}>
+        <input type="hidden" name="lead_id" value={row.id} />
+        <button className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700">
+          Make priority
+        </button>
+      </form>
+    );
+  }
+  return <span className="font-medium text-slate-900">{row.priority}</span>;
 }
 
 function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: string | null }) {

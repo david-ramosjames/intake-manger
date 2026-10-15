@@ -54,6 +54,30 @@ export async function savePriority(leadId: string, formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
 }
 
+export async function markPriority(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      priority: true,
+      priority_reason: "Marked from the work queue",
+      priority_suggestion: null,
+    })
+    .eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "priority_set",
+    actor: email,
+    payload: { source: "work-queue" },
+  });
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function reviewPrioritySuggestion(formData: FormData) {
   const { supabase, email } = await requireStaff();
   const leadId = text(formData, "lead_id");

@@ -16,6 +16,7 @@ import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type Ca
 import { chicagoDay, chicagoLocalToIso } from "./time";
 import { canonicalLeadSource, isPiCaseType, isSourceType } from "./leads";
 import { toE164 } from "./phone";
+import { isPracticeTestPhone } from "./test-phone";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { sendQuoText } from "./quo";
@@ -99,7 +100,8 @@ export async function startTextSequence(
       .maybeSingle();
     if (error || !lead) return { error: error?.message ?? "Lead not found" };
     if ((lead.text_sequence_status || "").toLowerCase() === "active") return { error: "A text sequence is already running." };
-    if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status) || lead.sequence === "stop") {
+    const practiceTest = isPracticeTestPhone(lead.phone_e164 || lead.phone);
+    if (!practiceTest && (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status) || lead.sequence === "stop")) {
       return { error: "This lead is closed, so a text sequence stays off." };
     }
     const phone = lead.phone_e164 || lead.phone;
@@ -539,11 +541,11 @@ export async function startFollowUp(leadId: string) {
   const { supabase, email } = await requireStaff();
   const { data: lead, error } = await supabase
     .from("leads")
-    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date")
+    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date, phone, phone_e164")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !lead) throw new Error(error?.message ?? "Lead not found");
-  if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status)) {
+  if (!isPracticeTestPhone(lead.phone_e164 || lead.phone) && (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status))) {
     throw new Error("This lead is closed.");
   }
   if (contractSent(lead)) {

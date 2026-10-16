@@ -7,6 +7,7 @@ import { channelOutboundMention, LEAD_CHANNEL_ID, mentionForName, postToSlack } 
 import { isPlaceholderOwner, slackMentionFor } from "./talked-with";
 import { sendQuoText } from "./quo";
 import { withinWorkHours } from "./time";
+import { isPracticeTestPhone } from "./test-phone";
 
 type Job = {
   id: string;
@@ -50,6 +51,7 @@ function textSendingLive(): boolean {
 }
 
 function closed(lead: LeadRow): boolean {
+  if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) return false;
   return Boolean(lead.signed_case || lead.case_id) || ["Lost", "Referred", "Promoted"].includes(lead.lead_status);
 }
 

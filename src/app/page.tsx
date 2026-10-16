@@ -14,6 +14,7 @@ import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-act
 import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
 import { phoneLikePattern, phoneMatches, phoneTail } from "@/lib/phone";
+import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, formatCallDay, formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
@@ -335,7 +336,12 @@ export default async function LeadListPage({
       .order("name"),
     supabase.from("referral_templates").select("language, body"),
   ]);
-  const workLeads = (data ?? []) as ListLead[];
+  let workLeads = (data ?? []) as ListLead[];
+  if (funnel !== "closed" && !workLeads.some((lead) => isPracticeTestPhone(lead.phone_e164 || lead.phone))) {
+    const { data: practiceRows } = await supabase.from("leads").select(LIST_COLUMNS).eq("phone_e164", "+17654183805").limit(1);
+    const practice = practiceRows?.[0] as ListLead | undefined;
+    if (practice) workLeads = [...workLeads, practice];
+  }
   const reviewLeads = (reviewResult.data ?? []) as ListLead[];
   const searched = await searchLeads(supabase, q);
   const merged = new Map<string, ListLead>();
@@ -545,14 +551,14 @@ export default async function LeadListPage({
   const queueRows: QueueRow[] = shown.map(({ row, others }) => {
     const automation = automationLine(row.lead);
     const nextAction = nextActionLines({
-      closed: row.cycle === "signed" || row.cycle === "closed",
+      closed: !isPracticeTestPhone(row.lead.phone_e164 || row.lead.phone) && (row.cycle === "signed" || row.cycle === "closed"),
       sequence: row.lead.sequence,
       textStatus: row.lead.text_sequence_status,
       textNextAt: row.lead.text_next_at,
       reminderAt: row.lead.agreement_next_reminder_at,
       agreementStatus: row.lead.agreement_status,
       callStart: dayOneFor(row.lead, {
-        closed: row.cycle === "signed" || row.cycle === "closed",
+        closed: !isPracticeTestPhone(row.lead.phone_e164 || row.lead.phone) && (row.cycle === "signed" || row.cycle === "closed"),
         talked: row.cycle !== "contact",
         kind: row.lead.kind,
         agreementStatus: row.lead.agreement_status,
@@ -562,7 +568,7 @@ export default async function LeadListPage({
       callsMade: row.tally.calls,
       pendingCallAt: row.nextAt ?? null,
       callSteps: stepsForLead(callSteps, {
-        closed: row.cycle === "signed" || row.cycle === "closed",
+        closed: !isPracticeTestPhone(row.lead.phone_e164 || row.lead.phone) && (row.cycle === "signed" || row.cycle === "closed"),
         talked: row.cycle !== "contact",
         kind: row.lead.kind,
         agreementStatus: row.lead.agreement_status,
@@ -619,13 +625,14 @@ export default async function LeadListPage({
       canStartText:
         (row.lead.text_sequence_status || "").toLowerCase() !== "active" &&
         Boolean(row.lead.phone_e164 || row.lead.phone) &&
-        !row.lead.signed_case &&
-        !row.lead.case_id &&
-        row.lead.lead_status !== "Lost" &&
-        row.lead.lead_status !== "Referred" &&
-        row.lead.lead_status !== "Promoted" &&
-        row.lead.lead_status !== "Signed" &&
-        row.lead.sequence !== "stop",
+        (isPracticeTestPhone(row.lead.phone_e164 || row.lead.phone) ||
+          (!row.lead.signed_case &&
+            !row.lead.case_id &&
+            row.lead.lead_status !== "Lost" &&
+            row.lead.lead_status !== "Referred" &&
+            row.lead.lead_status !== "Promoted" &&
+            row.lead.lead_status !== "Signed" &&
+            row.lead.sequence !== "stop")),
       quoUrl: row.lead.quo_link || outsideLinks.get(row.lead.id)?.quo || null,
       slackUrl: slackMessageUrl(row.lead) || outsideLinks.get(row.lead.id)?.slack || null,
       leadName: row.lead.lead_name?.trim() || "",
@@ -811,7 +818,9 @@ function slackTag(assigned: string | null | undefined, owner: string | null | un
 
 function matchesLegacy(view: LeadView, lead: ListLead): boolean {
   if (view === "pursue" || view === "needs_info") return lead.kind === view;
-  if (view === "open") return !lead.signed_case && !lead.case_id && lead.lead_status !== "Lost" && lead.lead_status !== "Referred";
+  if (view === "open") {
+    return isPracticeTestPhone(lead.phone_e164 || lead.phone) || (!lead.signed_case && !lead.case_id && lead.lead_status !== "Lost" && lead.lead_status !== "Referred");
+  }
   if (view === "signed") return lead.signed_case && !lead.case_id;
   if (view === "promoted") return Boolean(lead.case_id);
   if (view === "verify") return lead.needs_verification;

@@ -24,6 +24,19 @@ export function practiceAreaLabel(value: string | null | undefined): string {
   return AREA_LABEL.get(value as PracticeAreaId) ?? value;
 }
 
+/** Firms that take matters this office refers out. Personal-injury-only firms stay off this list. */
+export function referralFirms<T extends { active: boolean; practice_areas: string[] }>(destinations: T[]): T[] {
+  return destinations.filter(
+    (destination) => destination.active && destination.practice_areas.some((area) => area !== "personal_injury" && isPracticeArea(area)),
+  );
+}
+
+export function referralFirmArea(destination: { practice_areas: string[] }, leadArea: string | null | undefined): PracticeAreaId | "" {
+  if (leadArea && leadArea !== "personal_injury" && destination.practice_areas.includes(leadArea) && isPracticeArea(leadArea)) return leadArea;
+  const match = destination.practice_areas.find((area) => area !== "personal_injury" && isPracticeArea(area));
+  return match && isPracticeArea(match) ? match : "";
+}
+
 export const DEFAULT_REFERRAL_SMS = {
   en: "{{greeting}}, this is Ramos James Law. We are not able to help with {{area}}. Please contact {{attorney}} at {{phone}}. {{details}}",
   es: "{{greeting}}, le habla Ramos James Law. No podemos ayudar con asuntos de {{area}}. Comuníquese con {{attorney}} al {{phone}}. {{details}}",

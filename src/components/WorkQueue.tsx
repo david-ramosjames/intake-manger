@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
 import { PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, setConsultation, setDesired, setQualified, startTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setQualified, startTextSequence } from "@/lib/ops-actions";
+import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
 
@@ -38,6 +39,9 @@ export type QueueRow = {
   desiredLocked: boolean;
   signed: boolean;
   nonPi: boolean;
+  practiceArea: string | null;
+  referralSent: boolean;
+  referralFirm: string | null;
   callerClass: string | null;
   confirmSigned: boolean;
   lastLabel: string;
@@ -49,6 +53,7 @@ export type QueueRow = {
   canStartText: boolean;
   quoUrl: string | null;
   slackUrl: string | null;
+  leadName: string;
   phone: string | null;
   email: string | null;
   summary: string | null;
@@ -111,7 +116,17 @@ function sortValue(row: QueueRow, column: Column): string | number {
   return columnValue(row, column).toLowerCase();
 }
 
-export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: string }) {
+export function WorkQueue({
+  rows,
+  initialId,
+  destinations,
+  templates,
+}: {
+  rows: QueueRow[];
+  initialId?: string;
+  destinations: ReferralDestination[];
+  templates: { en: string; es: string };
+}) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
   const [sort, setSort] = useState<{ column: Column; dir: "asc" | "desc" } | null>(null);
@@ -206,6 +221,15 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
                     {row.label}
                   </span>
+                  {row.nonPi ? (
+                    row.referralSent ? (
+                      <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
+                    ) : (
+                      <button type="button" onClick={() => setSelectedId(row.id)} className="mt-1 text-[11px] font-medium text-orange-800 underline">
+                        Send referral
+                      </button>
+                    )
+                  ) : null}
                 </td>
                 <td className="px-2 py-2 text-center">
                   <PriorityCell row={row} />
@@ -246,7 +270,9 @@ export function WorkQueue({ rows, initialId }: { rows: QueueRow[]; initialId?: s
           </tbody>
         </table>
       </div>
-      {selected ? <LeadDrawer row={selected} onClose={() => setSelectedId("")} /> : null}
+      {selected ? (
+        <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} onClose={() => setSelectedId("")} />
+      ) : null}
     </div>
   );
 }
@@ -350,15 +376,17 @@ function YesNoCell({
   field,
   value,
   action,
+  align = "center",
 }: {
   row: QueueRow;
   field: "qualified" | "desired";
   value: string;
   action: (formData: FormData) => Promise<void>;
+  align?: "center" | "start";
 }) {
   const label = field === "qualified" ? "Qualified" : "Desired";
   return (
-    <form action={action} className="flex items-center justify-center gap-1">
+    <form action={action} className={`flex items-center gap-1 ${align === "start" ? "justify-start" : "justify-center"}`}>
       <input type="hidden" name="lead_id" value={row.id} />
       <button
         name="decision"
@@ -433,46 +461,244 @@ function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: strin
   );
 }
 
+function fieldClass() {
+  return "mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900";
+}
+
+function PanelSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
+      <div className="mt-2 space-y-2">{children}</div>
+    </section>
+  );
+}
+
+function FieldLabel({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+      {label}
+      {children}
+    </label>
+  );
+}
+
 function LeadFacts({ row }: { row: QueueRow }) {
+  const [error, setError] = useState<string | null>(null);
+  async function onSubmit(formData: FormData) {
+    setError(null);
+    try {
+      await saveLeadDetails(formData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save");
+    }
+  }
   const caseOptions = new Set<string>(PI_CASE_TYPES);
   if (row.caseType) caseOptions.add(row.caseType);
   const sourceOptions = new Set<string>(SOURCE_TYPES);
   if (row.sourceType) sourceOptions.add(row.sourceType);
+  const formId = `lead-details-${row.id}`;
   return (
-    <form action={saveLeadDetails} className="grid gap-2 rounded-lg border border-slate-200 p-3 text-sm">
-      <input type="hidden" name="lead_id" value={row.id} />
-      <label className="block">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Case type</span>
-        <select name="case_type" defaultValue={row.caseType} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5">
-          <option value="">Not set</option>
-          {[...caseOptions].map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="block">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Lead source</span>
-        <input name="lead_source" defaultValue={row.leadSource} placeholder="Google, referral" className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5" />
-      </label>
-      <label className="block">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Source type</span>
-        <select name="source_type" defaultValue={row.sourceType} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5">
-          <option value="">Not set</option>
-          {[...sourceOptions].map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button className="mt-1 justify-self-start rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Save</button>
-    </form>
+    <div className="space-y-5">
+      <form id={formId} action={onSubmit} className="space-y-5">
+        <input type="hidden" name="lead_id" value={row.id} />
+        <PanelSection title="Contact">
+          <FieldLabel label="Name">
+            <input name="lead_name" defaultValue={row.leadName} className={fieldClass()} />
+          </FieldLabel>
+          <FieldLabel label="Phone">
+            <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
+          </FieldLabel>
+          <FieldLabel label="Email">
+            <input name="email" type="email" defaultValue={row.email ?? ""} className={fieldClass()} />
+          </FieldLabel>
+        </PanelSection>
+        <PanelSection title="Marketing">
+          <FieldLabel label="Lead source">
+            <input name="lead_source" defaultValue={row.leadSource} placeholder="Google, referral" className={fieldClass()} />
+          </FieldLabel>
+          <FieldLabel label="Source type">
+            <select name="source_type" defaultValue={row.sourceType} className={fieldClass()}>
+              <option value="">Not set</option>
+              {[...sourceOptions].map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </FieldLabel>
+        </PanelSection>
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Case details</h3>
+          <div className="mt-2">
+            <FieldLabel label="Type">
+              <select name="case_type" defaultValue={row.caseType} className={fieldClass()}>
+                <option value="">Not set</option>
+                {[...caseOptions].map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </FieldLabel>
+          </div>
+        </section>
+      </form>
+      <div className="-mt-3 space-y-2">
+        <div className="rounded-md bg-slate-50 px-3 py-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</p>
+          <div className="mt-1">
+            <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} align="start" />
+          </div>
+        </div>
+        <ConsultDate row={row} />
+        <div className="rounded-md bg-slate-50 px-3 py-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</p>
+          <div className="mt-1">
+            {row.desiredLocked ? (
+              <span className="text-sm text-slate-900">{row.desired}</span>
+            ) : (
+              <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} align="start" />
+            )}
+          </div>
+        </div>
+        <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
+        {row.confirmSigned ? (
+          <form action={confirmSigned}>
+            <input type="hidden" name="lead_id" value={row.id} />
+            <button className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Confirm signed</button>
+          </form>
+        ) : null}
+        {error ? <p className="text-sm text-red-700">{error}</p> : null}
+        <button form={formId} className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+          Save details
+        </button>
+      </div>
+    </div>
   );
 }
 
-function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
+function QueueReferral({
+  row,
+  destinations,
+  templates,
+}: {
+  row: QueueRow;
+  destinations: ReferralDestination[];
+  templates: { en: string; es: string };
+}) {
+  const firms = referralFirms(destinations);
+  const [firmId, setFirmId] = useState(firms[0]?.id ?? "");
+  const [language, setLanguage] = useState<"en" | "es">("en");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const firm = firms.find((item) => item.id === firmId) ?? null;
+  const area = firm ? referralFirmArea(firm, row.practiceArea) : "";
+  const preview =
+    firm && area
+      ? renderReferralSms({
+          language,
+          template: templates[language],
+          leadName: row.leadName || row.title,
+          area,
+          destination: firm,
+        })
+      : "";
+
+  async function submit(kind: "send" | "already") {
+    if (!firm || !area) {
+      setError("Pick the firm.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    const data = new FormData();
+    data.set("destination_id", firm.id);
+    data.set("language", language);
+    data.set("practice_area", area);
+    try {
+      if (kind === "send") await sendReferral(row.id, data);
+      else await markReferralAlreadySent(row.id, data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not record the referral");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Referral</h3>
+      {row.referralSent ? (
+        <p className="mt-2 text-sm font-medium text-emerald-800">
+          Referral sent{row.referralFirm ? ` · ${row.referralFirm}` : ""}
+        </p>
+      ) : firms.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-600">Add a firm on the Referrals page first.</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Firm
+            <select
+              value={firm?.id ?? ""}
+              onChange={(event) => setFirmId(event.target.value)}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
+            >
+              {firms.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Language
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value === "es" ? "es" : "en")}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
+            >
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+            </select>
+          </label>
+          {preview ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p> : null}
+          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => void submit("send")}
+              className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {pending ? "Saving…" : "Send referral"}
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => void submit("already")}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 disabled:opacity-60"
+            >
+              Already sent
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LeadDrawer({
+  row,
+  destinations,
+  templates,
+  onClose,
+}: {
+  row: QueueRow;
+  destinations: ReferralDestination[];
+  templates: { en: string; es: string };
+  onClose: () => void;
+}) {
   const [touches, setTouches] = useState<Touch[] | null>(null);
   useEffect(() => {
     let cancel = false;
@@ -510,11 +736,13 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         </button>
       </div>
       <div className="space-y-5 overflow-y-auto px-4 py-4">
-        <LeadFacts row={row} />
+        {row.nonPi ? <QueueReferral row={row} destinations={destinations} templates={templates} /> : null}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
+        <LeadFacts row={row} />
+        <TagEditor row={row} />
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
             <a href={row.quoUrl} className="rounded-md bg-brand px-3 py-1.5 font-medium text-navy" target="_blank" rel="noreferrer">
@@ -535,39 +763,6 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
           <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${row.stageClassName}`}>{row.label}</span>
           <span className="text-sm text-slate-700">{row.step === "—" ? "No next step" : row.step}</span>
         </div>
-        <p className="text-sm text-slate-600">
-          {row.phone || "No phone"}
-          {row.email ? ` · ${row.email}` : ""}
-          {row.owner ? ` · ${row.owner}` : ""}
-          {row.grade ? ` · Grade ${row.grade}` : " · No grade"}
-          {row.priority ? ` · ${row.priority}` : ""}
-        </p>
-        <dl className="grid grid-cols-2 gap-2 text-sm">
-          <ConsultDate row={row} />
-          <div className="rounded-md bg-slate-50 px-3 py-2">
-            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</dt>
-            <dd className="mt-1">
-              <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} />
-            </dd>
-          </div>
-          <div className="rounded-md bg-slate-50 px-3 py-2">
-            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</dt>
-            <dd className="mt-1">
-              {row.desiredLocked ? (
-                <span className="text-slate-900">{row.desired}</span>
-              ) : (
-                <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} />
-              )}
-            </dd>
-          </div>
-          <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
-        </dl>
-        {row.confirmSigned ? (
-          <form action={confirmSigned} className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm">
-            <input type="hidden" name="lead_id" value={row.id} />
-            <button className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Confirm signed</button>
-          </form>
-        ) : null}
         {row.samePhone.length > 0 ? (
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Same phone</h3>
@@ -586,7 +781,6 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         {row.closeSuggestion ? <CloseSuggestion row={row} /> : null}
         {row.priority === "Suggested" && row.prioritySuggestion ? <PrioritySuggestion row={row} /> : null}
         {row.signed ? null : <NonLeadChoice row={row} />}
-        <TagEditor row={row} />
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next</h3>
           <p className="mt-2 text-sm font-medium text-slate-900">{row.actionTitle ?? "No next step"}</p>
@@ -677,7 +871,7 @@ function ConsultDate({ row }: { row: QueueRow }) {
     <form action={setConsultation} className="rounded-md bg-slate-50 px-3 py-2">
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-        Consultation
+        Consultation date
         <input
           key={`${row.id}:${row.consultKey}`}
           type="date"
@@ -792,9 +986,9 @@ function TagEditor({ row }: { row: QueueRow }) {
   }
 
   return (
-    <form action={onSubmit} className="rounded-lg border border-slate-200 p-3">
+    <form action={onSubmit}>
       <LeadTagFields
-        key={`${row.id}:${row.tags.join("|")}:${row.signed ? "signed" : "open"}`}
+        key={`${row.id}:${row.tags.join("|")}:${row.signed ? "signed" : "open"}:${row.qualifiedLabel}`}
         tags={row.tags}
         declineReason={row.declineReason}
         signed={row.signed}
@@ -802,14 +996,15 @@ function TagEditor({ row }: { row: QueueRow }) {
         nonPi={row.nonPi}
         callrail={row.callrail}
         quiet
+        qualifiedMark={row.qualifiedLabel}
       />
       {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
       <button
         type="submit"
         disabled={pending}
-        className="mt-3 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy disabled:opacity-60"
+        className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
       >
-        {pending ? "Saving…" : "Save tags"}
+        {pending ? "Saving…" : "Save"}
       </button>
     </form>
   );

@@ -14,9 +14,9 @@ import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
 import { isPiCaseType } from "./leads";
+import { toE164 } from "./phone";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
-import { toE164 } from "./phone";
 import { sendQuoText } from "./quo";
 import { DEFAULT_REFERRAL_SMS, isPracticeArea, renderReferralSms } from "./referrals";
 import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
@@ -206,16 +206,23 @@ export async function setConsultation(formData: FormData) {
   });
   revalidatePath("/");
   revalidatePath("/priority");
+  revalidatePath("/review");
   revalidatePath(`/leads/${leadId}`);
 }
 
 export async function saveLeadDetails(formData: FormData) {
-  const { supabase, email } = await requireStaff();
+  const { supabase, email: actor } = await requireStaff();
   const leadId = text(formData, "lead_id");
   if (!leadId) throw new Error("Missing the lead.");
   const caseType = text(formData, "case_type") || null;
   const leadSource = text(formData, "lead_source") || null;
   const sourceType = text(formData, "source_type") || null;
+  const leadName = text(formData, "lead_name");
+  const phone = text(formData, "phone");
+  const contactEmail = text(formData, "email");
+  const phoneE164 = phone ? toE164(phone) : null;
+  const keepPhone = formData.get("keep_phone") === "1";
+  if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
   const { data: before, error: loadError } = await supabase
     .from("leads")
     .select("caller_class, close_suggestion")
@@ -223,11 +230,18 @@ export async function saveLeadDetails(formData: FormData) {
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
   const patch: Record<string, string | null> = {
+    lead_name: leadName,
+    email: contactEmail,
     case_type: caseType,
     lead_source: leadSource,
     source_type: sourceType,
     source_channel: sourceType,
   };
+  if (!keepPhone) {
+    patch.phone = phone;
+    patch.phone_e164 = phoneE164;
+  }
+  if (leadName) patch.identity_status = "confirmed";
   if (caseType === "Non-PI Legal Matter") {
     patch.caller_class = "non_pi";
     patch.close_suggestion = "decline";
@@ -241,11 +255,12 @@ export async function saveLeadDetails(formData: FormData) {
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: "lead_details",
-    actor: email,
-    payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType },
+    actor,
+    payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType, lead_name: leadName },
   });
   revalidatePath("/");
   revalidatePath("/priority");
+  revalidatePath("/review");
   revalidatePath(`/leads/${leadId}`);
 }
 
@@ -316,6 +331,7 @@ async function saveQueueMilestone(
   }
   revalidatePath("/");
   revalidatePath("/priority");
+  revalidatePath("/review");
   revalidatePath(`/leads/${leadId}`);
 }
 
@@ -733,6 +749,57 @@ export async function sendReferral(leadId: string, formData: FormData) {
   }
 
   revalidatePath("/");
+  revalidatePath("/review");
+  revalidatePath(`/leads/${leadId}`);
+}
+
+export async function markReferralAlreadySent(leadId: string, formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const destinationId = text(formData, "destination_id");
+  const language = text(formData, "language") === "es" ? "es" : "en";
+  const area = text(formData, "practice_area");
+  if (!destinationId) throw new Error("Pick the firm.");
+  if (!isPracticeArea(area)) throw new Error("That firm has no practice area for this referral.");
+  const { data: destination, error: loadError } = await supabase
+    .from("referral_destinations")
+    .select("id, name, phone, practice_areas")
+    .eq("id", destinationId)
+    .maybeSingle();
+  if (loadError || !destination) throw new Error(loadError?.message ?? "That firm is missing.");
+  if (!(destination.practice_areas ?? []).includes(area)) throw new Error("That firm is not listed for this practice area.");
+  const outside = area !== "personal_injury";
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      lead_status: "Referred",
+      follow_up: false,
+      sequence: "stop",
+      close_reason: "referred",
+      close_suggestion: null,
+      practice_area: area,
+      referral_opportunity: true,
+      caller_class: outside ? "non_pi" : null,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  await stopFollowUp(supabase, leadId, "Referred out.");
+  const { error } = await supabase.from("referral_sends").insert({
+    lead_id: leadId,
+    destination_id: destination.id,
+    actor: email,
+    note: "Already sent outside Intake Manager",
+    language,
+    message: null,
+  });
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "referred",
+    actor: email,
+    payload: { destination: destination.name, language, recorded: true },
+  });
+  revalidatePath("/");
+  revalidatePath("/review");
   revalidatePath(`/leads/${leadId}`);
 }
 
@@ -1099,6 +1166,7 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
   }
 
   revalidatePath("/");
+  revalidatePath("/review");
   revalidatePath(`/leads/${leadId}`);
 }
 

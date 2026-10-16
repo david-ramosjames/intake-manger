@@ -8,6 +8,7 @@ const LOGO = "https://res.cloudinary.com/dmmxuoa3p/image/upload/v1783363036/logo
 
 const LINKS = [
   { href: "/", label: "Work queue" },
+  { href: "/review", label: "Review" },
   { href: "/priority", label: "Priority" },
   { href: "/verify", label: "Verify" },
   { href: "/sequences", label: "Sequences" },
@@ -24,7 +25,7 @@ function isActive(pathname: string, href: string): boolean {
 export function AppHeader({ email }: { email: string | null }) {
   const pathname = usePathname();
   const docsActive = isActive(pathname, "/how-it-fits");
-  const wide = pathname === "/";
+  const wide = pathname === "/" || pathname === "/review";
 
   return (
     <header className="sticky top-0 z-30 bg-[linear-gradient(100deg,#0A1E41_0%,#0F316D_100%)] text-white">

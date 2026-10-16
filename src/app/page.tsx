@@ -13,6 +13,7 @@ import { leadSequenceId } from "@/lib/sequences";
 import { phoneLikePattern, phoneMatches, phoneTail } from "@/lib/phone";
 import { chicagoDay, formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
+import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
 type HistoryTouch = {
@@ -283,7 +284,7 @@ export default async function LeadListPage({
     ? leadQuery.or("lead_status.in.(Signed,Promoted,Lost,Referred),signed_case.eq.true,case_id.not.is.null")
     : leadQuery.not("lead_status", "in", "(Signed,Promoted,Lost,Referred)").eq("signed_case", false).is("case_id", null);
   const since = recentCutoff();
-  const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, desiredCount, { data: stepRows }] = await Promise.all([
+  const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, desiredCount, { data: stepRows }, destinationResult, templateResult] = await Promise.all([
     leadQuery,
     queue === "nonleads"
       ? supabase
@@ -317,6 +318,12 @@ export default async function LeadListPage({
       .gte("lead_date", since)
       .or('desired_case.eq.true,agreement_sent_at.not.is.null,agreement_status.in.(sent,viewed,signed,completed),signed_case.eq.true,lead_status.eq.Signed,callrail_tags.cs.{"CVR DESIRED"}'),
     supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
+    supabase
+      .from("referral_destinations")
+      .select("id, name, phone, practice_areas, address, email, website, spanish, matters, notes, active")
+      .eq("active", true)
+      .order("name"),
+    supabase.from("referral_templates").select("language, body"),
   ]);
   const workLeads = (data ?? []) as ListLead[];
   const reviewLeads = (reviewResult.data ?? []) as ListLead[];
@@ -326,6 +333,29 @@ export default async function LeadListPage({
     merged.set(lead.id, lead);
   }
   const leads = [...merged.values()];
+  const destinations = ((destinationResult.data ?? []) as ReferralDestination[]).map((destination) => ({
+    ...destination,
+    practice_areas: destination.practice_areas ?? [],
+    active: destination.active !== false,
+    spanish: Boolean(destination.spanish),
+  }));
+  const templateRows = (templateResult.data ?? []) as { language: string; body: string }[];
+  const referralTemplates = {
+    en: templateRows.find((row) => row.language === "en")?.body || DEFAULT_REFERRAL_SMS.en,
+    es: templateRows.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es,
+  };
+  const firmName = new Map(destinations.map((destination) => [destination.id, destination.name]));
+  const sentFirm = new Map<string, string>();
+  if (leads.length) {
+    const { data: sendRows } = await supabase
+      .from("referral_sends")
+      .select("lead_id, destination_id, created_at")
+      .in("lead_id", leads.map((lead) => lead.id));
+    const sends = [...((sendRows ?? []) as { lead_id: string; destination_id: string; created_at: string }[])].sort((a, b) =>
+      a.created_at.localeCompare(b.created_at),
+    );
+    for (const send of sends) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+  }
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
 
   await attachCallrailSources(leads, async (id, source) => {
@@ -516,6 +546,9 @@ export default async function LeadListPage({
       desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead) || milestoneQualified(row.lead) === false,
       signed: milestoneSigned(row.lead),
       nonPi: row.lead.caller_class === "non_pi" && !isPiCaseType(suggestedCaseType(row.lead)),
+      practiceArea: row.lead.practice_area,
+      referralSent: sentFirm.has(row.lead.id) || row.lead.lead_status === "Referred" || row.lead.close_reason === "referred",
+      referralFirm: sentFirm.get(row.lead.id) || null,
       callerClass: row.lead.caller_class,
       confirmSigned: signatureNeedsConfirm(row.lead),
       lastLabel: lastContacted(row.outreach),
@@ -536,6 +569,7 @@ export default async function LeadListPage({
         row.lead.sequence !== "stop",
       quoUrl: row.lead.quo_link || outsideLinks.get(row.lead.id)?.quo || null,
       slackUrl: slackMessageUrl(row.lead) || outsideLinks.get(row.lead.id)?.slack || null,
+      leadName: row.lead.lead_name?.trim() || "",
       phone: displayPhone(row.lead.phone),
       email: row.lead.email,
       summary: row.lead.summary,
@@ -674,7 +708,7 @@ export default async function LeadListPage({
         </form>
       </div>
 
-      <WorkQueue rows={queueRows} initialId={selectedId} />
+      <WorkQueue rows={queueRows} initialId={selectedId} destinations={destinations} templates={referralTemplates} />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>

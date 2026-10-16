@@ -23,6 +23,7 @@ export function LeadTagFields({
   nonPi = false,
   callrail = false,
   quiet = false,
+  qualifiedMark = "",
 }: {
   tags: string[];
   declineReason?: string | null;
@@ -31,8 +32,12 @@ export function LeadTagFields({
   nonPi?: boolean;
   callrail?: boolean;
   quiet?: boolean;
+  qualifiedMark?: string;
 }) {
-  const [qualified, setQualified] = useState(qualifiedChoice(tags));
+  const qualifiedStart =
+    qualifiedChoice(tags) ||
+    (qualifiedMark === "Yes" ? QUALIFIED_YES : qualifiedMark === "No" ? QUALIFIED_NO : "");
+  const [qualified, setQualified] = useState(qualifiedStart);
   const [decline, setDecline] = useState(signed ? "" : selectedDecline(tags));
   const [notQualified, setNotQualified] = useState(selectedOne(tags, NOT_QUALIFIED_TAGS));
   const [size, setSize] = useState(selectedOne(tags, SIZE_TAGS));
@@ -42,7 +47,7 @@ export function LeadTagFields({
   const showType = !nonPi && notQualified !== "NQ: Non-PI Legal Matter";
 
   return (
-    <fieldset className="space-y-3 text-sm">
+    <fieldset className={quiet ? "space-y-5 text-sm" : "space-y-3 text-sm"}>
       {nonPi ? <input type="hidden" name="non_pi" value="yes" /> : null}
       {quiet ? (
         qualified ? <input type="hidden" name="qualified_tag" value={qualified} /> : null
@@ -77,7 +82,7 @@ export function LeadTagFields({
         </>
       )}
       <label className="block">
-        <span className="font-medium text-slate-700">Declined</span>
+        <span className={quiet ? "text-xs font-semibold uppercase tracking-wide text-slate-500" : "font-medium text-slate-700"}>Declined</span>
         <select
           name="decline_tag"
           value={decline}
@@ -117,7 +122,9 @@ export function LeadTagFields({
           ))}
         </select>
       </label>
-      {showSize ? (
+      {quiet && size ? <input type="hidden" name="size_tag" value={size} /> : null}
+      {quiet && injuryType ? <input type="hidden" name="injury_type" value={injuryType} /> : null}
+      {showSize && !quiet ? (
         <label className="block">
           <span className="font-medium text-slate-700">Size</span>
           <select
@@ -135,7 +142,7 @@ export function LeadTagFields({
           </select>
         </label>
       ) : null}
-      {showType ? (
+      {showType && !quiet ? (
         <label className="block">
           <span className="font-medium text-slate-700">Injury type</span>
           <select

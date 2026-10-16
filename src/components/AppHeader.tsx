@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "@/lib/auth-actions";
+import { navLink } from "@/lib/ui";
 
 const LOGO = "https://res.cloudinary.com/dmmxuoa3p/image/upload/v1783363036/logo_rdt8yk.webp";
 
@@ -38,24 +39,11 @@ export function AppHeader({ email }: { email: string | null }) {
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             {LINKS.map((link) => {
               const active = isActive(pathname, link.href);
-              if (link.href === "/priority") {
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={`rounded-full bg-brand px-3 py-1 font-semibold text-navy ${
-                      active ? "ring-2 ring-accent" : ""
-                    }`}
-                  >
-                    {link.label}
-                  </Link>
-                );
-              }
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`border-b-2 font-medium ${
+                  className={`${navLink} ${
                     active ? "border-accent text-white" : "border-transparent text-white/75 hover:text-white"
                   }`}
                 >
@@ -71,7 +59,7 @@ export function AppHeader({ email }: { email: string | null }) {
             </form>
             <Link
               href="/staff"
-              className={`border-b-2 font-medium ${
+              className={`${navLink} ${
                 isActive(pathname, "/staff")
                   ? "border-accent text-white"
                   : "border-transparent text-white/75 hover:text-white"
@@ -81,7 +69,7 @@ export function AppHeader({ email }: { email: string | null }) {
             </Link>
             <Link
               href="/how-it-fits"
-              className={`border-b-2 font-medium ${
+              className={`${navLink} ${
                 docsActive ? "border-accent text-white" : "border-transparent text-white/75 hover:text-white"
               }`}
             >

@@ -11,6 +11,8 @@ import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, m
 import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
+import { ButtonLabel } from "@/components/ButtonLabel";
+import { buttonPrimary, buttonQuiet, buttonSecondary } from "@/lib/ui";
 
 export type QueueRow = {
   id: string;
@@ -90,19 +92,51 @@ type Touch = {
   occurred_at: string | null;
 };
 
-type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "signed" | "last" | "automation";
+type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "last" | "automation";
 
 const COLUMNS: { id: Column; label: string; width: string }[] = [
   { id: "stage", label: "Stage", width: "10%" },
   { id: "priority", label: "Priority", width: "8%" },
   { id: "grade", label: "Grade", width: "5%" },
-  { id: "consult", label: "Consult", width: "6%" },
+  { id: "consult", label: "Consult", width: "7%" },
   { id: "qualified", label: "Qualified", width: "9%" },
   { id: "desired", label: "Desired", width: "9%" },
-  { id: "signed", label: "Signed", width: "6%" },
-  { id: "last", label: "Last contacted", width: "9%" },
+  { id: "last", label: "Last contacted", width: "10%" },
   { id: "automation", label: "Automation", width: "10%" },
 ];
+
+function actionIsPast(at: string | null): boolean {
+  return Boolean(at && new Date(at).getTime() < Date.now());
+}
+
+function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; layout?: "stack" | "row" }) {
+  const shown = lines.filter((line) => line.when !== "None");
+  return (
+    <>
+      {shown.map((line) => {
+        const past = actionIsPast(line.at);
+        if (layout === "row") {
+          return (
+            <div key={line.label} className="flex justify-between gap-3">
+              <dt className={past ? "font-medium text-amber-800" : "text-slate-500"}>{line.label}</dt>
+              <dd className={past ? "font-medium text-amber-800" : ""}>
+                {past ? "Overdue · " : ""}
+                {line.when}
+              </dd>
+            </div>
+          );
+        }
+        return (
+          <p key={line.label} className={past ? "font-medium text-amber-800" : "text-slate-600"}>
+            <span className={past ? "text-amber-900" : "text-slate-500"}>{line.label}</span>
+            {past ? " overdue · " : " "}
+            {line.when}
+          </p>
+        );
+      })}
+    </>
+  );
+}
 
 function columnValue(row: QueueRow, column: Column): string {
   if (column === "stage") return row.label;
@@ -111,7 +145,6 @@ function columnValue(row: QueueRow, column: Column): string {
   if (column === "consult") return row.consultWhen;
   if (column === "qualified") return row.qualifiedLabel;
   if (column === "desired") return row.desired;
-  if (column === "signed") return row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—";
   if (column === "last") return row.lastLabel;
   return row.automationLabel;
 }
@@ -162,8 +195,8 @@ export function WorkQueue({
       <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
         <table className="w-full table-fixed text-left text-xs">
           <colgroup>
-            <col style={{ width: "13%" }} />
-            <col style={{ width: "10%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "12%" }} />
             {COLUMNS.map((column) => (
               <col key={column.id} style={{ width: column.width }} />
             ))}
@@ -178,7 +211,7 @@ export function WorkQueue({
                   key={column.id}
                   label={column.label}
                   column={column.id}
-                  align={index >= COLUMNS.length - 3 ? "end" : "start"}
+                  align={index >= COLUMNS.length - 2 ? "end" : "start"}
                   rows={rows}
                   filter={filters[column.id] ?? ""}
                   sort={sort}
@@ -225,13 +258,7 @@ export function WorkQueue({
                 </td>
                 <td className="px-2 py-2 text-slate-800">
                   <p className="font-medium text-slate-900">{row.actionTitle ?? "—"}</p>
-                  {row.nextAction
-                    .filter((line) => line.when !== "None")
-                    .map((line) => (
-                      <p key={line.label} className="text-slate-600">
-                        <span className="text-slate-500">{line.label}</span> {line.when}
-                      </p>
-                    ))}
+                  <ActionLines lines={row.nextAction} />
                 </td>
                 <td className="px-2 py-2 text-center">
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
@@ -266,7 +293,6 @@ export function WorkQueue({
                     <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} />
                   )}
                 </td>
-                <td className="px-2 py-2 text-center text-slate-700">{row.signed ? "Yes" : row.confirmSigned ? "Confirm" : "—"}</td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.lastLabel}</td>
                 <td className="px-1 py-2 text-center">
                   <TextAutomation row={row} />
@@ -278,7 +304,7 @@ export function WorkQueue({
             ))}
             {shown.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={11} className="px-4 py-10 text-center text-slate-500">
                   Nothing in this queue.
                 </td>
               </tr>
@@ -445,30 +471,65 @@ function YesNoCell({
   align?: "center" | "start";
 }) {
   const label = field === "qualified" ? "Qualified" : "Desired";
+  const [pending, setPending] = useState<"yes" | "no" | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const unknown = value !== "Yes" && value !== "No";
+
+  async function choose(decision: "yes" | "no") {
+    const selected = decision === "yes" ? "Yes" : "No";
+    if (value === selected || pending) return;
+    setPending(decision);
+    setSaved(false);
+    setFailed(false);
+    const data = new FormData();
+    data.set("lead_id", row.id);
+    data.set("decision", decision);
+    try {
+      await action(data);
+      setSaved(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  const side = "h-9 min-w-12 px-2.5 text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2";
+
   return (
-    <form action={action} className={`flex items-center gap-1 ${align === "start" ? "justify-start" : "justify-center"}`}>
-      <input type="hidden" name="lead_id" value={row.id} />
-      <button
-        name="decision"
-        value="yes"
-        aria-label={`${label} yes`}
-        className={`cursor-pointer rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors ${
-          value === "Yes" ? "bg-navy text-white hover:bg-[#16366e]" : "border border-slate-300 bg-white text-slate-700 hover:border-navy hover:bg-slate-100 hover:text-navy"
-        }`}
-      >
-        Yes
-      </button>
-      <button
-        name="decision"
-        value="no"
-        aria-label={`${label} no`}
-        className={`cursor-pointer rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors ${
-          value === "No" ? "bg-navy text-white hover:bg-[#16366e]" : "border border-slate-300 bg-white text-slate-700 hover:border-navy hover:bg-slate-100 hover:text-navy"
-        }`}
-      >
-        No
-      </button>
-    </form>
+    <div className={`flex flex-col ${align === "start" ? "items-start" : "items-center"}`}>
+      <div className="inline-flex items-center">
+        <div className="inline-flex overflow-hidden rounded-lg border border-slate-300 bg-white" role="group" aria-label={label}>
+          <button
+            type="button"
+            aria-label={`${label} yes`}
+            aria-pressed={value === "Yes"}
+            disabled={pending !== null}
+            onClick={() => void choose("yes")}
+            className={`${side} border-r border-slate-300 ${
+              value === "Yes" ? "bg-emerald-50 text-emerald-900" : "text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            {value === "Yes" ? "✓ Yes" : "Yes"}
+          </button>
+          <button
+            type="button"
+            aria-label={`${label} no`}
+            aria-pressed={value === "No"}
+            disabled={pending !== null}
+            onClick={() => void choose("no")}
+            className={`${side} ${value === "No" ? "bg-slate-200 text-slate-900" : "text-slate-500 hover:bg-slate-50"}`}
+          >
+            No
+          </button>
+        </div>
+        <span className={`ml-1.5 h-1.5 w-1.5 rounded-full ${unknown ? "bg-amber-500" : "bg-transparent"}`} aria-hidden="true" />
+      </div>
+      <span className="mt-0.5 h-4 text-[11px] font-medium" aria-live="polite">
+        {failed ? <span className="text-red-700">Failed</span> : pending ? <span className="text-slate-500">Saving</span> : saved ? <span className="text-emerald-700">Saved</span> : null}
+      </span>
+    </div>
   );
 }
 
@@ -493,9 +554,8 @@ function PriorityCell({ row }: { row: QueueRow }) {
     return (
       <form action={markPriority}>
         <input type="hidden" name="lead_id" value={row.id} />
-        <button className="mx-auto cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
-          <span className="block">Make</span>
-          <span className="block">priority</span>
+        <button className={`${buttonQuiet} mx-auto h-auto min-h-9 px-2 text-center leading-tight`}>
+          Flag priority
         </button>
       </form>
     );
@@ -546,13 +606,16 @@ function FieldLabel({ label, children, className = "" }: { label: string; childr
 function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [saved, setSaved] = useState(false);
   async function onSubmit(formData: FormData) {
     setPending(true);
+    setSaved(false);
     setError(null);
     const tags = document.getElementById(`lead-tags-${row.id}`);
     try {
       await saveLeadDetails(formData);
       if (tags instanceof HTMLFormElement) await saveLeadTags(row.id, new FormData(tags));
+      setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -654,9 +717,9 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
         <button
           form={formId}
           disabled={pending}
-          className="w-full cursor-pointer rounded-md bg-navy px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
+          className={`${buttonPrimary} w-full`}
         >
-          {pending ? "Saving…" : "Save"}
+          <ButtonLabel value={pending ? "Saving…" : saved ? "✓ Saved" : "Save"} reserve={["Saving…", "✓ Saved", "Save"]} />
         </button>
       </div>
     </div>
@@ -878,7 +941,7 @@ function LeadDrawer({
         </section>
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
-            <a href={row.quoUrl} className="rounded-md bg-brand px-3 py-1.5 font-medium text-navy" target="_blank" rel="noreferrer">
+            <a href={row.quoUrl} className={buttonSecondary} target="_blank" rel="noreferrer">
               Open in Quo
             </a>
           ) : (
@@ -922,12 +985,7 @@ function LeadDrawer({
               <dt className="text-slate-500">Last contacted</dt>
               <dd>{row.lastLabel}</dd>
             </div>
-            {row.nextAction.filter((line) => line.when !== "None").map((line) => (
-              <div key={line.label} className="flex justify-between gap-3">
-                <dt className="text-slate-500">{line.label}</dt>
-                <dd>{line.when}</dd>
-              </div>
-            ))}
+            <ActionLines lines={row.nextAction} layout="row" />
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">Calls / texts</dt>
               <dd>

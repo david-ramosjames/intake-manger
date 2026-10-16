@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ButtonLabel } from "@/components/ButtonLabel";
+import { buttonPrimary } from "@/lib/ui";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
 import { isSourceType, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_SOURCES, LEAD_STATUSES, PI_CASE_TYPES, SOURCE_CHANNELS, SOURCE_TYPES, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
@@ -34,15 +36,19 @@ export function LeadForm({
   staff?: { name: string }[];
 }) {
   const [pending, setPending] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const statuses = new Set<string>(LEAD_STATUSES);
   if (lead?.lead_status) statuses.add(lead.lead_status);
 
   async function onSubmit(formData: FormData) {
     setPending(true);
+    setSaved(false);
     setError(null);
     try {
       await action(formData);
+      setSaved(true);
+      setPending(false);
     } catch (err) {
       if (isNextRedirect(err)) throw err;
       setError(err instanceof Error ? err.message : "Could not save");
@@ -260,9 +266,12 @@ export function LeadForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-navy disabled:opacity-60"
+          className={buttonPrimary}
         >
-          {pending ? "Saving…" : lead ? "Save changes" : "Add lead"}
+          <ButtonLabel
+            value={pending ? "Saving…" : saved ? "✓ Saved" : lead ? "Save changes" : "Add lead"}
+            reserve={["Saving…", "✓ Saved", "Save changes", "Add lead"]}
+          />
         </button>
       </div>
     </form>

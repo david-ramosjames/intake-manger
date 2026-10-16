@@ -207,6 +207,21 @@ export async function createLead(formData: FormData) {
       }
     : {};
 
+  if (fields.phone_e164) {
+    const { data: existingRows, error: existingError } = await supabase
+      .from("leads")
+      .select("id, lead_name")
+      .eq("phone_e164", fields.phone_e164)
+      .limit(1);
+    if (existingError) throw new Error(existingError.message);
+    const existing = existingRows?.[0];
+    if (existing) {
+      throw new Error(
+        `${existing.lead_name || "A lead"} already uses this phone. Open that lead instead of adding another.`,
+      );
+    }
+  }
+
   const { data, error } = await supabase
     .from("leads")
     .insert({ ...fields, arrival: fields.arrival ?? "manual", needs_verification: !fields.lead_name || !fields.phone, ...signedExtras })

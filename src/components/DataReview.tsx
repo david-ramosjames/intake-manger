@@ -255,6 +255,8 @@ function FilterChip({ active, onClick, label, count }: { active: boolean; onClic
 function ReviewRow({ row }: { row: ReviewLead }) {
   const [draft, setDraft] = useState(row);
   const [error, setError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const inflight = useRef(0);
   const editing = useRef(false);
   const latest = useRef(row);
   const queue = useRef(Promise.resolve());
@@ -267,13 +269,19 @@ function ReviewRow({ row }: { row: ReviewLead }) {
   const gaps = new Set(reviewGaps(draft));
 
   function run(job: () => Promise<void>, next: ReviewLead) {
+    inflight.current += 1;
+    setSaveState("saving");
     const task = queue.current.then(async () => {
       editing.current = true;
       setDraft(next);
       setError(null);
       try {
         await job();
+        inflight.current -= 1;
+        if (inflight.current === 0) setSaveState("saved");
       } catch (err) {
+        inflight.current -= 1;
+        setSaveState("failed");
         setError(err instanceof Error ? err.message : "Could not save");
         setDraft(latest.current);
       } finally {
@@ -350,6 +358,11 @@ function ReviewRow({ row }: { row: ReviewLead }) {
           <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
             <span>
               {row.closed ? "Closed" : "Open"} · {row.status}
+            </span>
+            <span className="inline-block w-14 text-right font-medium" aria-live="polite">
+              {saveState === "saving" ? <span className="text-slate-500">Saving</span> : null}
+              {saveState === "saved" ? <span className="text-emerald-700">Saved</span> : null}
+              {saveState === "failed" ? <span className="text-red-700">Failed</span> : null}
             </span>
             <Link href={`/leads/${row.id}`} className="font-medium text-navy underline">
               Open

@@ -1,4 +1,5 @@
 import { claimCall, recordCallOutcome } from "@/lib/ops-actions";
+import { buttonPrimary, buttonSecondary } from "@/lib/ui";
 import { CALL_OUTCOMES } from "@/lib/calls";
 
 export function CallWork({
@@ -20,7 +21,7 @@ export function CallWork({
         ) : (
           <form action={claimCall}>
             <input type="hidden" name="job_id" value={jobId} />
-            <button type="submit" className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs">
+            <button type="submit" className={buttonSecondary}>
               {assignedEmail ? "Take over" : "Claim"}
             </button>
           </form>
@@ -51,7 +52,7 @@ export function CallWork({
           <input type="checkbox" name="stop_rest" value="yes" />
           Stop the remaining calls on this lead
         </label>
-        <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy sm:col-span-2 sm:w-fit">
+        <button type="submit" className={`${buttonPrimary} sm:col-span-2 sm:w-fit`}>
           Record outcome
         </button>
       </form>

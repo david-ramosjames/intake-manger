@@ -5,6 +5,7 @@ import { leadTitle } from "@/lib/leads";
 import { runDueWork } from "@/lib/ops-actions";
 import { requireStaff } from "@/lib/session";
 import { chicagoDay, formatChicago } from "@/lib/time";
+import { buttonSecondary } from "@/lib/ui";
 
 type QueueView = "all" | "today" | "overdue" | "upcoming" | "mine" | "unassigned";
 
@@ -190,7 +191,7 @@ export default async function QueuesPage({
                   </p>
                 </div>
                 {lead?.quo_link ? (
-                  <a href={lead.quo_link} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
+                  <a href={lead.quo_link} className={buttonSecondary} target="_blank" rel="noreferrer">
                     Open in Quo
                   </a>
                 ) : (

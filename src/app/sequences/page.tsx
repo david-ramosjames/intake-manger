@@ -13,6 +13,7 @@ import {
   type WorkHours,
 } from "@/lib/sequences";
 import { requireStaff } from "@/lib/session";
+import { buttonQuiet } from "@/lib/ui";
 
 type Step = {
   sequence: string;
@@ -66,7 +67,7 @@ export default async function SequencesPage({
       </div>
 
       <details className="mt-4 rounded-xl border border-slate-200 bg-white px-5 py-4">
-        <summary className="cursor-pointer text-sm font-medium text-slate-700">More options</summary>
+        <summary className={`${buttonQuiet} w-fit cursor-pointer list-none`}>More options</summary>
         <p className="mt-2 text-xs text-slate-500">
           Slack call reminders post during these hours. The callback itself is still placed in the morning, lunch, or afternoon window.
         </p>

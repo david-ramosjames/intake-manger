@@ -92,7 +92,8 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
       .eq("phone_e164", parsed.phoneE164)
       .order("created_at", { ascending: false })
       .limit(5);
-    const open = (openLeads ?? []).find((lead) => !leadIsClosed(lead));
+    const matches = openLeads ?? [];
+    const open = matches.find((lead) => !leadIsClosed(lead)) ?? matches[0];
     if (open) {
       const patch: Record<string, unknown> = {};
       if (!open.lead_name && parsed.name) patch.lead_name = parsed.name;

@@ -16,6 +16,7 @@ import { leadCycle, leadNeed, leadStatusLabel, outreachSequence, PRIORITY_PLACE_
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { requireStaff } from "@/lib/session";
 import { docketBaseUrl } from "@/lib/supabase/config";
+import { buttonDanger, buttonPrimary, buttonSecondary } from "@/lib/ui";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -145,7 +146,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         </div>
         <div className="flex flex-wrap gap-3 text-sm">
           {lead.quo_link ? (
-            <a href={lead.quo_link} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
+            <a href={lead.quo_link} className={buttonSecondary} target="_blank" rel="noreferrer">
               Open in Quo
             </a>
           ) : null}
@@ -187,7 +188,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <input type="hidden" name="lead_id" value={lead.id} />
           <p className="font-medium text-violet-950">The contract looks complete.</p>
           <p className="mt-1 text-violet-900">Signed stays open until someone confirms every required signature is done.</p>
-          <button className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Confirm signed</button>
+          <button className={`${buttonPrimary} mt-3`}>Confirm signed</button>
         </form>
       ) : null}
 
@@ -195,7 +196,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <p className="mt-4 text-sm text-slate-600">Not a lead. Calls and texts are off.</p>
       ) : (
         <form action={markNotALead.bind(null, lead.id)} className="mt-4">
-          <button type="submit" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800">
+          <button type="submit" className={buttonDanger}>
             Not a lead
           </button>
           <p className="mt-1 text-sm text-slate-500">
@@ -215,8 +216,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <form action={savePriority.bind(null, lead.id)} className="mt-4 grid gap-3">
           <label className="flex items-center gap-2 text-sm">
             <input type="hidden" name="priority" value="no" />
-            <input type="checkbox" name="priority" value="yes" defaultChecked={lead.priority} />
-            Flag as priority
+            <input type="checkbox" name="priority" value="yes" defaultChecked={lead.priority} className="accent-accent" />
+            <span className="text-slate-600">Flag as priority</span>
           </label>
           <label className="block text-sm">
             <span className="font-medium text-slate-700">Why it is flagged</span>
@@ -247,7 +248,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
             />
           </label>
-          <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
+          <button type="submit" className={`${buttonPrimary} w-fit`}>
             Save priority
           </button>
         </form>
@@ -355,8 +356,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </select>
             </label>
           </div>
-          <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
-            Schedule Slack post
+          <button type="submit" className={`${buttonSecondary} w-fit`}>
+            Schedule
           </button>
         </form>
         <ul className="mt-4 space-y-2 text-sm">

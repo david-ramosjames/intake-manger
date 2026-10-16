@@ -56,7 +56,13 @@ function combineByPhone<T extends { lead: ListLead; cycle: string; age: number |
   return order.map((key) => {
     const group = groups.get(key) ?? [];
     const sorted = [...group].sort((a, b) => {
-      const rank = (item: T) => (item.lead.signed_case || item.lead.case_id || item.cycle === "signed" ? 0 : item.cycle === "closed" ? 2 : 1);
+      const rank = (item: T) => {
+        if (item.lead.signed_case || item.lead.case_id || item.cycle === "signed") return 0;
+        if (item.cycle === "closed") return 4;
+        if (item.lead.caller_class === "non_pi" || item.lead.close_suggestion) return 3;
+        if (item.lead.consultation_date || item.lead.agreement_sent_at || item.lead.desired_case) return 1;
+        return 2;
+      };
       const byRank = rank(a) - rank(b);
       if (byRank) return byRank;
       const aStamp = a.lead.lead_date ?? a.lead.created_at ?? "";

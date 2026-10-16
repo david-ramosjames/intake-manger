@@ -529,14 +529,14 @@ function PanelSection({ title, children }: { title: string; children: ReactNode 
   return (
     <section>
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
-      <div className="mt-2 space-y-2">{children}</div>
+      <div className="mt-2 grid grid-cols-2 gap-3">{children}</div>
     </section>
   );
 }
 
-function FieldLabel({ label, children }: { label: string; children: ReactNode }) {
+function FieldLabel({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+    <label className={`block text-xs font-medium uppercase tracking-wide text-slate-500 ${className}`}>
       {label}
       {children}
     </label>
@@ -545,55 +545,58 @@ function FieldLabel({ label, children }: { label: string; children: ReactNode })
 
 function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   async function onSubmit(formData: FormData) {
+    setPending(true);
     setError(null);
     try {
       await saveLeadDetails(formData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setPending(false);
     }
   }
   const caseOptions = new Set<string>(PI_CASE_TYPES);
   if (row.caseType) caseOptions.add(row.caseType);
   const formId = `lead-details-${row.id}`;
   return (
-    <div className="space-y-5">
-      <form id={formId} action={onSubmit} className="space-y-5">
-        <input type="hidden" name="lead_id" value={row.id} />
-        <PanelSection title="Contact">
-          <FieldLabel label="Name">
-            <input name="lead_name" defaultValue={row.leadName} className={fieldClass()} />
-          </FieldLabel>
-          <FieldLabel label="Phone">
-            <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
-          </FieldLabel>
-          <FieldLabel label="Email">
-            <input name="email" defaultValue={row.email ?? ""} className={fieldClass()} />
-          </FieldLabel>
-        </PanelSection>
-        <PanelSection title="Marketing">
-          <FieldLabel label="Lead source">
-            <input name="lead_source" list="lead-source-examples" defaultValue={row.leadSource} placeholder="Google, Friend, Attorney" className={fieldClass()} />
-          </FieldLabel>
-          <datalist id="lead-source-examples">
-            {LEAD_SOURCES.map((item) => (
-              <option key={item.source} value={item.source} />
-            ))}
-          </datalist>
-          <FieldLabel label="Source type">
-            <select name="source_type" defaultValue={isSourceType(row.sourceType) ? row.sourceType : ""} className={fieldClass()}>
-              <option value="">Not set</option>
-              {SOURCE_TYPES.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </FieldLabel>
-        </PanelSection>
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Case details</h3>
-          <div className="mt-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        <form id={formId} action={onSubmit} className="space-y-4">
+          <input type="hidden" name="lead_id" value={row.id} />
+          <PanelSection title="Contact">
+            <FieldLabel label="Name" className="col-span-2">
+              <input name="lead_name" defaultValue={row.leadName} className={fieldClass()} />
+            </FieldLabel>
+            <FieldLabel label="Phone">
+              <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
+            </FieldLabel>
+            <FieldLabel label="Email">
+              <input name="email" defaultValue={row.email ?? ""} className={fieldClass()} />
+            </FieldLabel>
+          </PanelSection>
+          <PanelSection title="Marketing">
+            <FieldLabel label="Lead source">
+              <input name="lead_source" list="lead-source-examples" defaultValue={row.leadSource} placeholder="Google, Friend, Attorney" className={fieldClass()} />
+              <datalist id="lead-source-examples">
+                {LEAD_SOURCES.map((item) => (
+                  <option key={item.source} value={item.source} />
+                ))}
+              </datalist>
+            </FieldLabel>
+            <FieldLabel label="Source type">
+              <select name="source_type" defaultValue={isSourceType(row.sourceType) ? row.sourceType : ""} className={fieldClass()}>
+                <option value="">Not set</option>
+                {SOURCE_TYPES.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </FieldLabel>
+          </PanelSection>
+          <PanelSection title="Case details">
             <FieldLabel label="Type">
               <select name="case_type" defaultValue={row.caseType} className={fieldClass()}>
                 <option value="">Not set</option>
@@ -604,38 +607,50 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
                 ))}
               </select>
             </FieldLabel>
+            <div />
+          </PanelSection>
+        </form>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</p>
+            <div className="mt-1">
+              <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} align="start" />
+            </div>
           </div>
-        </section>
-      </form>
-      <div className="-mt-3 space-y-2">
-        <div className="rounded-md bg-slate-50 px-3 py-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</p>
-          <div className="mt-1">
-            <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} align="start" />
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</p>
+            <div className="mt-1">
+              {row.desiredLocked ? (
+                <span className="text-sm text-slate-900">{row.desired}</span>
+              ) : (
+                <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} align="start" />
+              )}
+            </div>
           </div>
+          <ConsultDate row={row} />
+          <TalkedWith row={row} staff={staff} />
         </div>
-        <ConsultDate row={row} />
-        <TalkedWith row={row} staff={staff} />
-        <div className="rounded-md bg-slate-50 px-3 py-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</p>
-          <div className="mt-1">
-            {row.desiredLocked ? (
-              <span className="text-sm text-slate-900">{row.desired}</span>
-            ) : (
-              <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} align="start" />
-            )}
-          </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
+          {row.confirmSigned ? (
+            <form action={confirmSigned}>
+              <input type="hidden" name="lead_id" value={row.id} />
+              <button className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
+                Confirm signed
+              </button>
+            </form>
+          ) : null}
         </div>
-        <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
-        {row.confirmSigned ? (
-          <form action={confirmSigned}>
-            <input type="hidden" name="lead_id" value={row.id} />
-            <button className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Confirm signed</button>
-          </form>
-        ) : null}
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <button form={formId} className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
-          Save details
+        <TagEditor row={row} />
+      </div>
+      <div className="border-t border-slate-200 bg-white px-4 py-3">
+        {error ? <p className="mb-2 text-sm text-red-700">{error}</p> : null}
+        <button
+          form={formId}
+          disabled={pending}
+          className="w-full cursor-pointer rounded-md bg-navy px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
+        >
+          {pending ? "Saving…" : "Save"}
         </button>
       </div>
     </div>
@@ -765,6 +780,7 @@ function LeadDrawer({
   staff: string[];
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<"overview" | "details" | "activity">("overview");
   const [touches, setTouches] = useState<Touch[] | null>(null);
   useEffect(() => {
     let cancel = false;
@@ -801,14 +817,59 @@ function LeadDrawer({
           Close
         </button>
       </div>
-      <div className="space-y-5 overflow-y-auto px-4 py-4">
+      <div className="flex gap-1 border-b border-slate-200 px-3">
+        {(
+          [
+            ["overview", "Overview"],
+            ["details", "Details"],
+            ["activity", "Activity"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={`cursor-pointer border-b-2 px-3 py-2 text-sm font-medium ${
+              tab === id ? "border-navy text-navy" : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "details" ? (
+        <LeadFacts row={row} staff={staff} />
+      ) : (
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+        {tab === "activity" ? (
+          <section>
+            {touches === null ? (
+              <p className="text-sm text-slate-500">Loading activity…</p>
+            ) : touches.length === 0 ? (
+              <p className="text-sm text-slate-500">No calls or texts recorded yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {touches.map((touch) => (
+                  <li key={touch.id} className="text-sm">
+                    <p className="font-medium text-slate-800">
+                      {touchLabel(touch)}
+                      <span className="ml-2 font-normal text-slate-400">
+                        {touch.occurred_at ? formatChicago(touch.occurred_at) : ""}
+                      </span>
+                    </p>
+                    {touch.content ? <p className="mt-0.5 text-slate-600">{touch.content}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : (
+          <>
         {row.nonPi ? <QueueReferral row={row} destinations={destinations} templates={templates} /> : null}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
-        <LeadFacts row={row} staff={staff} />
-        <TagEditor row={row} />
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
             <a href={row.quoUrl} className="rounded-md bg-brand px-3 py-1.5 font-medium text-navy" target="_blank" rel="noreferrer">
@@ -904,28 +965,6 @@ function LeadDrawer({
             </a>
           ) : null}
         </section>
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Activity</h3>
-          {touches === null ? (
-            <p className="mt-2 text-sm text-slate-500">Loading activity…</p>
-          ) : touches.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">No calls or texts recorded yet.</p>
-          ) : (
-            <ul className="mt-2 space-y-3">
-              {touches.map((touch) => (
-                <li key={touch.id} className="text-sm">
-                  <p className="font-medium text-slate-800">
-                    {touchLabel(touch)}
-                    <span className="ml-2 font-normal text-slate-400">
-                      {touch.occurred_at ? formatChicago(touch.occurred_at) : ""}
-                    </span>
-                  </p>
-                  {touch.content ? <p className="mt-0.5 line-clamp-2 text-slate-600">{touch.content}</p> : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
         <div className="flex flex-wrap gap-3 text-sm">
           <Link href={`/leads/${row.id}`} className="font-medium text-slate-900 underline">
             Open lead
@@ -941,7 +980,10 @@ function LeadDrawer({
             </a>
           ) : null}
         </div>
+          </>
+        )}
       </div>
+      )}
     </aside>
   );
 }
@@ -963,6 +1005,7 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
       {row.callJobId && call?.at ? (
         <>
           <input type="hidden" name="call_job_id" value={row.callJobId} />
+          <div className="grid grid-cols-2 gap-2">
           <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
             Call time
             <input
@@ -987,6 +1030,7 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
               ))}
             </select>
           </label>
+          </div>
         </>
       ) : null}
       {text?.at ? (
@@ -1024,7 +1068,7 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
 function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
   const names = row.owner && !staff.includes(row.owner) ? [row.owner, ...staff] : staff;
   return (
-    <form action={setTalkedWith} className="rounded-md bg-slate-50 px-3 py-2">
+    <form action={setTalkedWith}>
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
         Talked with
@@ -1033,7 +1077,7 @@ function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
           name="owner_name"
           defaultValue={row.owner ?? ""}
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+          className={fieldClass()}
         >
           <option value="">Not set</option>
           {names.map((name) => (
@@ -1043,16 +1087,13 @@ function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
           ))}
         </select>
       </label>
-      <p className="mt-1 text-xs font-normal normal-case tracking-normal text-slate-500">
-        After a consultation, Slack follow-up tags this person.
-      </p>
     </form>
   );
 }
 
 function ConsultDate({ row }: { row: QueueRow }) {
   return (
-    <form action={setConsultation} className="rounded-md bg-slate-50 px-3 py-2">
+    <form action={setConsultation}>
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
         Consultation date
@@ -1062,7 +1103,7 @@ function ConsultDate({ row }: { row: QueueRow }) {
           name="consultation_date"
           defaultValue={row.consultKey.slice(0, 10)}
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+          className={fieldClass()}
         />
       </label>
     </form>
@@ -1071,9 +1112,9 @@ function ConsultDate({ row }: { row: QueueRow }) {
 
 function FunnelMark({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-slate-50 px-3 py-2">
+    <div>
       <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="mt-0.5 text-slate-900">{value}</dd>
+      <dd className="mt-1 text-sm text-slate-900">{value}</dd>
     </div>
   );
 }

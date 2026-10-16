@@ -1,5 +1,5 @@
 import { scheduleCallback } from "@/lib/callbacks";
-import { formatCallWhen, formatCallWindow } from "@/lib/time";
+import { formatCallWhen } from "@/lib/time";
 
 export type CallStep = { position: number; delay_minutes: number; callback_window?: string | null };
 
@@ -32,7 +32,7 @@ export function nextActionLines(input: {
   }
   if (!lines.length) lines.push({ label: "Text", when: "None", at: null });
   const callAt = nextCallAt(input);
-  lines.push({ label: "Call", when: callAt ? formatCallWindow(callAt) : "None", at: callAt });
+  lines.push({ label: "Call", when: callAt ? formatCallWhen(callAt) : "None", at: callAt });
   return lines;
 }
 
@@ -56,7 +56,7 @@ function nextCallAt(input: {
 }): string | null {
   if (input.closed || input.sequence === "stop") return null;
   const now = Date.now();
-  if (input.pendingCallAt && new Date(input.pendingCallAt).getTime() > now) return input.pendingCallAt;
+  if (input.pendingCallAt) return input.pendingCallAt;
   const steps = [...input.callSteps].sort((a, b) => a.position - b.position);
   if (!steps.length || !input.callStart) return null;
   const start = new Date(input.callStart).getTime();

@@ -4,7 +4,7 @@ import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { loadStaff } from "@/lib/identity";
-import { fillTalkedWith } from "@/lib/talked-with";
+import { fillTalkedWith, isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
 import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
@@ -374,7 +374,8 @@ export default async function LeadListPage({
 
   const talked = new Set<string>();
   const contact = new Map<string, { calls: number; texts: number }>();
-  const nextCall = new Map<string, string>();
+  const nextCall = new Map<string, { id: string; dueAt: string; tag: string | null }>();
+  const nextText = new Map<string, { id: string; dueAt: string }>();
   const lastOutreach = new Map<string, string>();
   const outsideLinks = new Map<string, { quo: string | null; slack: string | null }>();
   const rememberLinks = (leadId: string, touch: HistoryTouch) => {
@@ -395,7 +396,7 @@ export default async function LeadListPage({
   }
   if (ids.length) {
     const [{ data: calls }, touches] = await Promise.all([
-      supabase.from("lead_jobs").select("lead_id, due_at, status, queue").in("lead_id", ids).eq("queue", "call").eq("status", "pending"),
+      supabase.from("lead_jobs").select("id, lead_id, due_at, queue, assigned_name").in("lead_id", ids).eq("status", "pending"),
       loadTouches(supabase, ids),
     ]);
     for (const touch of touches) {
@@ -431,11 +432,18 @@ export default async function LeadListPage({
         rememberLinks(leadId, touch);
       }
     }
-    const now = Date.now();
     for (const job of calls ?? []) {
-      if (!job.lead_id || !job.due_at || new Date(job.due_at).getTime() <= now) continue;
+      if (!job.lead_id || !job.due_at || !job.id) continue;
+      if (job.queue === "text") {
+        const current = nextText.get(job.lead_id);
+        if (!current || job.due_at < current.dueAt) nextText.set(job.lead_id, { id: job.id, dueAt: job.due_at });
+        continue;
+      }
+      if (job.queue !== "call") continue;
       const current = nextCall.get(job.lead_id);
-      if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
+      if (!current || job.due_at < current.dueAt) {
+        nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name });
+      }
     }
   }
 
@@ -444,9 +452,10 @@ export default async function LeadListPage({
     const age = daysSince(lead.lead_date ?? lead.created_at);
     const outreachAt = lastOutreach.get(lead.id);
     const outreach = daysSince(outreachAt);
-    const nextAt = nextCall.get(lead.id);
+    const pendingCall = nextCall.get(lead.id);
+    const nextAt = pendingCall?.dueAt ?? null;
     const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
-    const waiting = waitingTooLong(cycle, age, outreach, nextAt);
+    const waiting = waitingTooLong(cycle, age, outreach, nextAt ?? undefined);
     const attention = needsAttention({
       cycle,
       waiting,
@@ -618,6 +627,10 @@ export default async function LeadListPage({
       calls: row.tally.calls,
       texts: row.tally.texts,
       nextCallLabel: formatCallWhen(row.nextAt),
+      callJobId: nextCall.get(row.lead.id)?.id ?? null,
+      callTag: slackTag(nextCall.get(row.lead.id)?.tag, row.lead.owner_name, row.lead.consultation_date),
+      textJobId: nextText.get(row.lead.id)?.id ?? null,
+      reminderAt: row.lead.agreement_next_reminder_at,
       nextAction,
       nextActionAt,
       nextDayKey: nextActionAt ? chicagoDay(nextActionAt) : "",
@@ -770,6 +783,12 @@ function stepsForLead(
   const sequence = leadSequenceId(lead);
   if (!sequence) return [];
   return steps.filter((step) => step.sequence === sequence);
+}
+
+function slackTag(assigned: string | null | undefined, owner: string | null | undefined, consultationDate: string | null | undefined): string | null {
+  if (!isPlaceholderOwner(assigned)) return assigned?.trim() || null;
+  if (consultationDate && !isPlaceholderOwner(owner)) return owner?.trim() || null;
+  return null;
 }
 
 function matchesLegacy(view: LeadView, lead: ListLead): boolean {

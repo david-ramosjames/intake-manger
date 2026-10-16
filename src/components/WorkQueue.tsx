@@ -7,10 +7,10 @@ import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
 import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
 import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
-import { formatChicago } from "@/lib/time";
+import { chicagoLocalInput, formatChicago } from "@/lib/time";
 
 export type QueueRow = {
   id: string;
@@ -70,6 +70,10 @@ export type QueueRow = {
   calls: number;
   texts: number;
   nextCallLabel: string;
+  callJobId: string | null;
+  callTag: string | null;
+  textJobId: string | null;
+  reminderAt: string | null;
   nextAction: NextActionLine[];
   nextActionAt: string | null;
   nextDayKey: string;
@@ -864,16 +868,30 @@ function LeadDrawer({
               </dd>
             </div>
           </dl>
+          <NextActionEdit row={row} staff={staff} />
         </section>
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>
           <ul className="mt-2 space-y-2 text-sm">
-            <li className="flex justify-between gap-3">
-              <span className="text-slate-500">Texts</span>
-              <span>
-                {row.textsLive ? row.automationLabel : "Off"}
-                {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
-              </span>
+            <li className="space-y-2">
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Texts</span>
+                <span>
+                  {row.textsLive ? row.automationLabel : "Off"}
+                  {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
+                </span>
+              </div>
+              {row.canStartText ? (
+                <form action={startTextSequence} className="flex flex-wrap gap-2">
+                  <input type="hidden" name="lead_id" value={row.id} />
+                  <button name="sequence" value="new-lead" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+                    New lead
+                  </button>
+                  <button name="sequence" value="more-info" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900">
+                    More info
+                  </button>
+                </form>
+              ) : null}
             </li>
             <li className="flex justify-between gap-3">
               <span className="text-slate-500">Contract</span>
@@ -925,6 +943,81 @@ function LeadDrawer({
         </div>
       </div>
     </aside>
+  );
+}
+
+function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
+  const call = row.nextAction.find((line) => line.label === "Call" && line.at);
+  const text = row.nextAction.find((line) => line.label === "Text" && line.at);
+  const reminder = row.nextAction.find((line) => line.label === "Reminder" && line.at);
+  const canEdit = Boolean(row.callJobId || text || reminder);
+  if (!canEdit) return null;
+  const names = row.callTag && !staff.includes(row.callTag) ? [row.callTag, ...staff] : staff;
+  return (
+    <form
+      action={setNextAction}
+      key={`${row.id}:${row.callJobId ?? ""}:${call?.at ?? ""}:${row.callTag ?? ""}:${text?.at ?? ""}:${reminder?.at ?? ""}`}
+      className="mt-3 space-y-2 rounded-md bg-slate-50 px-3 py-2"
+    >
+      <input type="hidden" name="lead_id" value={row.id} />
+      {row.callJobId && call?.at ? (
+        <>
+          <input type="hidden" name="call_job_id" value={row.callJobId} />
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Call time
+            <input
+              type="datetime-local"
+              name="call_at"
+              defaultValue={chicagoLocalInput(call.at)}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+            />
+          </label>
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Slack tag
+            <select
+              name="tag"
+              defaultValue={row.callTag ?? ""}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+            >
+              <option value="">Whoever is available</option>
+              {names.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      ) : null}
+      {text?.at ? (
+        <>
+          {row.textJobId ? <input type="hidden" name="text_job_id" value={row.textJobId} /> : null}
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Text time
+            <input
+              type="datetime-local"
+              name="text_at"
+              defaultValue={chicagoLocalInput(text.at)}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+            />
+          </label>
+        </>
+      ) : null}
+      {reminder?.at ? (
+        <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+          Reminder time
+          <input
+            type="datetime-local"
+            name="reminder_at"
+            defaultValue={chicagoLocalInput(reminder.at)}
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+          />
+        </label>
+      ) : null}
+      <button type="submit" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+        Save next action
+      </button>
+    </form>
   );
 }
 

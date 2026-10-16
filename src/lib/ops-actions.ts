@@ -211,6 +211,85 @@ export async function setConsultation(formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
 }
 
+export async function setNextAction(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const callJobId = text(formData, "call_job_id");
+  const callAt = text(formData, "call_at");
+  const textAt = text(formData, "text_at");
+  const textJobId = text(formData, "text_job_id");
+  const reminderAt = text(formData, "reminder_at");
+  const tag = text(formData, "tag");
+
+  if (callJobId) {
+    if (!callAt) throw new Error("Choose a call time.");
+    const due = chicagoLocalToIso(callAt);
+    const { data: job, error } = await supabase
+      .from("lead_jobs")
+      .select("id, lead_id, queue, status")
+      .eq("id", callJobId)
+      .maybeSingle();
+    if (error || !job || job.lead_id !== leadId || job.queue !== "call" || job.status !== "pending") {
+      throw new Error(error?.message ?? "That call is no longer on the schedule.");
+    }
+    const { error: updateError } = await supabase
+      .from("lead_jobs")
+      .update({
+        due_at: due,
+        assigned_name: tag,
+        mention: null,
+        detail: tag ? `Tag ${tag}.` : "Any available intake person.",
+      })
+      .eq("id", callJobId);
+    if (updateError) throw new Error(updateError.message);
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "next_action",
+      actor: email,
+      payload: { queue: "call", due_at: due, assigned_name: tag },
+    });
+  }
+
+  if (textAt) {
+    const due = chicagoLocalToIso(textAt);
+    const { error } = await supabase.from("leads").update({ text_next_at: due }).eq("id", leadId);
+    if (error) throw new Error(error.message);
+    if (textJobId) {
+      const { error: jobError } = await supabase
+        .from("lead_jobs")
+        .update({ due_at: due })
+        .eq("id", textJobId)
+        .eq("lead_id", leadId)
+        .eq("queue", "text")
+        .eq("status", "pending");
+      if (jobError) throw new Error(jobError.message);
+    }
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "next_action",
+      actor: email,
+      payload: { queue: "text", due_at: due },
+    });
+  }
+
+  if (reminderAt) {
+    const due = chicagoLocalToIso(reminderAt);
+    const { error } = await supabase.from("leads").update({ agreement_next_reminder_at: due }).eq("id", leadId);
+    if (error) throw new Error(error.message);
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "next_action",
+      actor: email,
+      payload: { queue: "reminder", due_at: due },
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function setTalkedWith(formData: FormData) {
   const { supabase, email } = await requireStaff();
   const leadId = text(formData, "lead_id");

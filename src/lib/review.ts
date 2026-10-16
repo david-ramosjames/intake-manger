@@ -66,6 +66,7 @@ export type ReviewLead = {
   status: string;
   closed: boolean;
   leadDate: string;
+  updatedBy: string;
 };
 
 export type ReviewSource = {
@@ -168,7 +169,15 @@ export function toReviewLead(lead: ReviewSource): ReviewLead {
     status: excluded ? callerClassLabel(lead.caller_class) || status : status,
     closed: excluded || CLOSED_STATUSES.has(status),
     leadDate: clean(lead.lead_date || lead.created_at).slice(0, 10),
+    updatedBy: "",
   };
+}
+
+export function reviewEditorName(actor: string | null | undefined): string {
+  const value = (actor ?? "").trim();
+  const at = value.indexOf("@");
+  if (at <= 0) return "";
+  return value.slice(0, at);
 }
 
 function csvCell(value: string): string {
@@ -197,6 +206,7 @@ export function reviewCsv(rows: ReviewLead[]): string {
     "Open or closed",
     "Missing",
     "Lead date",
+    "Updated by",
     "Id",
   ];
   const lines = [headers.join(",")];
@@ -224,6 +234,7 @@ export function reviewCsv(rows: ReviewLead[]): string {
         row.closed ? "Closed" : "Open",
         reviewGaps(row).map((gap) => REVIEW_GAP_LABEL[gap]).join("; "),
         row.leadDate,
+        row.updatedBy,
         row.id,
       ]
         .map(csvCell)

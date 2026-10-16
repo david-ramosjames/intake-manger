@@ -196,6 +196,7 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
               <th className="px-2 py-2">Signed</th>
               <th className="px-2 py-2">Declined</th>
               <th className="px-2 py-2">Not qualified</th>
+              <th className="px-2 py-2">Updated by</th>
             </tr>
           </thead>
           <tbody>
@@ -204,7 +205,7 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
             ))}
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={14} className="px-3 py-8 text-sm text-slate-500">
+                <td colSpan={15} className="px-3 py-8 text-sm text-slate-500">
                   No leads match this filter.
                 </td>
               </tr>
@@ -635,10 +636,11 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             ))}
           </select>
         </td>
+        <td className="px-2 py-1.5 text-xs text-slate-600">{row.updatedBy || "—"}</td>
       </tr>
       {error ? (
         <tr>
-          <td colSpan={13} className="px-2 pb-2 text-xs text-red-700">
+          <td colSpan={15} className="px-2 pb-2 text-xs text-red-700">
             {error}
           </td>
         </tr>

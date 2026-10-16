@@ -1,6 +1,6 @@
 import { DataReview } from "@/components/DataReview";
 import { fillLeadSources } from "@/lib/lead-source-fill";
-import { toReviewLead, type ReviewSource } from "@/lib/review";
+import { reviewEditorName, toReviewLead, type ReviewSource } from "@/lib/review";
 import { requireStaff } from "@/lib/session";
 
 const COLUMNS =
@@ -24,6 +24,28 @@ async function loadReviewLeads(supabase: Awaited<ReturnType<typeof requireStaff>
   return rows;
 }
 
+async function loadEditors(supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"]): Promise<Map<string, string>> {
+  const editors = new Map<string, string>();
+  const size = 1000;
+  for (let from = 0; from < 20000; from += size) {
+    const { data, error } = await supabase
+      .from("lead_events")
+      .select("lead_id, actor, created_at")
+      .ilike("actor", "%@%")
+      .order("created_at", { ascending: false })
+      .range(from, from + size - 1);
+    if (error) throw new Error(error.message);
+    const batch = data ?? [];
+    for (const event of batch) {
+      if (!event.lead_id || editors.has(event.lead_id)) continue;
+      const name = reviewEditorName(event.actor);
+      if (name) editors.set(event.lead_id, name);
+    }
+    if (batch.length < size) break;
+  }
+  return editors;
+}
+
 export default async function ReviewPage() {
   const { supabase } = await requireStaff();
   let rows: ReturnType<typeof toReviewLead>[] = [];
@@ -31,7 +53,8 @@ export default async function ReviewPage() {
   try {
     const loaded = await loadReviewLeads(supabase);
     await fillLeadSources(supabase, loaded);
-    rows = loaded.map(toReviewLead);
+    const editors = await loadEditors(supabase);
+    rows = loaded.map((lead) => ({ ...toReviewLead(lead), updatedBy: editors.get(lead.id) ?? "" }));
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Could not load leads.";
   }
@@ -40,7 +63,7 @@ export default async function ReviewPage() {
     <main className="w-full px-4 py-4 xl:px-6">
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Data review</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Every lead, open and closed. Amber marks a blank contact, marketing, or case field. A consultation with a date is yes. Choose no when there was no consultation. Email can be saved as Not Available.
+        Every lead, open and closed. Amber marks a blank contact, marketing, or case field. Name, phone, email, source, and first contact save when you leave the field. The other choices save as soon as you change them. A consultation with a date is yes. Choose no when there was no consultation. Email can be saved as Not Available.
       </p>
       {loadError ? <p className="mt-4 text-sm text-red-700">{loadError}</p> : <DataReview rows={rows} />}
     </main>

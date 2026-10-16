@@ -992,11 +992,16 @@ export async function saveSlackSettings(formData: FormData) {
     .eq("id", "default")
     .maybeSingle();
   const token = pasted || (typeof current?.slack_bot_token === "string" ? current.slack_bot_token : null);
+  const limitToTest = formData.getAll("slack_test_only").includes("yes");
+  const testRaw = String(formData.get("slack_test_phone") ?? "").trim();
+  const testPhone = limitToTest ? toE164(testRaw) : null;
+  if (limitToTest && !testPhone) throw new Error("Enter a 10-digit test number.");
   const { error } = await supabase.from("intake_settings").upsert({
     id: "default",
     slack_posting: posting,
     slack_bot_token: token,
     slack_channel_id: channel || "C026G89PPSS",
+    slack_test_phone: testPhone,
     updated_at: new Date().toISOString(),
     updated_by: email,
   });
@@ -1482,11 +1487,11 @@ export async function recordCallOutcome(formData: FormData) {
   revalidatePath("/priority");
 }
 
-function slackUserId(value: string | null): string | null {
-  if (!value) return null;
-  const id = value.replace(/^<@|>$/g, "").trim();
-  if (!/^U[A-Z0-9]+$/.test(id)) throw new Error("A Slack ID looks like U05JBLVM3TM.");
-  return id;
+function slackUserId(value: string | null): { id: string | null; error?: string } {
+  if (!value) return { id: null };
+  const id = value.toUpperCase().match(/[UW][A-Z0-9]{8,}/)?.[0] ?? "";
+  if (!id) return { id: null, error: "A Slack ID looks like U05JBLVM3TM. Paste the member ID from their Slack profile." };
+  return { id };
 }
 
 function staffSaveError(message: string): string {
@@ -1494,69 +1499,87 @@ function staffSaveError(message: string): string {
   return message;
 }
 
-export async function saveStaffContact(formData: FormData) {
-  const { supabase } = await requireStaff();
-  const id = text(formData, "id");
-  const name = text(formData, "name");
-  if (!id || !name) throw new Error("Enter the person's name.");
-  const slack = slackUserId(text(formData, "slack_user_id"));
-  const listed = formData.get("listed") === "yes";
-  const { data: before, error } = await supabase.from("contacts").select("id, name").eq("id", id).maybeSingle();
-  if (error || !before) throw new Error(error?.message ?? "That person was not found.");
-  const { error: updateError } = await supabase
-    .from("contacts")
-    .update({
-      name,
-      slack_user_id: slack,
-      slack_display_name: slack ? name.split(/\s+/)[0] : null,
-      listed,
-      updated_at: Date.now(),
-    })
-    .eq("id", id);
-  if (updateError) throw new Error(staffSaveError(updateError.message));
-  if (before.name !== name) {
-    const { error: leadError } = await supabase.from("leads").update({ owner_name: name }).eq("owner_name", before.name);
-    if (leadError) throw new Error(leadError.message);
-    const { error: jobError } = await supabase.from("lead_jobs").update({ assigned_name: name }).eq("assigned_name", before.name);
-    if (jobError) throw new Error(jobError.message);
+export async function saveStaffContact(
+  _prev: { error: string } | null,
+  formData: FormData,
+): Promise<{ error: string } | null> {
+  try {
+    const { supabase } = await requireStaff();
+    const id = text(formData, "id");
+    const name = text(formData, "name");
+    if (!id || !name) return { error: "Enter the person's name." };
+    const slack = slackUserId(text(formData, "slack_user_id"));
+    if (slack.error) return { error: slack.error };
+    const listed = formData.get("listed") === "yes";
+    const { data: before, error } = await supabase.from("contacts").select("id, name").eq("id", id).maybeSingle();
+    if (error || !before) return { error: error?.message ?? "That person was not found." };
+    const { error: updateError } = await supabase
+      .from("contacts")
+      .update({
+        name,
+        slack_user_id: slack.id,
+        slack_display_name: slack.id ? name.split(/\s+/)[0] : null,
+        listed,
+        updated_at: Date.now(),
+      })
+      .eq("id", id);
+    if (updateError) return { error: staffSaveError(updateError.message) };
+    if (before.name !== name) {
+      const { error: leadError } = await supabase.from("leads").update({ owner_name: name }).eq("owner_name", before.name);
+      if (leadError) return { error: leadError.message };
+      const { error: jobError } = await supabase.from("lead_jobs").update({ assigned_name: name }).eq("assigned_name", before.name);
+      if (jobError) return { error: jobError.message };
+    }
+    revalidatePath("/staff");
+    revalidatePath("/");
+    revalidatePath("/priority");
+    revalidatePath("/review");
+    return null;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not save." };
   }
-  revalidatePath("/staff");
-  revalidatePath("/");
-  revalidatePath("/priority");
-  revalidatePath("/review");
 }
 
-export async function addStaffContact(formData: FormData) {
-  const { supabase } = await requireStaff();
-  const email = text(formData, "email")?.toLowerCase() ?? "";
-  const name = text(formData, "name");
-  if (!/^[a-z0-9._+-]+@ramosjames\.com$/.test(email)) throw new Error("Use their Ramos James email.");
-  if (!name) throw new Error("Enter the person's name.");
-  const slack = slackUserId(text(formData, "slack_user_id"));
-  const userId = await firmUserId(email);
-  if (!userId) throw new Error("That email does not have a firm login yet.");
-  const { data: existing, error: existingError } = await supabase
-    .from("contacts")
-    .select("id")
-    .or(`user_id.eq.${userId},email.ilike.${email}`)
-    .limit(1);
-  if (existingError) throw new Error(existingError.message);
-  if (existing?.length) throw new Error("That person is already on the list.");
-  const now = Date.now();
-  const { error } = await supabase.from("contacts").insert({
-    user_id: userId,
-    name,
-    email,
-    role: "other",
-    created_at: now,
-    updated_at: now,
-    slack_user_id: slack,
-    slack_display_name: slack ? name.split(/\s+/)[0] : null,
-    listed: true,
-  });
-  if (error) throw new Error(staffSaveError(error.message));
-  revalidatePath("/staff");
-  revalidatePath("/");
+export async function addStaffContact(
+  _prev: { error: string } | null,
+  formData: FormData,
+): Promise<{ error: string } | null> {
+  try {
+    const { supabase } = await requireStaff();
+    const email = text(formData, "email")?.toLowerCase() ?? "";
+    const name = text(formData, "name");
+    if (!/^[a-z0-9._+-]+@ramosjames\.com$/.test(email)) return { error: "Use their Ramos James email." };
+    if (!name) return { error: "Enter the person's name." };
+    const slack = slackUserId(text(formData, "slack_user_id"));
+    if (slack.error) return { error: slack.error };
+    const userId = await firmUserId(email);
+    if (!userId) return { error: "That email does not have a firm login yet." };
+    const { data: existing, error: existingError } = await supabase
+      .from("contacts")
+      .select("id")
+      .or(`user_id.eq.${userId},email.ilike.${email}`)
+      .limit(1);
+    if (existingError) return { error: existingError.message };
+    if (existing?.length) return { error: "That person is already on the list." };
+    const now = Date.now();
+    const { error } = await supabase.from("contacts").insert({
+      user_id: userId,
+      name,
+      email,
+      role: "other",
+      created_at: now,
+      updated_at: now,
+      slack_user_id: slack.id,
+      slack_display_name: slack.id ? name.split(/\s+/)[0] : null,
+      listed: true,
+    });
+    if (error) return { error: staffSaveError(error.message) };
+    revalidatePath("/staff");
+    revalidatePath("/");
+    return null;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not add that person." };
+  }
 }
 
 export async function runDueWork() {

@@ -546,7 +546,25 @@ export default async function HowItFitsPage() {
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
           />
         </label>
-        <p className="text-sm text-slate-500">{slack.tokenSet ? "A bot token is saved." : "No bot token saved yet."}</p>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="hidden" name="slack_test_only" value="no" />
+          <input type="checkbox" name="slack_test_only" value="yes" defaultChecked={Boolean(slack.testPhone)} />
+          Only post Slack for a test number
+        </label>
+        <label className="block text-sm">
+          <span className="font-medium text-slate-700">Test number</span>
+          <input
+            name="slack_test_phone"
+            defaultValue={slack.testPhone ?? "7654183805"}
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+          />
+        </label>
+        <p className="text-sm text-slate-500">
+          {slack.testPhone
+            ? `Slack posts only for ${slack.testPhone}. Other leads stay on the schedule.`
+            : "Off. Slack posts for every due lead. Turn this on to try 7654183805 first."}
+          {slack.tokenSet ? " A bot token is saved." : " No bot token saved yet."}
+        </p>
         <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
           Save Slack settings
         </button>

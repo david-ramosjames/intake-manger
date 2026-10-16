@@ -6,6 +6,7 @@ import { loadStaff } from "./identity";
 import { channelOutboundMention, LEAD_CHANNEL_ID, mentionForName, postToSlack } from "./slack";
 import { isPlaceholderOwner, slackMentionFor } from "./talked-with";
 import { sendQuoText } from "./quo";
+import { phoneTail } from "./phone";
 import { withinWorkHours } from "./time";
 import { isPracticeTestPhone } from "./test-phone";
 
@@ -50,6 +51,11 @@ function textSendingLive(): boolean {
   return process.env.TEXT_SENDING === "live" && Boolean(process.env.QUO_API_KEY && process.env.QUO_FROM_NUMBER);
 }
 
+function slackTestMatch(lead: { phone?: string | null; phone_e164?: string | null }, testPhone: string | null): boolean {
+  if (!testPhone) return true;
+  return phoneTail(lead.phone_e164 || lead.phone) === phoneTail(testPhone);
+}
+
 function closed(lead: LeadRow): boolean {
   if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) return false;
   return Boolean(lead.signed_case || lead.case_id) || ["Lost", "Referred", "Promoted"].includes(lead.lead_status);
@@ -87,7 +93,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
     .not("notified_at", "is", null)
     .gte("notified_at", new Date(Date.now() - 15 * 60_000).toISOString())
     .limit(1);
-  let holdSlack = (recentReminder.data ?? []).length > 0;
+  let holdSlack = !slack.testPhone && (recentReminder.data ?? []).length > 0;
 
   for (const job of (jobs ?? []) as Job[]) {
     const lead = byId.get(job.lead_id);
@@ -103,6 +109,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
     if (job.queue === "call") {
       const channel = lead.slack_channel_id || LEAD_CHANNEL_ID;
       const threadTs = lead.slack_thread_ts || lead.slack_message_ts;
+      const postThisLead = slackTestMatch(lead, slack.testPhone);
       if (job.notified_at) {
         const loggedAt = await callLoggedAfter(supabase, lead, job.notified_at);
         if (!loggedAt) continue;
@@ -116,7 +123,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
             detail: "Call log shows a call after the Slack reminder.",
           })
           .eq("id", job.id);
-        if (slack.posting) {
+        if (slack.posting && postThisLead) {
           await postToSlack({
             token: slack.token,
             channel,
@@ -126,7 +133,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
         }
         continue;
       }
-      if (!slack.posting) continue;
+      if (!slack.posting || !postThisLead) continue;
       if (holdSlack) continue;
       const sequence =
         leadSequenceId({
@@ -173,7 +180,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
     }
 
     if (!textSendingLive()) {
-      if (!job.notified_at && slack.posting) {
+      if (!job.notified_at && slack.posting && slackTestMatch(lead, slack.testPhone)) {
         const channel = lead.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID;
         await postToSlack({
           token: slack.token,
@@ -218,16 +225,16 @@ export async function dispatchDue(supabase: SupabaseClient) {
 
   const postLeadIds = [...new Set((posts ?? []).map((post) => post.lead_id as string))];
   const { data: postLeads } = postLeadIds.length
-    ? await supabase.from("leads").select("id, slack_channel_id, slack_thread_ts").in("id", postLeadIds)
+    ? await supabase.from("leads").select("id, phone, phone_e164, slack_channel_id, slack_thread_ts").in("id", postLeadIds)
     : { data: [] };
   const postById = new Map((postLeads ?? []).map((lead) => [lead.id as string, lead]));
 
   for (const post of (posts ?? []) as SlackPost[]) {
     const lead = postById.get(post.lead_id) as
-      | { slack_channel_id: string | null; slack_thread_ts: string | null }
+      | { phone: string | null; phone_e164: string | null; slack_channel_id: string | null; slack_thread_ts: string | null }
       | undefined;
     const mention = post.mention ? `<@${post.mention.replace(/[<@>]/g, "")}> ` : "";
-    if (!slack.posting) continue;
+    if (!slack.posting || !slackTestMatch(lead ?? {}, slack.testPhone)) continue;
     const posted = await postToSlack({
       token: slack.token,
       channel: lead?.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID,

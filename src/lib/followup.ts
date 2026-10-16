@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { chicagoMinute, scheduleCallback } from "./callbacks";
 import { isPlaceholderOwner } from "./talked-with";
-import { contractSent } from "./desired";
+import { contractOutstanding } from "./desired";
 import type { LeadKind } from "./leads";
 import { type CallSequenceId, type WorkHours } from "./sequences";
 import { chicagoLocalToIso, formatChicago } from "./time";
@@ -20,6 +20,8 @@ type LeadBits = {
   owner_name?: string | null;
   agreement_status?: string | null;
   agreement_sent_at?: string | null;
+  agreement_reminder_count?: number | null;
+  agreement_next_reminder_at?: string | null;
   priority?: boolean | null;
   created_at?: string | null;
   consultation_date?: string | null;
@@ -66,7 +68,7 @@ function closedLead(lead: LeadBits): boolean {
 
 export function sequenceForLead(lead: LeadBits, manual: "post_consult" | "auto"): CallSequenceId | null {
   if (closedLead(lead)) return null;
-  if (contractSent(lead)) return "want_to_sign";
+  if (contractOutstanding(lead)) return "want_to_sign";
   if (
     manual === "post_consult" ||
     lead.consultation_date ||
@@ -159,6 +161,14 @@ export async function enrollFollowUp(
     .eq("status", "pending")
     .neq("sequence", sequence);
   if (!rows.length) return;
+  await supabase
+    .from("lead_jobs")
+    .delete()
+    .eq("lead_id", lead.id)
+    .eq("queue", "call")
+    .eq("sequence", sequence)
+    .eq("status", "skipped")
+    .in("position", rows.map((row) => row.position));
   const { error: insertError } = await supabase.from("lead_jobs").upsert(rows, {
     onConflict: "lead_id,queue,sequence,position",
     ignoreDuplicates: true,
@@ -167,21 +177,39 @@ export async function enrollFollowUp(
   void hoursBySequence;
 }
 
-export async function enrollMissingFollowUps(supabase: SupabaseClient) {
-  const { data, error } = await supabase
-    .from("leads")
-    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date, phone, phone_e164")
-    .eq("follow_up", true)
-    .or("and(signed_case.eq.false,case_id.is.null,lead_status.not.in.(Lost,Referred,Promoted,Signed)),phone_e164.eq.+17654183805")
-    .order("created_at", { ascending: false })
-    .limit(80);
-  if (error) throw new Error(error.message);
+const FOLLOW_UP_COLUMNS =
+  "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, priority, created_at, consultation_date, lead_date, phone, phone_e164";
 
-  const leads = (data ?? []) as LeadBits[];
+export async function enrollMissingFollowUps(supabase: SupabaseClient) {
+  const [{ data, error }, { data: contractLeads, error: contractError }] = await Promise.all([
+    supabase
+      .from("leads")
+      .select(FOLLOW_UP_COLUMNS)
+      .eq("follow_up", true)
+      .or("and(signed_case.eq.false,case_id.is.null,lead_status.not.in.(Lost,Referred,Promoted,Signed)),phone_e164.eq.+17654183805")
+      .order("created_at", { ascending: false })
+      .limit(80),
+    supabase
+      .from("leads")
+      .select(FOLLOW_UP_COLUMNS)
+      .eq("follow_up", true)
+      .eq("signed_case", false)
+      .is("case_id", null)
+      .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
+      .in("agreement_status", ["sent", "viewed"])
+      .order("agreement_sent_at", { ascending: false })
+      .limit(40),
+  ]);
+  if (error) throw new Error(error.message);
+  if (contractError) throw new Error(contractError.message);
+
+  const byId = new Map<string, LeadBits>();
+  for (const lead of [...((contractLeads ?? []) as LeadBits[]), ...((data ?? []) as LeadBits[])]) byId.set(lead.id, lead);
+  const leads = [...byId.values()];
   if (!leads.length) return 0;
   const { data: existing, error: jobsError } = await supabase
     .from("lead_jobs")
-    .select("lead_id, due_at")
+    .select("lead_id, sequence")
     .eq("queue", "call")
     .eq("status", "pending")
     .gt("due_at", new Date().toISOString())
@@ -190,11 +218,18 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
       leads.map((lead) => lead.id),
     );
   if (jobsError) throw new Error(jobsError.message);
-  const started = new Set((existing ?? []).map((job) => String(job.lead_id)));
+  const pendingSequences = new Map<string, Set<string>>();
+  for (const job of existing ?? []) {
+    const sequences = pendingSequences.get(String(job.lead_id)) ?? new Set<string>();
+    if (job.sequence) sequences.add(String(job.sequence));
+    pendingSequences.set(String(job.lead_id), sequences);
+  }
 
   let enrolled = 0;
   for (const lead of leads) {
-    if (started.has(lead.id)) continue;
+    const sequence = sequenceForLead(lead, "auto");
+    const pending = pendingSequences.get(lead.id);
+    if (sequence && pending?.size === 1 && pending.has(sequence)) continue;
     await enrollFollowUp(supabase, lead);
     enrolled += 1;
     if (enrolled >= 40) break;

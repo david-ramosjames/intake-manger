@@ -10,11 +10,12 @@ export type StaffPerson = {
 export async function loadStaff(supabase: SupabaseClient): Promise<StaffPerson[]> {
   const { data, error } = await supabase
     .from("contacts")
-    .select("name, email, slack_user_id")
+    .select("name, email, slack_user_id, listed")
+    .eq("listed", true)
     .order("name");
   if (error) throw new Error(error.message);
-  return ((data ?? []) as { name: string | null; email: string | null; slack_user_id: string | null }[])
-    .filter((person) => person.name && !/^(referred|legal assistant)$/i.test(person.name.trim()))
+  return ((data ?? []) as { name: string | null; email: string | null; slack_user_id: string | null; listed: boolean | null }[])
+    .filter((person) => person.listed !== false && person.name && !/^(referred|legal assistant)$/i.test(person.name.trim()))
     .map((person) => ({
       name: person.name!.trim(),
       email: person.email,

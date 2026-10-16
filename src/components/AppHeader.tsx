@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/sequences", label: "Sequences" },
   { href: "/calls", label: "Lead channel" },
   { href: "/referrals", label: "Referrals" },
+  { href: "/staff", label: "Staff" },
   { href: "/leads/new", label: "Add lead" },
 ];
 

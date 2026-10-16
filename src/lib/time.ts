@@ -17,6 +17,33 @@ export function formatChicago(value: string | null | undefined): string {
   }).format(date);
 }
 
+function callDayLabel(date: Date): string {
+  const day = chicagoDay(date);
+  const today = chicagoDay(new Date());
+  if (day === today) return "Today";
+  if (day === shiftDay(today, 1)) return "Tomorrow";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ZONE,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${pick("weekday")} ${pick("month")} ${pick("day")}`;
+}
+
+/** Morning, Lunch, or Afternoon. A time outside those blocks has no window name. */
+export function callWindowName(value: string | Date): "Morning" | "Lunch" | "Afternoon" | null {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = chicagoParts(date);
+  const minute = parts.hour * 60 + parts.minute;
+  if (minute >= 8 * 60 + 30 && minute < 11 * 60 + 30) return "Morning";
+  if (minute >= 11 * 60 + 30 && minute < 14 * 60 + 30) return "Lunch";
+  if (minute >= 14 * 60 + 30 && minute < 17 * 60 + 30) return "Afternoon";
+  return null;
+}
+
 export function formatCallWhen(value: string | null | undefined): string {
   if (!value) return "No call";
   const date = new Date(value);
@@ -26,18 +53,25 @@ export function formatCallWhen(value: string | null | undefined): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
-  const day = chicagoDay(date);
-  const today = chicagoDay(new Date());
-  if (day === today) return `Today ${time}`;
-  if (day === shiftDay(today, 1)) return `Tomorrow ${time}`;
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: ZONE,
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).formatToParts(date);
-  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${pick("weekday")} ${pick("month")} ${pick("day")} ${time}`;
+  return `${callDayLabel(date)} ${time}`;
+}
+
+/** The day and the call window. The minute inside the window stays off the label. */
+export function formatCallWindow(value: string | null | undefined): string {
+  if (!value) return "No call";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No call";
+  const window = callWindowName(date);
+  const day = callDayLabel(date);
+  return window ? `${day} ${window}` : formatCallWhen(value);
+}
+
+/** Calendar day for the next-action filter. Today and Tomorrow stay words. */
+export function formatCallDay(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return callDayLabel(date);
 }
 
 function shiftDay(day: string, days: number): string {

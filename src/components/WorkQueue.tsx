@@ -71,6 +71,9 @@ export type QueueRow = {
   texts: number;
   nextCallLabel: string;
   nextAction: NextActionLine[];
+  nextActionAt: string | null;
+  nextDayKey: string;
+  nextDayLabel: string;
 };
 
 type LeadIdentity = "ok" | "needs_review" | "confirmed";
@@ -131,12 +134,19 @@ export function WorkQueue({
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
+  const [nextDay, setNextDay] = useState("");
   const [sort, setSort] = useState<{ column: Column; dir: "asc" | "desc" } | null>(null);
   const selected = rows.find((row) => row.id === selectedId) ?? null;
   const shown = rows
+    .filter((row) => !nextDay || row.nextDayKey === nextDay)
     .filter((row) => COLUMNS.every((column) => !filters[column.id] || columnValue(row, column.id) === filters[column.id]))
     .sort((a, b) => {
-      if (!sort) return 0;
+      if (!sort) {
+        if (a.nextActionAt && b.nextActionAt && a.nextActionAt !== b.nextActionAt) return a.nextActionAt < b.nextActionAt ? -1 : 1;
+        if (a.nextActionAt && !b.nextActionAt) return -1;
+        if (!a.nextActionAt && b.nextActionAt) return 1;
+        return a.title.localeCompare(b.title);
+      }
       const left = sortValue(a, sort.column);
       const right = sortValue(b, sort.column);
       const compared = left < right ? -1 : left > right ? 1 : 0;
@@ -158,7 +168,7 @@ export function WorkQueue({
           <thead className="text-slate-500">
             <tr>
               <th className="sticky top-16 z-20 border-b border-slate-200 bg-white px-2 py-2 text-left font-medium uppercase tracking-wide">Lead</th>
-              <th className="sticky top-16 z-20 border-b border-slate-200 bg-white px-2 py-2 text-left font-medium uppercase tracking-wide">Next action</th>
+              <NextDayHead rows={rows} day={nextDay} onChange={setNextDay} />
               {COLUMNS.map((column, index) => (
                 <HeadSort
                   key={column.id}
@@ -276,6 +286,50 @@ export function WorkQueue({
         <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} staff={staff} onClose={() => setSelectedId("")} />
       ) : null}
     </div>
+  );
+}
+
+function NextDayHead({ rows, day, onChange }: { rows: QueueRow[]; day: string; onChange: (day: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const days = new Map<string, string>();
+  for (const row of rows) {
+    if (row.nextDayKey) days.set(row.nextDayKey, row.nextDayLabel);
+  }
+  const options = [...days.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const pick = (value: string) => {
+    onChange(value);
+    setOpen(false);
+  };
+  return (
+    <th className={`sticky top-16 border-b border-slate-200 bg-white px-2 py-2 text-left font-medium ${open ? "z-30" : "z-20"}`}>
+      <button
+        type="button"
+        aria-label="Filter next action by date"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={`flex items-center gap-0.5 rounded-md border px-1 py-1 text-[11px] uppercase leading-tight tracking-normal ${
+          day ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white"
+        }`}
+      >
+        <span>Next action</span>
+        <span aria-hidden="true" className="text-[10px]">↕</span>
+      </button>
+      {open ? (
+        <>
+          <button type="button" aria-label="Close filter" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 z-20 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg">
+            <MenuChoice current={!day} onPick={() => pick("")}>
+              All dates
+            </MenuChoice>
+            {options.map(([key, label]) => (
+              <MenuChoice key={key} current={day === key} onPick={() => pick(key)}>
+                {label}
+              </MenuChoice>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </th>
   );
 }
 
@@ -510,7 +564,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
             <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
           </FieldLabel>
           <FieldLabel label="Email">
-            <input name="email" type="email" defaultValue={row.email ?? ""} className={fieldClass()} />
+            <input name="email" defaultValue={row.email ?? ""} className={fieldClass()} />
           </FieldLabel>
         </PanelSection>
         <PanelSection title="Marketing">

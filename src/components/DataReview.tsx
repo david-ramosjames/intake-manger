@@ -5,7 +5,7 @@ import Link from "next/link";
 import { canonicalLeadSource, isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
 import { saveLeadDetails, saveLeadTags, setConsultation, setDesired, setQualified } from "@/lib/ops-actions";
 import { toE164 } from "@/lib/phone";
-import { REVIEW_GAP_LABEL, REVIEW_GAPS, reviewCsv, reviewGaps, type ReviewGap, type ReviewLead } from "@/lib/review";
+import { EMAIL_NOT_AVAILABLE, REVIEW_GAP_LABEL, REVIEW_GAPS, reviewCsv, reviewGaps, type ReviewGap, type ReviewLead } from "@/lib/review";
 import { DECLINE_TAGS, NOT_QUALIFIED_TAGS, QUALIFIED_NO, QUALIFIED_YES, TAG_LABEL } from "@/lib/tags";
 
 const PAGE_SIZE = 40;
@@ -23,6 +23,8 @@ function box(missing: boolean, wide = false): string {
 
 export function DataReview({ rows }: { rows: ReviewLead[] }) {
   const [query, setQuery] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [status, setStatus] = useState<"all" | "open" | "closed">("all");
   const [scope, setScope] = useState<"missing" | "complete" | "all">("missing");
   const [gap, setGap] = useState<ReviewGap | "any">("any");
@@ -33,11 +35,13 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
     return rows.filter((row) => {
       if (status === "open" && row.closed) return false;
       if (status === "closed" && !row.closed) return false;
+      if (from && (!row.firstContact || row.firstContact < from)) return false;
+      if (to && (!row.firstContact || row.firstContact > to)) return false;
       if (!needle) return true;
       const hay = `${row.name} ${row.phone} ${row.email} ${row.leadSource} ${row.caseType} ${row.status}`.toLowerCase();
       return hay.includes(needle);
     });
-  }, [rows, query, status]);
+  }, [rows, query, status, from, to]);
 
   const gapCounts = useMemo(() => {
     const counts = Object.fromEntries(REVIEW_GAPS.map((item) => [item, 0])) as Record<ReviewGap, number>;
@@ -93,6 +97,32 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
           className="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
           aria-label="Search leads"
         />
+        <label className="flex items-center gap-1 text-sm text-slate-600">
+          From
+          <input
+            type="date"
+            value={from}
+            aria-label="First contact from"
+            onChange={(event) => {
+              setFrom(event.target.value);
+              setPage(0);
+            }}
+            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-sm text-slate-600">
+          To
+          <input
+            type="date"
+            value={to}
+            aria-label="First contact to"
+            onChange={(event) => {
+              setTo(event.target.value);
+              setPage(0);
+            }}
+            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </label>
         <select
           value={status}
           onChange={(event) => {
@@ -153,6 +183,7 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
           <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_0_rgb(226,232,240)]">
             <tr className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               <th className="sticky left-0 z-30 bg-white px-2 py-2">Lead</th>
+              <th className="px-2 py-2">First contact</th>
               <th className="px-2 py-2">Missing</th>
               <th className="px-2 py-2">Phone</th>
               <th className="px-2 py-2">Email</th>
@@ -160,7 +191,7 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
               <th className="px-2 py-2">Source type</th>
               <th className="px-2 py-2">Type</th>
               <th className="px-2 py-2">Qualified</th>
-              <th className="px-2 py-2">Consultation date</th>
+              <th className="px-2 py-2">Consultation</th>
               <th className="px-2 py-2">Desired</th>
               <th className="px-2 py-2">Signed</th>
               <th className="px-2 py-2">Declined</th>
@@ -173,7 +204,7 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
             ))}
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={13} className="px-3 py-8 text-sm text-slate-500">
+                <td colSpan={14} className="px-3 py-8 text-sm text-slate-500">
                   No leads match this filter.
                 </td>
               </tr>
@@ -278,6 +309,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
       data.set("source_type", next.sourceType);
       data.set("case_type", next.caseType);
       data.set("phone", next.phone);
+      data.set("lead_date", next.firstContact);
       if (!phoneEdited && !toE164(next.phone)) data.set("keep_phone", "1");
       await saveLeadDetails(data);
     }, next);
@@ -290,7 +322,8 @@ function ReviewRow({ row }: { row: ReviewLead }) {
       next.email !== row.email ||
       next.leadSource !== row.leadSource ||
       next.sourceType !== row.sourceType ||
-      next.caseType !== row.caseType
+      next.caseType !== row.caseType ||
+      next.firstContact !== row.firstContact
     );
   }
 
@@ -320,7 +353,27 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             <Link href={`/leads/${row.id}`} className="font-medium text-navy underline">
               Open
             </Link>
+            {row.slackUrl ? (
+              <a href={row.slackUrl} target="_blank" rel="noreferrer" className="font-medium text-navy underline">
+                Slack
+              </a>
+            ) : null}
           </p>
+        </td>
+        <td className="px-2 py-1.5">
+          <input
+            aria-label="First contact"
+            type="date"
+            value={draft.firstContact}
+            onFocus={() => {
+              editing.current = true;
+            }}
+            onChange={(event) => {
+              const next = { ...draft, firstContact: event.target.value };
+              void persistDetails(next, next.phone !== row.phone);
+            }}
+            className={box(false)}
+          />
         </td>
         <td className="px-2 py-1.5 align-top text-[11px] leading-4 text-amber-800">
           {gaps.size ? [...gaps].map((item) => REVIEW_GAP_LABEL[item]).join(", ") : <span className="text-slate-400">Complete</span>}
@@ -354,6 +407,18 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             }}
             className={box(gaps.has("email"), true)}
           />
+          {draft.email.trim().toLowerCase() === EMAIL_NOT_AVAILABLE.toLowerCase() ? null : (
+            <button
+              type="button"
+              onClick={() => {
+                const next = { ...draft, email: EMAIL_NOT_AVAILABLE };
+                void persistDetails(next, next.phone !== row.phone);
+              }}
+              className="mt-1 block text-[11px] font-medium text-navy underline"
+            >
+              Not available
+            </button>
+          )}
         </td>
         <td className="px-2 py-1.5">
           <input
@@ -442,24 +507,60 @@ function ReviewRow({ row }: { row: ReviewLead }) {
           </select>
         </td>
         <td className="px-2 py-1.5">
-          <input
-            aria-label="Consultation date"
-            type="date"
-            value={draft.consultation}
-            onFocus={() => {
-              editing.current = true;
-            }}
-            onChange={(event) => {
-              const next = { ...draft, consultation: event.target.value };
-              void run(async () => {
-                const data = new FormData();
-                data.set("lead_id", row.id);
-                data.set("consultation_date", next.consultation);
-                await setConsultation(data);
-              }, next);
-            }}
-            className={box(gaps.has("consultation"))}
-          />
+          <div className="flex items-center gap-1">
+            <select
+              aria-label="Consultation"
+              value={draft.consulted}
+              onChange={(event) => {
+                const value = event.target.value === "yes" || event.target.value === "no" ? event.target.value : "";
+                if (value === "yes" && !draft.consultation) {
+                  setDraft({ ...draft, consulted: "yes" });
+                  return;
+                }
+                const next: ReviewLead = {
+                  ...draft,
+                  consulted: value,
+                  consultation: value === "yes" ? draft.consultation : "",
+                };
+                void run(async () => {
+                  const data = new FormData();
+                  data.set("lead_id", row.id);
+                  data.set("consultation_date", next.consultation);
+                  if (value === "no") data.set("consulted", "no");
+                  await setConsultation(data);
+                }, next);
+              }}
+              className={box(gaps.has("consultation"))}
+            >
+              <option value="">Not set</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+            {draft.consulted === "yes" ? (
+              <input
+                aria-label="Consultation date"
+                type="date"
+                value={draft.consultation}
+                onFocus={() => {
+                  editing.current = true;
+                }}
+                onChange={(event) => {
+                  const next: ReviewLead = {
+                    ...draft,
+                    consulted: event.target.value ? "yes" : "",
+                    consultation: event.target.value,
+                  };
+                  void run(async () => {
+                    const data = new FormData();
+                    data.set("lead_id", row.id);
+                    data.set("consultation_date", next.consultation);
+                    await setConsultation(data);
+                  }, next);
+                }}
+                className={box(gaps.has("consultation"))}
+              />
+            ) : null}
+          </div>
         </td>
         <td className="px-2 py-1.5">
           {draft.desiredLocked ? (

@@ -1,11 +1,11 @@
 import { scheduleCallback } from "@/lib/callbacks";
-import { formatCallWhen } from "@/lib/time";
+import { formatCallWhen, formatCallWindow } from "@/lib/time";
 
 export type CallStep = { position: number; delay_minutes: number; callback_window?: string | null };
 
 const REMINDER_CLOSED = new Set(["signed", "completed", "failed", "cancelled", "expired"]);
 
-export type NextActionLine = { label: string; when: string };
+export type NextActionLine = { label: string; when: string; at: string | null };
 
 export function nextActionLines(input: {
   closed: boolean;
@@ -24,16 +24,23 @@ export function nextActionLines(input: {
 }): NextActionLine[] {
   const lines: NextActionLine[] = [];
   if (!input.closed && (input.textStatus || "").toLowerCase() === "active" && input.textNextAt) {
-    lines.push({ label: "Text", when: formatCallWhen(input.textNextAt) });
+    lines.push({ label: "Text", when: formatCallWhen(input.textNextAt), at: input.textNextAt });
   }
   const agreement = (input.agreementStatus || "").toLowerCase();
   if (!input.closed && input.reminderAt && !REMINDER_CLOSED.has(agreement)) {
-    lines.push({ label: "Reminder", when: formatCallWhen(input.reminderAt) });
+    lines.push({ label: "Reminder", when: formatCallWhen(input.reminderAt), at: input.reminderAt });
   }
-  if (!lines.length) lines.push({ label: "Text", when: "None" });
+  if (!lines.length) lines.push({ label: "Text", when: "None", at: null });
   const callAt = nextCallAt(input);
-  lines.push({ label: "Call", when: callAt ? formatCallWhen(callAt) : "None" });
+  lines.push({ label: "Call", when: callAt ? formatCallWindow(callAt) : "None", at: callAt });
   return lines;
+}
+
+/** The soonest text, reminder, or call. */
+export function nextActionMoment(lines: NextActionLine[]): string | null {
+  const times = lines.map((line) => line.at).filter((at): at is string => Boolean(at));
+  times.sort();
+  return times[0] ?? null;
 }
 
 function nextCallAt(input: {

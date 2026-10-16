@@ -165,7 +165,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       <dl className="mt-4 grid gap-2 sm:grid-cols-4">
         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Consultation</dt>
-          <dd className="mt-1 text-sm text-slate-900">{lead.consultation_date ? consultationWhen(lead.consultation_date) : "—"}</dd>
+          <dd className="mt-1 text-sm text-slate-900">
+            {lead.consultation_date ? consultationWhen(lead.consultation_date) : lead.consultation === "no" ? "No" : "—"}
+          </dd>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
           <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</dt>

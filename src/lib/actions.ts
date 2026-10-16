@@ -169,7 +169,7 @@ function changedFields(before: Lead, after: ReturnType<typeof fieldsFromForm>) {
 
 function applyMilestones(fields: ReturnType<typeof fieldsFromForm>, before: Lead | null) {
   const previousDate = before?.consultation_date?.slice(0, 10) ?? null;
-  if (!fields.consultation_date) fields.consultation = null;
+  if (!fields.consultation_date) fields.consultation = before?.consultation === "no" ? "no" : null;
   else if (!before || fields.consultation_date !== previousDate) fields.consultation = "staff";
   else fields.consultation = before.consultation;
 

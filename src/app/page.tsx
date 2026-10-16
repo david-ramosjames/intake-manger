@@ -10,11 +10,11 @@ import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccid
 import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
-import { nextActionLines, type CallStep } from "@/lib/next-action";
+import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
 import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
 import { phoneLikePattern, phoneMatches, phoneTail } from "@/lib/phone";
-import { chicagoDay, formatCallWhen } from "@/lib/time";
+import { chicagoDay, formatCallDay, formatCallWhen } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -513,18 +513,40 @@ export default async function LeadListPage({
         return phoneMatches(lead.phone || lead.phone_e164, q);
       });
     })
-    .sort((a, b) => {
-      const rank = (row: (typeof rows)[number]) => (row.cycle === "closed" ? 3 : row.cycle === "signed" ? 2 : row.waiting ? 0 : 1);
-      const byRank = rank(a.row) - rank(b.row);
-      if (byRank) return byRank;
-      const aWait = a.row.outreach ?? 99;
-      const bWait = b.row.outreach ?? 99;
-      if (aWait !== bWait) return bWait - aWait;
-      return (b.row.age ?? 0) - (a.row.age ?? 0);
-    });
+    .sort((a, b) => (a.row.lead.id < b.row.lead.id ? -1 : a.row.lead.id > b.row.lead.id ? 1 : 0));
 
   const queueRows: QueueRow[] = shown.map(({ row, others }) => {
     const automation = automationLine(row.lead);
+    const nextAction = nextActionLines({
+      closed: row.cycle === "signed" || row.cycle === "closed",
+      sequence: row.lead.sequence,
+      textStatus: row.lead.text_sequence_status,
+      textNextAt: row.lead.text_next_at,
+      reminderAt: row.lead.agreement_next_reminder_at,
+      agreementStatus: row.lead.agreement_status,
+      callStart: dayOneFor(row.lead, {
+        closed: row.cycle === "signed" || row.cycle === "closed",
+        talked: row.cycle !== "contact",
+        kind: row.lead.kind,
+        agreementStatus: row.lead.agreement_status,
+        agreementSentAt: row.lead.agreement_sent_at,
+        signedCase: row.lead.signed_case,
+      }),
+      callsMade: row.tally.calls,
+      pendingCallAt: row.nextAt ?? null,
+      callSteps: stepsForLead(callSteps, {
+        closed: row.cycle === "signed" || row.cycle === "closed",
+        talked: row.cycle !== "contact",
+        kind: row.lead.kind,
+        agreementStatus: row.lead.agreement_status,
+        agreementSentAt: row.lead.agreement_sent_at,
+        signedCase: row.lead.signed_case,
+      }),
+      priority: row.priority === "contract" || row.priority === "flagged",
+      contactAt: row.lead.created_at,
+      leadId: row.lead.id,
+    });
+    const nextActionAt = nextActionMoment(nextAction);
     return {
       id: row.lead.id,
       title: leadTitle(row.lead),
@@ -596,36 +618,17 @@ export default async function LeadListPage({
       calls: row.tally.calls,
       texts: row.tally.texts,
       nextCallLabel: formatCallWhen(row.nextAt),
-      nextAction: nextActionLines({
-        closed: row.cycle === "signed" || row.cycle === "closed",
-        sequence: row.lead.sequence,
-        textStatus: row.lead.text_sequence_status,
-        textNextAt: row.lead.text_next_at,
-        reminderAt: row.lead.agreement_next_reminder_at,
-        agreementStatus: row.lead.agreement_status,
-        callStart: dayOneFor(row.lead, {
-          closed: row.cycle === "signed" || row.cycle === "closed",
-          talked: row.cycle !== "contact",
-          kind: row.lead.kind,
-          agreementStatus: row.lead.agreement_status,
-          agreementSentAt: row.lead.agreement_sent_at,
-          signedCase: row.lead.signed_case,
-        }),
-        callsMade: row.tally.calls,
-        pendingCallAt: row.nextAt ?? null,
-        callSteps: stepsForLead(callSteps, {
-          closed: row.cycle === "signed" || row.cycle === "closed",
-          talked: row.cycle !== "contact",
-          kind: row.lead.kind,
-          agreementStatus: row.lead.agreement_status,
-          agreementSentAt: row.lead.agreement_sent_at,
-          signedCase: row.lead.signed_case,
-        }),
-        priority: row.priority === "contract" || row.priority === "flagged",
-        contactAt: row.lead.created_at,
-        leadId: row.lead.id,
-      }),
+      nextAction,
+      nextActionAt,
+      nextDayKey: nextActionAt ? chicagoDay(nextActionAt) : "",
+      nextDayLabel: formatCallDay(nextActionAt),
     };
+  });
+  queueRows.sort((a, b) => {
+    if (a.nextActionAt && b.nextActionAt && a.nextActionAt !== b.nextActionAt) return a.nextActionAt < b.nextActionAt ? -1 : 1;
+    if (a.nextActionAt && !b.nextActionAt) return -1;
+    if (!a.nextActionAt && b.nextActionAt) return 1;
+    return a.title.localeCompare(b.title);
   });
 
   return (

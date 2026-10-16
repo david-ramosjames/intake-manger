@@ -55,7 +55,7 @@ export function LeadForm({
       <Field label="Date" name="lead_date" type="date" defaultValue={dateValue(lead?.lead_date)} />
       <Field label="Lead name" name="lead_name" defaultValue={lead?.lead_name ?? ""} />
       <Field label="Phone" name="phone" defaultValue={lead?.phone ?? ""} />
-      <Field label="Email" name="email" type="email" defaultValue={lead?.email ?? ""} />
+      <Field label="Email" name="email" defaultValue={lead?.email ?? ""} />
       <ChannelField value={lead?.source_channel ?? ""} />
       <label className="block text-sm">
         <span className="font-medium text-slate-700">Lead source</span>

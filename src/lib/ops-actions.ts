@@ -189,12 +189,13 @@ export async function setConsultation(formData: FormData) {
   const leadId = text(formData, "lead_id");
   if (!leadId) throw new Error("Missing the lead.");
   const raw = text(formData, "consultation_date");
-  const consultationDate = raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  const declined = text(formData, "consulted") === "no";
+  const consultationDate = !declined && raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
   const { error } = await supabase
     .from("leads")
     .update({
       consultation_date: consultationDate,
-      consultation: consultationDate ? "staff" : null,
+      consultation: consultationDate ? "staff" : declined ? "no" : null,
     })
     .eq("id", leadId);
   if (error) throw new Error(error.message);
@@ -202,7 +203,7 @@ export async function setConsultation(formData: FormData) {
     lead_id: leadId,
     event_type: "consultation_set",
     actor: email,
-    payload: { consultation_date: consultationDate },
+    payload: { consultation_date: consultationDate, consultation: consultationDate ? "staff" : declined ? "no" : null },
   });
   revalidatePath("/");
   revalidatePath("/priority");
@@ -259,6 +260,7 @@ export async function saveLeadDetails(formData: FormData) {
   const leadName = text(formData, "lead_name");
   const phone = text(formData, "phone");
   const contactEmail = text(formData, "email");
+  const leadDate = text(formData, "lead_date");
   const phoneE164 = phone ? toE164(phone) : null;
   const keepPhone = formData.get("keep_phone") === "1";
   if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
@@ -280,6 +282,7 @@ export async function saveLeadDetails(formData: FormData) {
     patch.phone_e164 = phoneE164;
   }
   if (leadName) patch.identity_status = "confirmed";
+  if (formData.has("lead_date")) patch.lead_date = leadDate && /^\d{4}-\d{2}-\d{2}$/.test(leadDate) ? leadDate : null;
   if (caseType === "Non-PI Legal Matter") {
     patch.caller_class = "non_pi";
     patch.close_suggestion = "decline";

@@ -154,7 +154,7 @@ async function askSmsFollowUp(body: Record<string, unknown>): Promise<{
   sequence?: { slug?: string };
 }> {
   const base = process.env.SMS_FOLLOWUP_URL?.replace(/\/$/, "");
-  const token = process.env.SMS_FOLLOWUP_TOKEN;
+  const token = process.env.SMS_FOLLOWUP_TOKEN || process.env.INTAKE_ENROLL_TOKEN;
   if (!base || !token) return { ok: false, reason: "not_configured" };
   const response = await fetch(`${base}/api/intake/enroll`, {
     method: "POST",

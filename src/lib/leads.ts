@@ -31,18 +31,51 @@ export const SOURCE_CHANNELS = ["Call", "Web form", "Meta", "Facebook", "WhatsAp
 export const SOURCE_TYPES = ["Call", "Web form", "Landing page", "Meta", "Facebook", "WhatsApp", "Website", "TikTok", "Referral"] as const;
 
 export const PI_CASE_TYPES = [
-  "Car accident",
-  "Truck accident",
-  "Motorcycle",
-  "Pedestrian",
-  "Dog bite",
-  "Slip and fall",
-  "Assault",
-  "Work accident",
-  "Premises",
-  "Wrongful death",
-  "Other",
+  "Other Injury",
+  "Premises Liability",
+  "Auto Accident",
+  "Non-PI Legal Matter",
+  "Unknown / No Response",
+  "Sexual Assault / Child Abuse",
+  "Work Injury",
+  "Workers Comp",
+  "No Injuries / Property Damage",
+  "Commercial / 18 Wheeler",
+  "MedMal",
+  "Pedestrian / Bicycle / Scooter",
+  "Dog Bite",
+  "Wrongful Death",
 ] as const;
+
+const CASE_TYPE_ALIASES: Record<string, (typeof PI_CASE_TYPES)[number]> = {
+  "dog bite": "Dog Bite",
+  "car accident": "Auto Accident",
+  "auto accident": "Auto Accident",
+  motorcycle: "Auto Accident",
+  "truck accident": "Commercial / 18 Wheeler",
+  "18 wheeler": "Commercial / 18 Wheeler",
+  "18-wheeler": "Commercial / 18 Wheeler",
+  pedestrian: "Pedestrian / Bicycle / Scooter",
+  "slip and fall": "Premises Liability",
+  premises: "Premises Liability",
+  assault: "Other Injury",
+  "work accident": "Work Injury",
+  "work injury": "Work Injury",
+  "workers comp": "Workers Comp",
+  "workers compensation": "Workers Comp",
+  "wrongful death": "Wrongful Death",
+  "medical malpractice": "MedMal",
+  medmal: "MedMal",
+  other: "Other Injury",
+  "other injury": "Other Injury",
+  "non-pi legal matter": "Non-PI Legal Matter",
+  "non pi legal matter": "Non-PI Legal Matter",
+  "child abuse": "Sexual Assault / Child Abuse",
+  "sexual assault": "Sexual Assault / Child Abuse",
+  "sexualassault / child abuse": "Sexual Assault / Child Abuse",
+};
+
+const OUTSIDE_CASE_TYPES = new Set<string>(["Non-PI Legal Matter", "Unknown / No Response"]);
 
 export const LEAD_ARRIVAL_LABEL: Record<LeadArrival, string> = {
   form: "Form",
@@ -308,29 +341,35 @@ function usableAccident(value: string | null | undefined): string | null {
 
 function narrativeCaseType(text: string | null | undefined): string | null {
   const body = text ?? "";
-  if (/\bdog bite|bitten by (?:a |the )?(?:\w+ )?dog|attacked by (?:a |the )?(?:\w+ )?dogs?\b/i.test(body)) return "Dog bite";
-  if (/\b(?:slip(?:ped)? and fall|wet floor)\b/i.test(body)) return "Slip and fall";
-  if (/\b(?:workers?'? compensation|work accident|workplace injury)\b/i.test(body)) return "Work accident";
-  if (/\b(?:truck accident|18-wheeler)\b/i.test(body)) return "Truck accident";
-  if (/\bmotorcycle\b/i.test(body)) return "Motorcycle";
-  if (/\bpedestrian\b/i.test(body)) return "Pedestrian";
-  if (/\b(?:car accident|rear-?ended|other driver)\b/i.test(body)) return "Car accident";
-  if (/\bwrongful death\b/i.test(body)) return "Wrongful death";
-  if (/\b(?:premises|slip and fall)\b/i.test(body)) return "Premises";
-  if (/\b(fight|assault(?:ed)?|attacked|beaten|beer bottle)\b/i.test(body)) return "Assault";
+  if (/\b(?:child abuse|sexual assault|molest)\b/i.test(body)) return "Sexual Assault / Child Abuse";
+  if (/\bdog bite|bitten by (?:a |the )?(?:\w+ )?dog|attacked by (?:a |the )?(?:\w+ )?dogs?\b/i.test(body)) return "Dog Bite";
+  if (/\bwrongful death\b/i.test(body)) return "Wrongful Death";
+  if (/\b(?:medical malpractice|med\s*mal|surgical error)\b/i.test(body)) return "MedMal";
+  if (/\bworkers?'?\s*comp(?:ensation)?\b/i.test(body)) return "Workers Comp";
+  if (/\b(?:work(?:place)? (?:accident|injury)|injured at work)\b/i.test(body)) return "Work Injury";
+  if (/\b(?:18-?\s*wheeler|tractor-?trailer|commercial truck|truck accident)\b/i.test(body)) return "Commercial / 18 Wheeler";
+  if (/\b(?:pedestrian|bicycle|scooter)\b/i.test(body)) return "Pedestrian / Bicycle / Scooter";
+  if (/\b(?:no injuries|property damage only)\b/i.test(body)) return "No Injuries / Property Damage";
+  if (/\b(?:car accident|auto accident|rear-?ended|motorcycle|other driver|hit and run)\b/i.test(body)) return "Auto Accident";
+  if (/\b(?:slip(?:ped)? and fall|premises liability|wet floor)\b/i.test(body)) return "Premises Liability";
+  if (/\b(?:immigration|divorce|child support|criminal defense|family law)\b/i.test(body)) return "Non-PI Legal Matter";
+  if (/\b(?:injur(?:y|ed|ies)|hurt)\b/i.test(body)) return "Other Injury";
   return null;
 }
 
 export function isPiCaseType(value: string | null | undefined): boolean {
-  if (!value) return false;
-  return PI_CASE_TYPES.some((item) => item.toLowerCase() === value.toLowerCase());
+  const official = officialCaseType(value);
+  return Boolean(official && !OUTSIDE_CASE_TYPES.has(official));
+}
+
+export function officialCaseType(value: string | null | undefined): (typeof PI_CASE_TYPES)[number] | null {
+  const text = usableFact(value);
+  if (!text) return null;
+  return CASE_TYPE_ALIASES[text.toLowerCase()] ?? PI_CASE_TYPES.find((item) => item.toLowerCase() === text.toLowerCase()) ?? null;
 }
 
 export function canonicalCaseType(value: string | null | undefined): string | null {
-  const text = usableFact(value);
-  if (!text) return null;
-  const match = PI_CASE_TYPES.find((item) => item.toLowerCase() === text.toLowerCase());
-  return match ?? text;
+  return officialCaseType(value) ?? usableFact(value);
 }
 
 export function suggestedCaseType(lead: { case_type: string | null; case_detail?: string | null; summary?: string | null }): string {
@@ -340,7 +379,7 @@ export function suggestedCaseType(lead: { case_type: string | null; case_detail?
 }
 
 export function listAccident(lead: { case_type: string | null; case_detail?: string | null }): string {
-  const stored = usableAccident(lead.case_type);
+  const stored = officialCaseType(lead.case_type) ?? usableAccident(lead.case_type);
   if (stored) return stored;
   const fromPost = webLeadFacts(lead.case_detail).accident;
   if (fromPost) return fromPost;

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
-import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, PI_CASE_TYPES, SOURCE_CHANNELS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
   return (
@@ -75,7 +75,7 @@ export function LeadForm({
         defaultValue={lead?.source_type ?? ""}
         placeholder="Marketing"
       />
-      <Field label="Case type" name="case_type" defaultValue={lead?.case_type ?? ""} />
+      <CaseTypeField value={lead?.case_type ?? ""} />
       <label className="block text-sm">
         <span className="font-medium text-slate-700">Lead status</span>
         <select
@@ -274,6 +274,24 @@ function Field({
         placeholder={placeholder}
         className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
       />
+    </label>
+  );
+}
+
+function CaseTypeField({ value }: { value: string }) {
+  const options = new Set<string>(PI_CASE_TYPES);
+  if (value && !options.has(value)) options.add(value);
+  return (
+    <label className="block text-sm">
+      <span className="font-medium text-slate-700">Case type</span>
+      <select name="case_type" defaultValue={value} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
+        <option value="">Not set</option>
+        {[...options].map((item) => (
+          <option key={item} value={item}>
+            {item}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

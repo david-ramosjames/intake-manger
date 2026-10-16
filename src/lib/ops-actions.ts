@@ -228,7 +228,10 @@ export async function saveLeadDetails(formData: FormData) {
     source_type: sourceType,
     source_channel: sourceType,
   };
-  if (isPiCaseType(caseType) && before.caller_class === "non_pi") {
+  if (caseType === "Non-PI Legal Matter") {
+    patch.caller_class = "non_pi";
+    patch.close_suggestion = "decline";
+  } else if (isPiCaseType(caseType) && before.caller_class === "non_pi") {
     patch.caller_class = null;
     patch.practice_area = "personal_injury";
     if (before.close_suggestion === "decline") patch.close_suggestion = null;

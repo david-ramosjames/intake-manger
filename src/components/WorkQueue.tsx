@@ -182,8 +182,8 @@ export function WorkQueue({
 
   return (
     <div className={`mt-4 grid items-start gap-4 ${selected ? "xl:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
-      <div className="min-w-0 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full min-w-[72rem] table-fixed text-left text-xs">
+      <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
+        <table className="w-full table-fixed text-left text-xs">
           <colgroup>
             <col style={{ width: "15%" }} />
             <col style={{ width: "12%" }} />

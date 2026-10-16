@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useActionState, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
@@ -427,6 +427,25 @@ function MenuChoice({ current, onPick, children }: { current: boolean; onPick: (
   );
 }
 
+function TextStartButtons({ leadId, compact = false }: { leadId: string; compact?: boolean }) {
+  const [state, action, pending] = useActionState(startTextSequence, null);
+  const button = compact
+    ? "cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
+    : "";
+  return (
+    <form action={action} className={compact ? "flex flex-col items-center gap-1" : "flex flex-wrap gap-2"}>
+      <input type="hidden" name="lead_id" value={leadId} />
+      <button name="sequence" value="new-lead" disabled={pending} className={compact ? button : buttonPrimary}>
+        New lead
+      </button>
+      <button name="sequence" value="more-info" disabled={pending} className={compact ? button : buttonSecondary}>
+        More info
+      </button>
+      {state?.error ? <p className="w-full text-[11px] font-medium text-red-700">{state.error}</p> : null}
+    </form>
+  );
+}
+
 function TextAutomation({ row }: { row: QueueRow }) {
   if (row.textsLive) {
     return <span className={row.automationBad ? "font-medium text-red-700" : "font-medium text-slate-800"}>{row.automationLabel}</span>;
@@ -434,17 +453,7 @@ function TextAutomation({ row }: { row: QueueRow }) {
   if (!row.canStartText) {
     return <span className={row.automationBad ? "font-medium text-red-700" : "text-slate-400"}>{row.automationLabel}</span>;
   }
-  return (
-    <form action={startTextSequence} className="flex flex-col items-center gap-1">
-      <input type="hidden" name="lead_id" value={row.id} />
-      <button name="sequence" value="new-lead" className="cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
-        New lead
-      </button>
-      <button name="sequence" value="more-info" className="cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
-        More info
-      </button>
-    </form>
-  );
+  return <TextStartButtons leadId={row.id} compact />;
 }
 
 function YesNoCell({
@@ -1000,17 +1009,7 @@ function LeadDrawer({
                   {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
                 </span>
               </div>
-              {row.canStartText ? (
-                <form action={startTextSequence} className="flex flex-wrap gap-2">
-                  <input type="hidden" name="lead_id" value={row.id} />
-                  <button name="sequence" value="new-lead" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
-                    New lead
-                  </button>
-                  <button name="sequence" value="more-info" className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
-                    More info
-                  </button>
-                </form>
-              ) : null}
+              {row.canStartText ? <TextStartButtons leadId={row.id} /> : null}
             </li>
             <li className="flex justify-between gap-3">
               <span className="text-slate-500">Contract</span>

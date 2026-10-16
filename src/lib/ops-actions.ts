@@ -82,90 +82,104 @@ export async function markPriority(formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
 }
 
-export async function startTextSequence(formData: FormData) {
-  const { supabase, email } = await requireStaff();
-  const leadId = text(formData, "lead_id");
-  const sequence = text(formData, "sequence");
-  if (!leadId) throw new Error("Missing the lead.");
-  if (sequence !== "new-lead" && sequence !== "more-info") throw new Error("Choose New lead or More info.");
-  const { data: lead, error } = await supabase
-    .from("leads")
-    .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, email")
-    .eq("id", leadId)
-    .maybeSingle();
-  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
-  if ((lead.text_sequence_status || "").toLowerCase() === "active") throw new Error("A text sequence is already running.");
-  if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status) || lead.sequence === "stop") {
-    throw new Error("This lead is closed, so a text sequence stays off.");
-  }
-  const phone = lead.phone_e164 || lead.phone;
-  if (!phone) throw new Error("This lead has no phone number.");
-  const staff = await loadStaff(supabase);
-  const owner = matchStaff(lead.owner_name, staff);
-  const assignee = owner?.slackUserId || (await defaultTextOwner());
-  if (!assignee) throw new Error("Set an owner on the lead, or a default owner in SMS Follow-Up, before starting texts.");
-  const [first, ...rest] = (lead.lead_name || "").trim().split(/\s+/).filter(Boolean);
-  const service = createSupabaseServiceClient();
-  const { data, error: enrollError } = await service.rpc("followup_enroll", {
-    payload: {
+export async function startTextSequence(
+  _prev: { error: string } | null,
+  formData: FormData,
+): Promise<{ error: string } | null> {
+  try {
+    const { supabase, email } = await requireStaff();
+    const leadId = text(formData, "lead_id");
+    const sequence = text(formData, "sequence");
+    if (!leadId) return { error: "Missing the lead." };
+    if (sequence !== "new-lead" && sequence !== "more-info") return { error: "Choose New lead or More info." };
+    const { data: lead, error } = await supabase
+      .from("leads")
+      .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, email")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (error || !lead) return { error: error?.message ?? "Lead not found" };
+    if ((lead.text_sequence_status || "").toLowerCase() === "active") return { error: "A text sequence is already running." };
+    if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status) || lead.sequence === "stop") {
+      return { error: "This lead is closed, so a text sequence stays off." };
+    }
+    const phone = lead.phone_e164 || lead.phone;
+    if (!phone) return { error: "This lead has no phone number." };
+    const staff = await loadStaff(supabase);
+    const owner = matchStaff(lead.owner_name, staff);
+    const [first, ...rest] = (lead.lead_name || "").trim().split(/\s+/).filter(Boolean);
+    const result = await askSmsFollowUp({
       phone,
       sequence_slug: sequence,
       first_name: first || null,
       last_name: rest.join(" ") || null,
       case_type: lead.case_type,
-      assigned_slack_user_id: assignee,
+      assigned_slack_user_id: owner?.slackUserId || null,
       assigned_slack_user_name: owner?.slackUserId ? owner.name : null,
       slack_channel_id: lead.slack_channel_id,
       slack_thread_ts: lead.slack_thread_ts,
-      source: "dashboard",
-      lead_source: "intake-manager",
       lead_detail: { email: lead.email, started_by: email },
-    },
-  });
-  if (enrollError) throw new Error(enrollError.message);
-  const result = (data ?? {}) as { ok?: boolean; reason?: string; next_run_at?: string | null; sequence?: { slug?: string } };
-  if (!result.ok) throw new Error(textSequenceError(result.reason));
-  const slug = result.sequence?.slug || sequence;
-  const { error: updateError } = await supabase
-    .from("leads")
-    .update({
-      text_sequence_slug: slug,
-      text_sequence_status: "active",
-      text_next_at: result.next_run_at ?? null,
-    })
-    .eq("id", leadId);
-  if (updateError) throw new Error(updateError.message);
-  await supabase.from("lead_events").insert({
-    lead_id: leadId,
-    event_type: "text_sequence_started",
-    actor: email,
-    payload: { sequence: slug, label: textSequenceLabel(slug) },
-  });
-  revalidatePath("/");
-  revalidatePath("/priority");
-  revalidatePath(`/leads/${leadId}`);
+    });
+    if (!result.ok) return { error: textSequenceError(result.reason) };
+    const slug = result.sequence?.slug || sequence;
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({
+        text_sequence_slug: slug,
+        text_sequence_status: "active",
+        text_next_at: result.next_run_at ?? null,
+      })
+      .eq("id", leadId);
+    if (updateError) return { error: updateError.message };
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "text_sequence_started",
+      actor: email,
+      payload: { sequence: slug, label: textSequenceLabel(slug) },
+    });
+    revalidatePath("/");
+    revalidatePath("/priority");
+    revalidatePath(`/leads/${leadId}`);
+    return null;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "The text sequence could not be started." };
+  }
 }
 
-async function defaultTextOwner(): Promise<string | null> {
-  const service = createSupabaseServiceClient();
-  const { data } = await service
-    .from("app_settings")
-    .select("value")
-    .eq("key", "lead_default_owner_slack_id")
-    .limit(1)
-    .maybeSingle();
-  const value = data?.value;
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+async function askSmsFollowUp(body: Record<string, unknown>): Promise<{
+  ok: boolean;
+  reason?: string;
+  next_run_at?: string | null;
+  sequence?: { slug?: string };
+}> {
+  const base = process.env.SMS_FOLLOWUP_URL?.replace(/\/$/, "");
+  const token = process.env.SMS_FOLLOWUP_TOKEN;
+  if (!base || !token) return { ok: false, reason: "not_configured" };
+  const response = await fetch(`${base}/api/intake/enroll`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    reason?: string;
+    next_run_at?: string | null;
+    sequence?: { slug?: string };
+  } | null;
+  if (!data) return { ok: false, reason: "unreachable" };
+  return { ok: Boolean(data.ok), reason: data.reason, next_run_at: data.next_run_at, sequence: data.sequence };
 }
 
 function textSequenceError(reason: string | undefined): string {
+  if (reason === "not_configured") return "SMS Follow-Up is not connected yet.";
+  if (reason === "unreachable" || reason === "unauthorized" || reason === "no_firm") return "SMS Follow-Up did not accept the sequence.";
   if (reason === "invalid_phone") return "That phone number cannot take a text sequence.";
   if (reason === "already_active") return "A text sequence is already running for this number.";
   if (reason === "opted_out") return "This number has opted out of texts.";
   if (reason === "sequence_not_found") return "That sequence is not set up.";
   if (reason === "sequence_inactive") return "That sequence is switched off.";
   if (reason === "no_steps") return "That sequence has no texts yet.";
-  if (reason === "missing_assignee") return "Nobody is assigned to send these texts.";
+  if (reason === "missing_assignee") return "Set who owns automatic texts in SMS Follow-Up before starting one.";
+  if (reason?.startsWith("lead_decision:")) return "This lead is closed, so a text sequence stays off.";
   return "The text sequence could not be started.";
 }
 

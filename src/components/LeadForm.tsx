@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
-import { LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, PI_CASE_TYPES, SOURCE_CHANNELS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { isSourceType, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_SOURCES, LEAD_STATUSES, PI_CASE_TYPES, SOURCE_CHANNELS, SOURCE_TYPES, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
   return (
@@ -57,24 +57,42 @@ export function LeadForm({
       <Field label="Phone" name="phone" defaultValue={lead?.phone ?? ""} />
       <Field label="Email" name="email" type="email" defaultValue={lead?.email ?? ""} />
       <ChannelField value={lead?.source_channel ?? ""} />
-      <Field
-        label="Detail"
-        name="lead_source"
-        defaultValue={lead?.lead_source ?? ""}
-        placeholder="Google, referral"
-      />
+      <label className="block text-sm">
+        <span className="font-medium text-slate-700">Lead source</span>
+        <input
+          name="lead_source"
+          list="lead-source-examples"
+          defaultValue={lead?.lead_source ?? ""}
+          placeholder="Google, Friend, Attorney"
+          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+        />
+        <datalist id="lead-source-examples">
+          {LEAD_SOURCES.map((item) => (
+            <option key={item.source} value={item.source} />
+          ))}
+        </datalist>
+      </label>
       <Field
         label="Source note"
         name="source_note"
         defaultValue={lead?.source_note ?? ""}
         placeholder="My friend gave me this number"
       />
-      <Field
-        label="Source category"
-        name="source_type"
-        defaultValue={lead?.source_type ?? ""}
-        placeholder="Marketing"
-      />
+      <label className="block text-sm">
+        <span className="font-medium text-slate-700">Source type</span>
+        <select
+          name="source_type"
+          defaultValue={isSourceType(lead?.source_type) ? lead?.source_type : ""}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+        >
+          <option value="">Not set</option>
+          {SOURCE_TYPES.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+      </label>
       <CaseTypeField value={lead?.case_type ?? ""} />
       <label className="block text-sm">
         <span className="font-medium text-slate-700">Lead status</span>
@@ -151,7 +169,7 @@ export function LeadForm({
         </select>
       </label>
       <label className="text-sm sm:col-span-1">
-        <span className="font-medium text-slate-700">Handled by</span>
+        <span className="font-medium text-slate-700">Talked with</span>
         <select
           name="owner_name"
           defaultValue={lead?.owner_name ?? ""}

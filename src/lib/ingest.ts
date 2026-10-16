@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enrollFollowUp } from "./followup";
+import { leadSourceFromText } from "./leads";
+import { isPlaceholderOwner } from "./talked-with";
 import { parseSlackLead, leadIsClosed, slackPostDisposition } from "./slack-lead";
 import { LEAD_CHANNEL_ID } from "./slack";
 
@@ -86,7 +88,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
   if (parsed.phoneE164) {
     const { data: openLeads } = await supabase
       .from("leads")
-      .select("id, signed_case, case_id, lead_status, lead_name, phone, email, summary, owner_name, quo_link, callrail_tags")
+      .select("id, signed_case, case_id, lead_status, lead_name, phone, email, summary, owner_name, quo_link, callrail_tags, lead_source")
       .eq("phone_e164", parsed.phoneE164)
       .order("created_at", { ascending: false })
       .limit(5);
@@ -100,8 +102,17 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
       }
       if (!open.email && parsed.email) patch.email = parsed.email;
       if (!open.summary && parsed.summary) patch.summary = parsed.summary;
-      if (!open.owner_name && parsed.handledBy) patch.owner_name = parsed.handledBy;
+      if (parsed.handledBy && !isPlaceholderOwner(parsed.handledBy) && isPlaceholderOwner(open.owner_name)) {
+        patch.owner_name = parsed.handledBy;
+      }
       if (!open.quo_link && parsed.quoLink) patch.quo_link = parsed.quoLink;
+      if (!open.lead_source) {
+        const found = leadSourceFromText(text);
+        if (found) {
+          patch.lead_source = found.source;
+          patch.source_type = found.type || null;
+        }
+      }
       if (parsed.tags.length) {
         const current = Array.isArray(open.callrail_tags) ? (open.callrail_tags as string[]) : [];
         patch.callrail_tags = [...new Set([...current, ...parsed.tags])];
@@ -119,6 +130,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
     }
   }
 
+  const found = leadSourceFromText(text);
   const { data: created, error } = await supabase
     .from("leads")
     .insert({
@@ -127,13 +139,15 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
       phone: parsed.phone,
       phone_e164: parsed.phoneE164,
       email: parsed.email,
+      lead_source: found?.source ?? null,
+      source_type: found?.type || null,
       source_channel: parsed.arrival === "form" ? "Web form" : "Call",
       lead_status: "New",
       kind: parsed.kind,
       arrival: parsed.arrival,
       case_type: parsed.caseType,
       summary: parsed.summary,
-      owner_name: parsed.handledBy,
+      owner_name: isPlaceholderOwner(parsed.handledBy) ? null : parsed.handledBy,
       quo_link: parsed.quoLink,
       callrail_tags: parsed.tags,
       follow_up: true,
@@ -162,7 +176,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
     case_id: created.case_id,
     lead_status: created.lead_status,
     arrival: parsed.arrival,
-    owner_name: parsed.handledBy,
+    owner_name: isPlaceholderOwner(parsed.handledBy) ? null : parsed.handledBy,
     created_at: new Date().toISOString(),
     priority: false,
   });

@@ -2,7 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { weekendCallAllowed } from "./callbacks";
 import { leadSequenceId, loadWorkHours } from "./sequences";
 import { loadSlackSettings } from "./slack-settings";
+import { loadStaff } from "./identity";
 import { channelOutboundMention, LEAD_CHANNEL_ID, mentionForName, postToSlack } from "./slack";
+import { isPlaceholderOwner, slackMentionFor } from "./talked-with";
 import { sendQuoText } from "./quo";
 import { withinWorkHours } from "./time";
 
@@ -54,6 +56,7 @@ function closed(lead: LeadRow): boolean {
 export async function dispatchDue(supabase: SupabaseClient) {
   const now = new Date().toISOString();
   const slack = await loadSlackSettings();
+  const staff = await loadStaff(supabase);
   const hoursBySequence = await loadWorkHours(supabase);
   const result = { texts: 0, calls: 0, slack: 0, skipped: 0, failed: 0 };
 
@@ -138,14 +141,14 @@ export async function dispatchDue(supabase: SupabaseClient) {
       if (weekend && !priority) continue;
       if (!weekend && sequence && !withinWorkHours(nowDate, hoursBySequence[sequence])) continue;
       const who = lead.lead_name || "Unnamed lead";
-      const consultWith = lead.consultation_date ? lead.owner_name : "";
+      const assigned = isPlaceholderOwner(job.assigned_name) ? "" : job.assigned_name?.trim() || "";
+      const consultWith = lead.consultation_date && !isPlaceholderOwner(lead.owner_name) ? lead.owner_name?.trim() || "" : "";
+      const chosen = assigned || consultWith;
       const named = job.mention
         ? (job.mention.startsWith("<@") ? job.mention : `<@${job.mention.replace(/[<@>]/g, "")}>`)
-        : job.assigned_name
-          ? await mentionForName(job.assigned_name, slack.token)
-          : consultWith
-            ? await mentionForName(consultWith, slack.token)
-            : "";
+        : chosen
+          ? slackMentionFor(chosen, staff) || (await mentionForName(chosen, slack.token))
+          : "";
       const mention = named || (await channelOutboundMention(channel, slack.token));
       const posted = await postToSlack({
         token: slack.token,

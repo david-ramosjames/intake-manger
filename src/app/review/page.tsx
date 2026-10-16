@@ -1,9 +1,10 @@
 import { DataReview } from "@/components/DataReview";
+import { fillLeadSources } from "@/lib/lead-source-fill";
 import { toReviewLead, type ReviewSource } from "@/lib/review";
 import { requireStaff } from "@/lib/session";
 
 const COLUMNS =
-  "id, lead_name, phone, email, lead_source, source_type, source_channel, case_type, qualified, consultation_date, desired_case, desired_source, signed_case, lead_status, callrail_tags, caller_class, agreement_status, agreement_sent_at, lead_date, created_at";
+  "id, lead_name, phone, email, lead_source, source_type, source_channel, case_type, qualified, consultation_date, desired_case, desired_source, signed_case, lead_status, callrail_tags, caller_class, agreement_status, agreement_sent_at, lead_date, created_at, summary, case_detail, source_note";
 
 async function loadReviewLeads(supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"]): Promise<ReviewSource[]> {
   const rows: ReviewSource[] = [];
@@ -28,7 +29,9 @@ export default async function ReviewPage() {
   let rows: ReturnType<typeof toReviewLead>[] = [];
   let loadError: string | null = null;
   try {
-    rows = (await loadReviewLeads(supabase)).map(toReviewLead);
+    const loaded = await loadReviewLeads(supabase);
+    await fillLeadSources(supabase, loaded);
+    rows = loaded.map(toReviewLead);
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Could not load leads.";
   }

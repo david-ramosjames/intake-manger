@@ -13,7 +13,7 @@ import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
-import { isPiCaseType } from "./leads";
+import { canonicalLeadSource, isPiCaseType, isSourceType } from "./leads";
 import { toE164 } from "./phone";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -210,13 +210,52 @@ export async function setConsultation(formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
 }
 
+export async function setTalkedWith(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const name = text(formData, "owner_name");
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("id, consultation_date")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+  const { error: updateError } = await supabase.from("leads").update({ owner_name: name }).eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  if (lead.consultation_date) {
+    await supabase
+      .from("lead_jobs")
+      .update({
+        assigned_name: name,
+        mention: null,
+        detail: name ? `Tag ${name}.` : "Any available intake person.",
+      })
+      .eq("lead_id", leadId)
+      .eq("queue", "call")
+      .eq("status", "pending");
+  }
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "talked_with",
+    actor: email,
+    payload: { owner_name: name },
+  });
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath("/review");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function saveLeadDetails(formData: FormData) {
   const { supabase, email: actor } = await requireStaff();
   const leadId = text(formData, "lead_id");
   if (!leadId) throw new Error("Missing the lead.");
   const caseType = text(formData, "case_type") || null;
-  const leadSource = text(formData, "lead_source") || null;
-  const sourceType = text(formData, "source_type") || null;
+  const writtenSource = canonicalLeadSource(text(formData, "lead_source"));
+  const leadSource = writtenSource.source || null;
+  const chosenType = text(formData, "source_type");
+  const sourceType = isSourceType(chosenType) ? chosenType : writtenSource.type || null;
   const leadName = text(formData, "lead_name");
   const phone = text(formData, "phone");
   const contactEmail = text(formData, "email");
@@ -235,7 +274,6 @@ export async function saveLeadDetails(formData: FormData) {
     case_type: caseType,
     lead_source: leadSource,
     source_type: sourceType,
-    source_channel: sourceType,
   };
   if (!keepPhone) {
     patch.phone = phone;

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
+import { canonicalLeadSource, isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
 import { saveLeadDetails, saveLeadTags, setConsultation, setDesired, setQualified } from "@/lib/ops-actions";
 import { toE164 } from "@/lib/phone";
 import { REVIEW_GAP_LABEL, REVIEW_GAPS, reviewCsv, reviewGaps, type ReviewGap, type ReviewLead } from "@/lib/review";
@@ -27,12 +27,6 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
   const [scope, setScope] = useState<"missing" | "complete" | "all">("missing");
   const [gap, setGap] = useState<ReviewGap | "any">("any");
   const [page, setPage] = useState(0);
-
-  const sources = useMemo(() => {
-    const values = new Set<string>();
-    for (const row of rows) if (row.leadSource) values.add(row.leadSource);
-    return [...values].sort((a, b) => a.localeCompare(b));
-  }, [rows]);
 
   const pool = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -150,8 +144,8 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
         ))}
       </div>
       <datalist id="review-lead-sources">
-        {sources.map((source) => (
-          <option key={source} value={source} />
+        {LEAD_SOURCES.map((item) => (
+          <option key={item.source} value={item.source} />
         ))}
       </datalist>
       <div className="mt-3 max-h-[calc(100vh-16rem)] overflow-auto rounded-lg border border-slate-200">
@@ -371,7 +365,13 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             }}
             onChange={(event) => setDraft({ ...draft, leadSource: event.target.value })}
             onBlur={() => {
-              if (detailsChanged(draft)) void persistDetails(draft, draft.phone !== row.phone);
+              const canonical = canonicalLeadSource(draft.leadSource);
+              const next = {
+                ...draft,
+                leadSource: canonical.source,
+                sourceType: canonical.type || (isSourceType(draft.sourceType) ? draft.sourceType : ""),
+              };
+              if (detailsChanged(next) || next.sourceType !== row.sourceType) void persistDetails(next, next.phone !== row.phone);
               else editing.current = false;
             }}
             className={box(gaps.has("lead_source"))}
@@ -380,15 +380,16 @@ function ReviewRow({ row }: { row: ReviewLead }) {
         <td className="px-2 py-1.5">
           <select
             aria-label="Source type"
-            value={draft.sourceType}
+            value={isSourceType(draft.sourceType) ? draft.sourceType : ""}
             onChange={(event) => {
-              const next = { ...draft, sourceType: event.target.value };
+              const value = event.target.value;
+              const next = { ...draft, sourceType: isSourceType(value) ? value : "" };
               void persistDetails(next, false);
             }}
             className={box(gaps.has("source_type"))}
           >
             <option value="">Not set</option>
-            {withCurrent(SOURCE_TYPES, draft.sourceType).map((item) => (
+            {SOURCE_TYPES.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>

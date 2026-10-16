@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
 import { contractSent } from "./desired";
-import { displayContact } from "./leads";
+import { canonicalLeadSource, displayContact, isSourceType } from "./leads";
 import { LEAD_TAGS, tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
@@ -122,8 +122,10 @@ function fieldsFromForm(formData: FormData) {
     phone: text(formData, "phone"),
     phone_e164: toE164(text(formData, "phone")),
     email: displayContact(text(formData, "email")),
-    lead_source: text(formData, "lead_source"),
-    source_type: text(formData, "source_type"),
+    lead_source: canonicalLeadSource(text(formData, "lead_source")).source || null,
+    source_type: isSourceType(text(formData, "source_type"))
+      ? text(formData, "source_type")
+      : canonicalLeadSource(text(formData, "lead_source")).type || null,
     source_channel: text(formData, "source_channel"),
     source_note: text(formData, "source_note"),
     case_type: text(formData, "case_type"),

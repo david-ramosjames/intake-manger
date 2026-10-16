@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { chicagoMinute, scheduleCallback } from "./callbacks";
+import { isPlaceholderOwner } from "./talked-with";
 import { contractSent } from "./desired";
 import type { LeadKind } from "./leads";
 import { type CallSequenceId, type WorkHours } from "./sequences";
@@ -74,10 +75,16 @@ export function sequenceForLead(lead: LeadBits, manual: "post_consult" | "auto")
   return "first_talk";
 }
 
-function proposedCaller(sequence: CallSequenceId, position: number, owner: string | null | undefined): string | null {
-  if (!owner) return null;
-  if (sequence === "want_to_sign") return owner;
-  if (sequence === "more_info" && position <= 2) return owner;
+function proposedCaller(
+  sequence: CallSequenceId,
+  position: number,
+  owner: string | null | undefined,
+  consultation: boolean,
+): string | null {
+  const name = owner?.trim() ?? "";
+  if (isPlaceholderOwner(name)) return null;
+  if (sequence === "want_to_sign") return name;
+  if (sequence === "more_info" && (consultation || position <= 2)) return name;
   return null;
 }
 
@@ -108,7 +115,7 @@ export async function enrollFollowUp(
     const position = step.position as number;
     const delay = Number(step.delay_minutes);
     const from = new Date(dayOne + delay * 60_000);
-    const caller = proposedCaller(sequence, position, lead.owner_name);
+    const caller = proposedCaller(sequence, position, lead.owner_name, Boolean(lead.consultation_date));
     const dueAt = scheduleCallback({
       from,
       window: typeof step.callback_window === "string" ? step.callback_window : null,
@@ -133,7 +140,11 @@ export async function enrollFollowUp(
       due_at: dueAt,
       body: renderStep(String(step.body), lead),
       assigned_name: caller,
-      detail: caller && sequence === "want_to_sign" ? `Proposed owner: ${caller}. Change the tag if someone else should call.` : null,
+      detail: caller && sequence === "want_to_sign"
+        ? `Proposed owner: ${caller}. Change the tag if someone else should call.`
+        : caller && sequence === "more_info" && lead.consultation_date
+          ? `Tag ${caller}.`
+          : null,
     }];
   });
   await supabase

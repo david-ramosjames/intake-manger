@@ -6,8 +6,8 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
-import { PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setQualified, startTextSequence } from "@/lib/ops-actions";
+import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
 import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
@@ -121,11 +121,13 @@ export function WorkQueue({
   initialId,
   destinations,
   templates,
+  staff,
 }: {
   rows: QueueRow[];
   initialId?: string;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  staff: string[];
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
@@ -271,7 +273,7 @@ export function WorkQueue({
         </table>
       </div>
       {selected ? (
-        <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} onClose={() => setSelectedId("")} />
+        <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} staff={staff} onClose={() => setSelectedId("")} />
       ) : null}
     </div>
   );
@@ -483,7 +485,7 @@ function FieldLabel({ label, children }: { label: string; children: ReactNode })
   );
 }
 
-function LeadFacts({ row }: { row: QueueRow }) {
+function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
   const [error, setError] = useState<string | null>(null);
   async function onSubmit(formData: FormData) {
     setError(null);
@@ -495,8 +497,6 @@ function LeadFacts({ row }: { row: QueueRow }) {
   }
   const caseOptions = new Set<string>(PI_CASE_TYPES);
   if (row.caseType) caseOptions.add(row.caseType);
-  const sourceOptions = new Set<string>(SOURCE_TYPES);
-  if (row.sourceType) sourceOptions.add(row.sourceType);
   const formId = `lead-details-${row.id}`;
   return (
     <div className="space-y-5">
@@ -515,12 +515,17 @@ function LeadFacts({ row }: { row: QueueRow }) {
         </PanelSection>
         <PanelSection title="Marketing">
           <FieldLabel label="Lead source">
-            <input name="lead_source" defaultValue={row.leadSource} placeholder="Google, referral" className={fieldClass()} />
+            <input name="lead_source" list="lead-source-examples" defaultValue={row.leadSource} placeholder="Google, Friend, Attorney" className={fieldClass()} />
           </FieldLabel>
+          <datalist id="lead-source-examples">
+            {LEAD_SOURCES.map((item) => (
+              <option key={item.source} value={item.source} />
+            ))}
+          </datalist>
           <FieldLabel label="Source type">
-            <select name="source_type" defaultValue={row.sourceType} className={fieldClass()}>
+            <select name="source_type" defaultValue={isSourceType(row.sourceType) ? row.sourceType : ""} className={fieldClass()}>
               <option value="">Not set</option>
-              {[...sourceOptions].map((item) => (
+              {SOURCE_TYPES.map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>
@@ -552,6 +557,7 @@ function LeadFacts({ row }: { row: QueueRow }) {
           </div>
         </div>
         <ConsultDate row={row} />
+        <TalkedWith row={row} staff={staff} />
         <div className="rounded-md bg-slate-50 px-3 py-2">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</p>
           <div className="mt-1">
@@ -692,11 +698,13 @@ function LeadDrawer({
   row,
   destinations,
   templates,
+  staff,
   onClose,
 }: {
   row: QueueRow;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  staff: string[];
   onClose: () => void;
 }) {
   const [touches, setTouches] = useState<Touch[] | null>(null);
@@ -741,7 +749,7 @@ function LeadDrawer({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
-        <LeadFacts row={row} />
+        <LeadFacts row={row} staff={staff} />
         <TagEditor row={row} />
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
@@ -863,6 +871,35 @@ function LeadDrawer({
         </div>
       </div>
     </aside>
+  );
+}
+
+function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
+  const names = row.owner && !staff.includes(row.owner) ? [row.owner, ...staff] : staff;
+  return (
+    <form action={setTalkedWith} className="rounded-md bg-slate-50 px-3 py-2">
+      <input type="hidden" name="lead_id" value={row.id} />
+      <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+        Talked with
+        <select
+          key={`${row.id}:${row.owner ?? ""}`}
+          name="owner_name"
+          defaultValue={row.owner ?? ""}
+          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
+        >
+          <option value="">Not set</option>
+          {names.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="mt-1 text-xs font-normal normal-case tracking-normal text-slate-500">
+        After a consultation, Slack follow-up tags this person.
+      </p>
+    </form>
   );
 }
 

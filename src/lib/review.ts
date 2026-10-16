@@ -1,4 +1,5 @@
 import { callerClassLabel, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
+import { isSourceType } from "@/lib/leads";
 import { contractSent, milestoneDesired, milestoneQualified, milestoneSigned } from "@/lib/desired";
 import { toE164 } from "@/lib/phone";
 import { NOT_QUALIFIED_TAGS, selectedDecline, selectedOne, SIZE_TAGS, TYPE_TAGS } from "@/lib/tags";
@@ -77,6 +78,9 @@ export type ReviewSource = {
   agreement_sent_at: string | null;
   lead_date: string | null;
   created_at: string | null;
+  summary?: string | null;
+  case_detail?: string | null;
+  source_note?: string | null;
 };
 
 function clean(value: string | null | undefined): string {
@@ -98,7 +102,7 @@ export function reviewGaps(lead: Pick<
   if (!toE164(lead.phone)) gaps.push("phone");
   if (!lead.email.includes("@")) gaps.push("email");
   if (!lead.leadSource.trim()) gaps.push("lead_source");
-  if (!lead.sourceType.trim()) gaps.push("source_type");
+  if (!isSourceType(lead.sourceType)) gaps.push("source_type");
   if (!lead.caseType.trim()) gaps.push("case_type");
   if (!lead.qualified) gaps.push("qualified");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(lead.consultation)) gaps.push("consultation");
@@ -128,7 +132,7 @@ export function toReviewLead(lead: ReviewSource): ReviewLead {
     phone: clean(lead.phone),
     email: clean(lead.email),
     leadSource: clean(lead.lead_source),
-    sourceType: clean(lead.source_type) || clean(lead.source_channel),
+    sourceType: isSourceType(clean(lead.source_type)) ? clean(lead.source_type) : "",
     caseType: clean(lead.case_type),
     qualified: yesNo(qualified),
     consultation: /^\d{4}-\d{2}-\d{2}$/.test(consult) ? consult : "",

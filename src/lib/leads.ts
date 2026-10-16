@@ -28,7 +28,228 @@ export const LEAD_KIND_LABEL: Record<LeadKind, string> = {
 
 export const SOURCE_CHANNELS = ["Call", "Web form", "Meta", "Facebook", "WhatsApp", "Website"] as const;
 
-export const SOURCE_TYPES = ["Call", "Web form", "Landing page", "Meta", "Facebook", "WhatsApp", "Website", "TikTok", "Referral"] as const;
+export const SOURCE_TYPES = ["Marketing", "Referral", "Unknown", "Repeat"] as const;
+
+export type SourceType = (typeof SOURCE_TYPES)[number];
+
+/** Specific lead sources staff should use. Source type is the bucket each one belongs to. */
+export const LEAD_SOURCES: { source: string; type: SourceType }[] = [
+  { source: "Google", type: "Marketing" },
+  { source: "Google Maps", type: "Marketing" },
+  { source: "Meta", type: "Marketing" },
+  { source: "Facebook", type: "Marketing" },
+  { source: "Instagram", type: "Marketing" },
+  { source: "TikTok", type: "Marketing" },
+  { source: "WhatsApp", type: "Marketing" },
+  { source: "Website", type: "Marketing" },
+  { source: "TV", type: "Marketing" },
+  { source: "Radio", type: "Marketing" },
+  { source: "YouTube", type: "Marketing" },
+  { source: "Bing", type: "Marketing" },
+  { source: "Nextdoor", type: "Marketing" },
+  { source: "Reddit", type: "Marketing" },
+  { source: "ChatGPT", type: "Marketing" },
+  { source: "Email", type: "Marketing" },
+  { source: "Avvo", type: "Marketing" },
+  { source: "Super Lawyers", type: "Marketing" },
+  { source: "Internet", type: "Marketing" },
+  { source: "Social media", type: "Marketing" },
+  { source: "Walk-in", type: "Marketing" },
+  { source: "Web chat", type: "Marketing" },
+  { source: "Direct", type: "Marketing" },
+  { source: "Friend", type: "Referral" },
+  { source: "Family", type: "Referral" },
+  { source: "Attorney", type: "Referral" },
+  { source: "Law firm", type: "Referral" },
+  { source: "Client", type: "Referral" },
+  { source: "Neighbor", type: "Referral" },
+  { source: "Employee", type: "Referral" },
+  { source: "Word of mouth", type: "Referral" },
+  { source: "Repeat", type: "Repeat" },
+  { source: "Current client", type: "Repeat" },
+  { source: "Previous client", type: "Repeat" },
+  { source: "Returning client", type: "Repeat" },
+  { source: "Unknown", type: "Unknown" },
+];
+
+const LEAD_SOURCE_ALIASES: Record<string, string> = {
+  "google ads": "Google",
+  "google lsa": "Google",
+  "google organic": "Google",
+  "google my business": "Google Maps",
+  gmb: "Google Maps",
+  maps: "Google Maps",
+  "apple maps": "Google Maps",
+  "local services": "Google",
+  "local service ads": "Google",
+  "meta form": "Meta",
+  "meta lead": "Meta",
+  "meta ads": "Meta",
+  "facebook ads": "Facebook",
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  "google/tiktok": "TikTok",
+  whatsapp: "WhatsApp",
+  "walk in": "Walk-in",
+  "walk-in": "Walk-in",
+  "in person": "Walk-in",
+  webchat: "Web chat",
+  "web chat": "Web chat",
+  chatgpt: "ChatGPT",
+  "chat gpt": "ChatGPT",
+  "chat gbt": "ChatGPT",
+  "al search": "ChatGPT",
+  ai: "ChatGPT",
+  website: "Website",
+  webite: "Website",
+  "website lead": "Website",
+  tv: "TV",
+  radio: "Radio",
+  youtube: "YouTube",
+  bing: "Bing",
+  nextdoor: "Nextdoor",
+  reddit: "Reddit",
+  email: "Email",
+  avvo: "Avvo",
+  internet: "Internet",
+  "internet search": "Internet",
+  "social media": "Social media",
+  "social med": "Social media",
+  direct: "Direct",
+  friend: "Friend",
+  family: "Family",
+  attorney: "Attorney",
+  "law firm": "Law firm",
+  "lawyer referral": "Attorney",
+  "word of mouth": "Word of mouth",
+  recommendation: "Word of mouth",
+  recomended: "Word of mouth",
+  recommended: "Word of mouth",
+  neighbor: "Neighbor",
+  employee: "Employee",
+  client: "Client",
+  "client referral": "Client",
+  repeat: "Repeat",
+  "current client": "Current client",
+  "existing client": "Current client",
+  "previous client": "Previous client",
+  "prior client": "Previous client",
+  "former client": "Previous client",
+  "returning client": "Returning client",
+  "return client": "Returning client",
+  unknown: "Unknown",
+  "n/a": "Unknown",
+  na: "Unknown",
+};
+
+export function isSourceType(value: string | null | undefined): value is SourceType {
+  return SOURCE_TYPES.includes(value as SourceType);
+}
+
+function canonicalizeLeadSource(trimmed: string): { source: string; type: SourceType | "" } {
+  const key = trimmed.toLowerCase();
+  const aliased = LEAD_SOURCE_ALIASES[key];
+  const source = aliased ?? LEAD_SOURCES.find((item) => item.source.toLowerCase() === key)?.source ?? trimmed;
+  const known = LEAD_SOURCES.find((item) => item.source.toLowerCase() === source.toLowerCase());
+  return { source: known?.source ?? source, type: known?.type ?? "" };
+}
+
+export function canonicalLeadSource(value: string | null | undefined): { source: string; type: SourceType | "" } {
+  const trimmed = (value ?? "").trim().replace(/\s+/g, " ");
+  if (!trimmed) return { source: "", type: "" };
+  const direct = canonicalizeLeadSource(trimmed);
+  if (direct.type || !trimmed.includes("/")) return direct;
+  for (const part of trimmed.split("/")) {
+    const hit = canonicalizeLeadSource(part.trim());
+    if (hit.type) return hit;
+  }
+  return direct;
+}
+
+const SOURCE_SNIPPETS = [
+  /(?:^|\n)\s*(?:[•\-*]\s*)*\*?\s*(?:lead\s*source|source)\s*\*?\s*:?\s*\*?\s*([^\n]+)/gi,
+  /how (?:did|have) you hear(?: about (?:us|ramos(?: james)?))?[^?\n]*\??\s*([^\n]{0,180})/gi,
+  /where did you (?:hear|find)[^?\n]*\??\s*([^\n]{0,180})/gi,
+  /who referred you[^?\n]*\??\s*([^\n]{0,180})/gi,
+  /c[oó]mo (?:se|te) enter[oó][^?\n]*\??\s*([^\n]{0,180})/gi,
+  /qui[eé]n (?:lo|la|te) refiri[oó][^?\n]*\??\s*([^\n]{0,180})/gi,
+  /(?:found|heard about|saw) (?:us|you|ramos)[^\n]{0,120}/gi,
+  /referred by[^\n]{0,80}/gi,
+  /referid[oa] por[^\n]{0,80}/gi,
+  /(?:friend|family|attorney|client)\s+referral/gi,
+];
+
+const SOURCE_PHRASES: { pattern: RegExp; source: string }[] = [
+  { pattern: /google\s+my\s+business|\bgmb\b|google\s+maps/i, source: "Google Maps" },
+  { pattern: /google/i, source: "Google" },
+  { pattern: /facebook/i, source: "Facebook" },
+  { pattern: /instagram/i, source: "Instagram" },
+  { pattern: /tik\s*tok/i, source: "TikTok" },
+  { pattern: /whats\s*app/i, source: "WhatsApp" },
+  { pattern: /\bmeta\b/i, source: "Meta" },
+  { pattern: /youtube/i, source: "YouTube" },
+  { pattern: /nextdoor/i, source: "Nextdoor" },
+  { pattern: /chatgpt|chat\s*gpt/i, source: "ChatGPT" },
+  { pattern: /\bavvo\b/i, source: "Avvo" },
+  { pattern: /super\s+lawyers/i, source: "Super Lawyers" },
+  { pattern: /\breddit\b/i, source: "Reddit" },
+  { pattern: /\bbing\b/i, source: "Bing" },
+  { pattern: /\bradio\b/i, source: "Radio" },
+  { pattern: /\btv\b/i, source: "TV" },
+  { pattern: /walk[\s-]?in|in person/i, source: "Walk-in" },
+  { pattern: /web\s*chat/i, source: "Web chat" },
+  { pattern: /previous client|prior client|former client/i, source: "Previous client" },
+  { pattern: /returning client|return(?:ing)? client|called before/i, source: "Returning client" },
+  { pattern: /current client|existing client/i, source: "Current client" },
+  { pattern: /word of mouth/i, source: "Word of mouth" },
+  { pattern: /\bfriend\b/i, source: "Friend" },
+  { pattern: /family member|\bfamily\b/i, source: "Family" },
+  { pattern: /\battorney\b|\blawyer\b|\blaw firm\b|\babogad[oa]\b/i, source: "Attorney" },
+  { pattern: /\bneighbor\b|\bneighbour\b|\bvecin[oa]\b/i, source: "Neighbor" },
+  { pattern: /\bemployee\b/i, source: "Employee" },
+  { pattern: /\bclient\b|\bcliente\b/i, source: "Client" },
+  { pattern: /\bamig[oa]\b/i, source: "Friend" },
+  { pattern: /\bfamilia\b/i, source: "Family" },
+];
+
+function sourceByName(name: string): { source: string; type: SourceType } | null {
+  const known = LEAD_SOURCES.find((item) => item.source === name);
+  return known ? { source: known.source, type: known.type } : null;
+}
+
+function sourceInSnippet(snippet: string, labeled: boolean): { source: string; type: SourceType | "" } | null {
+  const cleaned = snippet.replace(/\*/g, "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+  if (labeled && /^(other|n\/a|na|none|unknown|-|null)$/i.test(cleaned)) return sourceByName("Unknown");
+  const direct = canonicalLeadSource(cleaned);
+  if (direct.type) return { source: direct.source, type: direct.type };
+  if (/family law/i.test(cleaned)) return null;
+  for (const phrase of SOURCE_PHRASES) {
+    if (phrase.pattern.test(cleaned)) return sourceByName(phrase.source);
+  }
+  if (!labeled) return null;
+  const named = cleaned.replace(/[·|].*$/, "").trim();
+  if (!named || named.length > 80 || named.split(/\s+/).length > 6 || /[.?!]/.test(named)) return null;
+  return { source: named, type: "" };
+}
+
+/** Read a Slack post or Quo transcript for where the lead came from. */
+export function leadSourceFromText(text: string | null | undefined): { source: string; type: SourceType | "" } | null {
+  const body = text?.trim() ?? "";
+  if (!body) return null;
+  let labeled = true;
+  for (const pattern of SOURCE_SNIPPETS) {
+    pattern.lastIndex = 0;
+    let match = pattern.exec(body);
+    while (match) {
+      const found = sourceInSnippet(match[1] || match[0], labeled);
+      if (found) return found;
+      match = pattern.exec(body);
+    }
+    labeled = false;
+  }
+  return null;
+}
 
 export const PI_CASE_TYPES = [
   "Other Injury",

@@ -22,6 +22,7 @@ import { docketBaseUrl } from "@/lib/supabase/config";
 type HistoryTouch = {
   lead_id: string | null;
   phone: string | null;
+  phone_e164?: string | null;
   type: string | null;
   direction: string | null;
   occurred_at: string | null;
@@ -109,8 +110,8 @@ async function loadTouchesByPhone(
   for (let from = 0; from < 20000; from += page) {
     const { data } = await supabase
       .from("intake_interactions")
-      .select("lead_id, phone, type, direction, occurred_at, quo_link, slack_permalink")
-      .in("phone", phones)
+      .select("lead_id, phone, phone_e164, type, direction, occurred_at, quo_link, slack_permalink")
+      .in("phone_e164", phones.map((phone) => `+1${phone}`))
       .order("occurred_at", { ascending: false })
       .range(from, from + page - 1);
     const batch = (data ?? []) as HistoryTouch[];
@@ -380,7 +381,7 @@ export default async function LeadListPage({
 
   const talked = new Set<string>();
   const contact = new Map<string, { calls: number; texts: number }>();
-  const nextCall = new Map<string, { id: string; dueAt: string; tag: string | null }>();
+  const nextCall = new Map<string, { id: string; dueAt: string; tag: string | null; position: number }>();
   const nextText = new Map<string, { id: string; dueAt: string }>();
   const lastOutreach = new Map<string, string>();
   const outsideLinks = new Map<string, { quo: string | null; slack: string | null }>();
@@ -402,7 +403,7 @@ export default async function LeadListPage({
   }
   if (ids.length) {
     const [{ data: calls }, touches] = await Promise.all([
-      supabase.from("lead_jobs").select("id, lead_id, due_at, queue, assigned_name").in("lead_id", ids).eq("status", "pending"),
+      supabase.from("lead_jobs").select("id, lead_id, due_at, queue, assigned_name, position").in("lead_id", ids).eq("status", "pending"),
       loadTouches(supabase, ids),
     ]);
     for (const touch of touches) {
@@ -428,11 +429,20 @@ export default async function LeadListPage({
     const missingPhones = [...idsByPhone.keys()].filter((phone) =>
       (idsByPhone.get(phone) ?? []).some((id) => !lastOutreach.has(id)),
     );
+    for (const lead of leads) {
+      if (lastOutreach.has(lead.id)) continue;
+      if (lead.arrival !== "human_call" && lead.arrival !== "qualified_call" && lead.arrival !== "sona") continue;
+      if (!lead.created_at) continue;
+      lastOutreach.set(lead.id, lead.created_at);
+      const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
+      if (tally.calls === 0) tally.calls = 1;
+      contact.set(lead.id, tally);
+    }
     for (const touch of await loadTouchesByPhone(supabase, missingPhones)) {
       if (touch.lead_id && idSet.has(touch.lead_id)) continue;
       const type = String(touch.type || "").toLowerCase();
       if (!touch.occurred_at || !countsAsContact(type)) continue;
-      for (const leadId of idsByPhone.get(phoneKey(touch.phone)) ?? []) {
+      for (const leadId of idsByPhone.get(phoneKey(touch.phone) || phoneKey(touch.phone_e164)) ?? []) {
         const current = lastOutreach.get(leadId);
         if (!current || touch.occurred_at > current) lastOutreach.set(leadId, touch.occurred_at);
         rememberLinks(leadId, touch);
@@ -446,9 +456,11 @@ export default async function LeadListPage({
         continue;
       }
       if (job.queue !== "call") continue;
+      if (new Date(job.due_at).getTime() <= Date.now()) continue;
+      const position = typeof job.position === "number" ? job.position : Number.MAX_SAFE_INTEGER;
       const current = nextCall.get(job.lead_id);
-      if (!current || job.due_at < current.dueAt) {
-        nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name });
+      if (!current || position < current.position) {
+        nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name, position });
       }
     }
   }

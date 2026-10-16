@@ -95,6 +95,7 @@ export type ReviewSource = {
   agreement_sent_at: string | null;
   lead_date: string | null;
   created_at: string | null;
+  arrival?: string | null;
   summary?: string | null;
   case_detail?: string | null;
   source_note?: string | null;
@@ -157,7 +158,7 @@ export function toReviewLead(lead: ReviewSource): ReviewLead {
     qualified: yesNo(qualified),
     consulted,
     consultation,
-    firstContact: clean(lead.lead_date || lead.created_at).slice(0, 10),
+    firstContact: "",
     slackUrl: slackMessageUrl(lead),
     desired: yesNo(desired),
     desiredLocked: qualified === false || signed || contractSent(lead),

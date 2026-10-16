@@ -12,7 +12,7 @@ import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestin
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
 import { ButtonLabel } from "@/components/ButtonLabel";
-import { buttonPrimary, buttonQuiet, buttonSecondary } from "@/lib/ui";
+import { buttonPrimary, buttonSecondary } from "@/lib/ui";
 
 export type QueueRow = {
   id: string;
@@ -105,32 +105,22 @@ const COLUMNS: { id: Column; label: string; width: string }[] = [
   { id: "automation", label: "Automation", width: "10%" },
 ];
 
-function actionIsPast(at: string | null): boolean {
-  return Boolean(at && new Date(at).getTime() < Date.now());
-}
-
 function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; layout?: "stack" | "row" }) {
   const shown = lines.filter((line) => line.when !== "None");
   return (
     <>
       {shown.map((line) => {
-        const past = actionIsPast(line.at);
         if (layout === "row") {
           return (
             <div key={line.label} className="flex justify-between gap-3">
-              <dt className={past ? "font-medium text-amber-800" : "text-slate-500"}>{line.label}</dt>
-              <dd className={past ? "font-medium text-amber-800" : ""}>
-                {past ? "Overdue · " : ""}
-                {line.when}
-              </dd>
+              <dt className="text-slate-500">{line.label}</dt>
+              <dd>{line.when}</dd>
             </div>
           );
         }
         return (
-          <p key={line.label} className={past ? "font-medium text-amber-800" : "text-slate-600"}>
-            <span className={past ? "text-amber-900" : "text-slate-500"}>{line.label}</span>
-            {past ? " overdue · " : " "}
-            {line.when}
+          <p key={line.label} className="text-slate-600">
+            <span className="text-slate-500">{line.label}</span> {line.when}
           </p>
         );
       })}
@@ -192,8 +182,8 @@ export function WorkQueue({
 
   return (
     <div className={`mt-4 grid items-start gap-4 ${selected ? "xl:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
-      <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
-        <table className="w-full table-fixed text-left text-xs">
+      <div className="min-w-0 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <table className="w-full min-w-[72rem] table-fixed text-left text-xs">
           <colgroup>
             <col style={{ width: "15%" }} />
             <col style={{ width: "12%" }} />
@@ -284,13 +274,13 @@ export function WorkQueue({
                 </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.consultWhen}</td>
                 <td className="px-1 py-2 text-center">
-                  <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} />
+                  <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} fit />
                 </td>
                 <td className="px-1 py-2 text-center">
                   {row.desiredLocked ? (
                     <span className="font-medium text-slate-900">{row.desired}</span>
                   ) : (
-                    <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} />
+                    <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} fit />
                   )}
                 </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.lastLabel}</td>
@@ -463,12 +453,14 @@ function YesNoCell({
   value,
   action,
   align = "center",
+  fit = false,
 }: {
   row: QueueRow;
   field: "qualified" | "desired";
   value: string;
   action: (formData: FormData) => Promise<void>;
   align?: "center" | "start";
+  fit?: boolean;
 }) {
   const label = field === "qualified" ? "Qualified" : "Desired";
   const [pending, setPending] = useState<"yes" | "no" | null>(null);
@@ -495,12 +487,14 @@ function YesNoCell({
     }
   }
 
-  const side = "h-9 min-w-12 px-2.5 text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2";
+  const side = fit
+    ? "flex h-7 min-w-0 flex-1 items-center justify-center whitespace-nowrap px-1 text-[11px] font-medium leading-none transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+    : "h-9 min-w-0 flex-1 px-2 text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent";
 
   return (
-    <div className={`flex flex-col ${align === "start" ? "items-start" : "items-center"}`}>
-      <div className="inline-flex items-center">
-        <div className="inline-flex overflow-hidden rounded-lg border border-slate-300 bg-white" role="group" aria-label={label}>
+    <div className={`flex flex-col ${align === "start" ? "items-stretch" : "items-center"}`}>
+      <div className={`relative ${fit ? "mx-auto w-full max-w-[6.5rem]" : "w-full"}`}>
+        <div className="flex w-full overflow-hidden rounded-lg border border-slate-300 bg-white" role="group" aria-label={label}>
           <button
             type="button"
             aria-label={`${label} yes`}
@@ -524,7 +518,7 @@ function YesNoCell({
             No
           </button>
         </div>
-        <span className={`ml-1.5 h-1.5 w-1.5 rounded-full ${unknown ? "bg-amber-500" : "bg-transparent"}`} aria-hidden="true" />
+        <span className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${unknown ? "bg-amber-500" : "bg-transparent"}`} aria-hidden="true" />
       </div>
       <span className="mt-0.5 h-4 text-[11px] font-medium" aria-live="polite">
         {failed ? <span className="text-red-700">Failed</span> : pending ? <span className="text-slate-500">Saving</span> : saved ? <span className="text-emerald-700">Saved</span> : null}
@@ -554,7 +548,7 @@ function PriorityCell({ row }: { row: QueueRow }) {
     return (
       <form action={markPriority}>
         <input type="hidden" name="lead_id" value={row.id} />
-        <button className={`${buttonQuiet} mx-auto h-auto min-h-9 px-2 text-center leading-tight`}>
+        <button className="mx-auto inline-flex w-full max-w-[5.25rem] items-center justify-center rounded-lg border border-slate-300 bg-white px-1.5 py-1.5 text-center text-[11px] font-medium leading-tight text-navy shadow-sm transition duration-150 hover:border-navy hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2">
           Flag priority
         </button>
       </form>
@@ -682,7 +676,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</p>
               <div className="mt-1">
-                <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} align="start" />
+                <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} align="start" fit />
               </div>
             </div>
             <div>
@@ -691,7 +685,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
                 {row.desiredLocked ? (
                   <span className="text-sm text-slate-900">{row.desired}</span>
                 ) : (
-                  <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} align="start" />
+                  <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} align="start" fit />
                 )}
               </div>
             </div>

@@ -15,6 +15,17 @@ function withCurrent(options: readonly string[], current: string): string[] {
   return [...options];
 }
 
+function formatContactDay(day: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "—";
+  const [year, month, date] = day.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, date)));
+}
+
 function box(missing: boolean, wide = false): string {
   return `${wide ? "min-w-[11rem]" : "min-w-[8rem]"} w-full rounded border px-1.5 py-1 text-xs text-slate-900 ${
     missing ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
@@ -318,7 +329,6 @@ function ReviewRow({ row }: { row: ReviewLead }) {
       data.set("source_type", next.sourceType);
       data.set("case_type", next.caseType);
       data.set("phone", next.phone);
-      data.set("lead_date", next.firstContact);
       if (!phoneEdited && !toE164(next.phone)) data.set("keep_phone", "1");
       await saveLeadDetails(data);
     }, next);
@@ -331,8 +341,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
       next.email !== row.email ||
       next.leadSource !== row.leadSource ||
       next.sourceType !== row.sourceType ||
-      next.caseType !== row.caseType ||
-      next.firstContact !== row.firstContact
+      next.caseType !== row.caseType
     );
   }
 
@@ -374,21 +383,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             ) : null}
           </p>
         </td>
-        <td className="px-2 py-1.5">
-          <input
-            aria-label="First contact"
-            type="date"
-            value={draft.firstContact}
-            onFocus={() => {
-              editing.current = true;
-            }}
-            onChange={(event) => {
-              const next = { ...draft, firstContact: event.target.value };
-              void persistDetails(next, next.phone !== row.phone);
-            }}
-            className={box(false)}
-          />
-        </td>
+        <td className="px-2 py-1.5 text-slate-700">{formatContactDay(row.firstContact)}</td>
         <td className="px-2 py-1.5 align-top text-[11px] leading-4 text-amber-800">
           {gaps.size ? [...gaps].map((item) => REVIEW_GAP_LABEL[item]).join(", ") : <span className="text-slate-400">Complete</span>}
         </td>

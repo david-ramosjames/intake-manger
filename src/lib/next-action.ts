@@ -56,7 +56,7 @@ function nextCallAt(input: {
 }): string | null {
   if (input.closed || input.sequence === "stop") return null;
   const now = Date.now();
-  if (input.pendingCallAt) return input.pendingCallAt;
+  if (input.pendingCallAt && new Date(input.pendingCallAt).getTime() > now) return input.pendingCallAt;
   const steps = [...input.callSteps].sort((a, b) => a.position - b.position);
   if (!steps.length || !input.callStart) return null;
   const start = new Date(input.callStart).getTime();

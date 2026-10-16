@@ -8,7 +8,6 @@ const LOGO = "https://res.cloudinary.com/dmmxuoa3p/image/upload/v1783363036/logo
 
 const LINKS = [
   { href: "/", label: "Work queue" },
-  { href: "/staff", label: "Staff" },
   { href: "/review", label: "Review" },
   { href: "/priority", label: "Priority" },
   { href: "/verify", label: "Verify" },
@@ -70,6 +69,16 @@ export function AppHeader({ email }: { email: string | null }) {
                 Sign out
               </button>
             </form>
+            <Link
+              href="/staff"
+              className={`border-b-2 font-medium ${
+                isActive(pathname, "/staff")
+                  ? "border-accent text-white"
+                  : "border-transparent text-white/75 hover:text-white"
+              }`}
+            >
+              Staff
+            </Link>
             <Link
               href="/how-it-fits"
               className={`border-b-2 font-medium ${

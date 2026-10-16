@@ -241,7 +241,7 @@ export function WorkQueue({
                     row.referralSent ? (
                       <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
                     ) : (
-                      <button type="button" onClick={() => setSelectedId(row.id)} className="mt-1 text-[11px] font-medium text-orange-800 underline">
+                      <button type="button" onClick={() => setSelectedId(row.id)} className="mt-1 cursor-pointer rounded px-1 text-[11px] font-medium text-orange-800 underline transition-colors hover:bg-orange-100">
                         Send referral
                       </button>
                     )
@@ -421,10 +421,10 @@ function TextAutomation({ row }: { row: QueueRow }) {
   return (
     <form action={startTextSequence} className="flex flex-col items-center gap-1">
       <input type="hidden" name="lead_id" value={row.id} />
-      <button name="sequence" value="new-lead" className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700">
+      <button name="sequence" value="new-lead" className="cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
         New lead
       </button>
-      <button name="sequence" value="more-info" className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700">
+      <button name="sequence" value="more-info" className="cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
         More info
       </button>
     </form>
@@ -452,8 +452,8 @@ function YesNoCell({
         name="decision"
         value="yes"
         aria-label={`${label} yes`}
-        className={`rounded-md px-1.5 py-1 text-[11px] font-medium ${
-          value === "Yes" ? "bg-navy text-white" : "border border-slate-300 bg-white text-slate-700"
+        className={`cursor-pointer rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors ${
+          value === "Yes" ? "bg-navy text-white hover:bg-[#16366e]" : "border border-slate-300 bg-white text-slate-700 hover:border-navy hover:bg-slate-100 hover:text-navy"
         }`}
       >
         Yes
@@ -462,8 +462,8 @@ function YesNoCell({
         name="decision"
         value="no"
         aria-label={`${label} no`}
-        className={`rounded-md px-1.5 py-1 text-[11px] font-medium ${
-          value === "No" ? "bg-navy text-white" : "border border-slate-300 bg-white text-slate-700"
+        className={`cursor-pointer rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors ${
+          value === "No" ? "bg-navy text-white hover:bg-[#16366e]" : "border border-slate-300 bg-white text-slate-700 hover:border-navy hover:bg-slate-100 hover:text-navy"
         }`}
       >
         No
@@ -479,10 +479,10 @@ function PriorityCell({ row }: { row: QueueRow }) {
         <input type="hidden" name="lead_id" value={row.id} />
         <span className="text-xs font-medium text-slate-700">Suggested</span>
         <span className="flex gap-1">
-          <button name="decision" value="confirm" className="rounded-md bg-navy px-2 py-1 text-xs font-medium text-white" aria-label="Add to priority">
+          <button name="decision" value="confirm" className="cursor-pointer rounded-md bg-navy px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-[#16366e]" aria-label="Add to priority">
             Yes
           </button>
-          <button name="decision" value="dismiss" className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs" aria-label="Not a priority">
+          <button name="decision" value="dismiss" className="cursor-pointer rounded-md border border-slate-300 bg-white px-2 py-1 text-xs transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy" aria-label="Not a priority">
             No
           </button>
         </span>
@@ -493,7 +493,7 @@ function PriorityCell({ row }: { row: QueueRow }) {
     return (
       <form action={markPriority}>
         <input type="hidden" name="lead_id" value={row.id} />
-        <button className="mx-auto rounded-md border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] font-medium leading-tight text-slate-700">
+        <button className="mx-auto cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
           <span className="block">Make</span>
           <span className="block">priority</span>
         </button>
@@ -733,7 +733,7 @@ function QueueReferral({
               type="button"
               disabled={pending}
               onClick={() => void submit("send")}
-              className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+              className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
             >
               {pending ? "Saving…" : "Send referral"}
             </button>
@@ -741,7 +741,7 @@ function QueueReferral({
               type="button"
               disabled={pending}
               onClick={() => void submit("already")}
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 disabled:opacity-60"
+              className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
             >
               Already sent
             </button>
@@ -884,10 +884,10 @@ function LeadDrawer({
               {row.canStartText ? (
                 <form action={startTextSequence} className="flex flex-wrap gap-2">
                   <input type="hidden" name="lead_id" value={row.id} />
-                  <button name="sequence" value="new-lead" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+                  <button name="sequence" value="new-lead" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
                     New lead
                   </button>
-                  <button name="sequence" value="more-info" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900">
+                  <button name="sequence" value="more-info" className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
                     More info
                   </button>
                 </form>

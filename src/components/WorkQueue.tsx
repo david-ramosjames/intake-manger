@@ -6,7 +6,8 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadTags, setConsultation, setDesired, setQualified, startTextSequence } from "@/lib/ops-actions";
+import { PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, setConsultation, setDesired, setQualified, startTextSequence } from "@/lib/ops-actions";
 import type { NextActionLine } from "@/lib/next-action";
 import { formatChicago } from "@/lib/time";
 
@@ -17,6 +18,9 @@ export type QueueRow = {
   closeSuggestion: "decline" | "not_interested" | "not_a_lead" | null;
   identityStatus: LeadIdentity | null;
   accident: string;
+  caseType: string;
+  leadSource: string;
+  sourceType: string;
   when: string;
   priority: string | null;
   prioritySuggestion: string | null;
@@ -429,6 +433,45 @@ function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: strin
   );
 }
 
+function LeadFacts({ row }: { row: QueueRow }) {
+  const caseOptions = new Set<string>(PI_CASE_TYPES);
+  if (row.caseType) caseOptions.add(row.caseType);
+  const sourceOptions = new Set<string>(SOURCE_TYPES);
+  if (row.sourceType) sourceOptions.add(row.sourceType);
+  return (
+    <form action={saveLeadDetails} className="grid gap-2 rounded-lg border border-slate-200 p-3 text-sm">
+      <input type="hidden" name="lead_id" value={row.id} />
+      <label className="block">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Case type</span>
+        <select name="case_type" defaultValue={row.caseType} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5">
+          <option value="">Not set</option>
+          {[...caseOptions].map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Lead source</span>
+        <input name="lead_source" defaultValue={row.leadSource} placeholder="Google, referral" className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5" />
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Source type</span>
+        <select name="source_type" defaultValue={row.sourceType} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5">
+          <option value="">Not set</option>
+          {[...sourceOptions].map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="mt-1 justify-self-start rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Save</button>
+    </form>
+  );
+}
+
 function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
   const [touches, setTouches] = useState<Touch[] | null>(null);
   useEffect(() => {
@@ -467,6 +510,7 @@ function LeadDrawer({ row, onClose }: { row: QueueRow; onClose: () => void }) {
         </button>
       </div>
       <div className="space-y-5 overflow-y-auto px-4 py-4">
+        <LeadFacts row={row} />
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>

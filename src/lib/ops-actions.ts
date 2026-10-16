@@ -13,6 +13,7 @@ import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
+import { isPiCaseType } from "./leads";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { toE164 } from "./phone";
@@ -202,6 +203,43 @@ export async function setConsultation(formData: FormData) {
     event_type: "consultation_set",
     actor: email,
     payload: { consultation_date: consultationDate },
+  });
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath(`/leads/${leadId}`);
+}
+
+export async function saveLeadDetails(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const caseType = text(formData, "case_type") || null;
+  const leadSource = text(formData, "lead_source") || null;
+  const sourceType = text(formData, "source_type") || null;
+  const { data: before, error: loadError } = await supabase
+    .from("leads")
+    .select("caller_class, close_suggestion")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
+  const patch: Record<string, string | null> = {
+    case_type: caseType,
+    lead_source: leadSource,
+    source_type: sourceType,
+    source_channel: sourceType,
+  };
+  if (isPiCaseType(caseType) && before.caller_class === "non_pi") {
+    patch.caller_class = null;
+    patch.practice_area = "personal_injury";
+    if (before.close_suggestion === "decline") patch.close_suggestion = null;
+  }
+  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "lead_details",
+    actor: email,
+    payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType },
   });
   revalidatePath("/");
   revalidatePath("/priority");

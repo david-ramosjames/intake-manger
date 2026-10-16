@@ -20,6 +20,7 @@ export function nextActionLines(input: {
   callSteps: CallStep[];
   priority?: boolean;
   contactAt?: string | null;
+  leadId?: string | null;
 }): NextActionLine[] {
   const lines: NextActionLine[] = [];
   if (!input.closed && (input.textStatus || "").toLowerCase() === "active" && input.textNextAt) {
@@ -44,6 +45,7 @@ function nextCallAt(input: {
   callSteps: CallStep[];
   priority?: boolean;
   contactAt?: string | null;
+  leadId?: string | null;
 }): string | null {
   if (input.closed || input.sequence === "stop") return null;
   const now = Date.now();
@@ -61,7 +63,7 @@ function nextCallAt(input: {
       index,
       contactAt,
       priority: Boolean(input.priority),
-      varyKey: `${input.callStart}:${index}`,
+      varyKey: `${input.leadId || input.callStart}:${step.position}`,
     });
     if (new Date(at).getTime() > now) return at;
   }

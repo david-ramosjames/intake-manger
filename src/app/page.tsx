@@ -3,7 +3,7 @@ import { QueueHelp } from "@/components/QueueHelp";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
 import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
-import { daysSince, isLeadView, leadTitle, listAccident, slackMessageUrl, type Lead, type LeadView } from "@/lib/leads";
+import { daysSince, isLeadView, isPiCaseType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
 import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
@@ -165,6 +165,7 @@ type ListLead = Pick<
   | "identity_status"
   | "lead_source"
   | "source_channel"
+  | "source_type"
   | "source_note"
   | "case_type"
   | "case_detail"
@@ -499,7 +500,10 @@ export default async function LeadListPage({
       priority: row.priority ? PRIORITY_PLACE_LABEL[row.priority] : null,
       prioritySuggestion: row.lead.priority_suggestion,
       actionTitle: row.actionTitle,
-      label: callerClassLabel(row.lead.caller_class) ?? row.label,
+      label: (row.lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType(row.lead)) ? null : callerClassLabel(row.lead.caller_class)) ?? row.label,
+      caseType: suggestedCaseType(row.lead),
+      leadSource: row.lead.lead_source?.trim() || (listDetail(row.lead) === "—" ? "" : listDetail(row.lead)),
+      sourceType: row.lead.source_channel || row.lead.source_type || "",
       stageClassName: stageClass(row.label),
       stageStripe: stageStripe(row.label),
       step: row.step,
@@ -511,7 +515,7 @@ export default async function LeadListPage({
       desired: desiredWord(milestoneDesired(row.lead)),
       desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead) || milestoneQualified(row.lead) === false,
       signed: milestoneSigned(row.lead),
-      nonPi: row.lead.caller_class === "non_pi",
+      nonPi: row.lead.caller_class === "non_pi" && !isPiCaseType(suggestedCaseType(row.lead)),
       callerClass: row.lead.caller_class,
       confirmSigned: signatureNeedsConfirm(row.lead),
       lastLabel: lastContacted(row.outreach),
@@ -575,6 +579,7 @@ export default async function LeadListPage({
         }),
         priority: row.priority === "contract" || row.priority === "flagged",
         contactAt: row.lead.created_at,
+        leadId: row.lead.id,
       }),
     };
   });

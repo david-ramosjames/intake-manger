@@ -28,6 +28,22 @@ export const LEAD_KIND_LABEL: Record<LeadKind, string> = {
 
 export const SOURCE_CHANNELS = ["Call", "Web form", "Meta", "Facebook", "WhatsApp", "Website"] as const;
 
+export const SOURCE_TYPES = ["Call", "Web form", "Landing page", "Meta", "Facebook", "WhatsApp", "Website", "TikTok", "Referral"] as const;
+
+export const PI_CASE_TYPES = [
+  "Car accident",
+  "Truck accident",
+  "Motorcycle",
+  "Pedestrian",
+  "Dog bite",
+  "Slip and fall",
+  "Assault",
+  "Work accident",
+  "Premises",
+  "Wrongful death",
+  "Other",
+] as const;
+
 export const LEAD_ARRIVAL_LABEL: Record<LeadArrival, string> = {
   form: "Form",
   missed: "Missed call",
@@ -292,12 +308,35 @@ function usableAccident(value: string | null | undefined): string | null {
 
 function narrativeCaseType(text: string | null | undefined): string | null {
   const body = text ?? "";
-  if (/\b(fight|assault(?:ed)?|attacked|beaten|beer bottle)\b/i.test(body)) return "Assault";
-  if (/\bdog bite|bitten by (?:a |the )?dog\b/i.test(body)) return "Dog Bite";
+  if (/\bdog bite|bitten by (?:a |the )?(?:\w+ )?dog|attacked by (?:a |the )?(?:\w+ )?dogs?\b/i.test(body)) return "Dog bite";
   if (/\b(?:slip(?:ped)? and fall|wet floor)\b/i.test(body)) return "Slip and fall";
-  if (/\b(?:workers?'? compensation|work accident)\b/i.test(body)) return "Work Accident";
+  if (/\b(?:workers?'? compensation|work accident|workplace injury)\b/i.test(body)) return "Work accident";
+  if (/\b(?:truck accident|18-wheeler)\b/i.test(body)) return "Truck accident";
+  if (/\bmotorcycle\b/i.test(body)) return "Motorcycle";
+  if (/\bpedestrian\b/i.test(body)) return "Pedestrian";
   if (/\b(?:car accident|rear-?ended|other driver)\b/i.test(body)) return "Car accident";
+  if (/\bwrongful death\b/i.test(body)) return "Wrongful death";
+  if (/\b(?:premises|slip and fall)\b/i.test(body)) return "Premises";
+  if (/\b(fight|assault(?:ed)?|attacked|beaten|beer bottle)\b/i.test(body)) return "Assault";
   return null;
+}
+
+export function isPiCaseType(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return PI_CASE_TYPES.some((item) => item.toLowerCase() === value.toLowerCase());
+}
+
+export function canonicalCaseType(value: string | null | undefined): string | null {
+  const text = usableFact(value);
+  if (!text) return null;
+  const match = PI_CASE_TYPES.find((item) => item.toLowerCase() === text.toLowerCase());
+  return match ?? text;
+}
+
+export function suggestedCaseType(lead: { case_type: string | null; case_detail?: string | null; summary?: string | null }): string {
+  const stored = canonicalCaseType(lead.case_type);
+  if (stored && stored.length <= 40) return stored;
+  return narrativeCaseType(`${lead.summary ?? ""}\n${lead.case_detail ?? ""}`) ?? "";
 }
 
 export function listAccident(lead: { case_type: string | null; case_detail?: string | null }): string {

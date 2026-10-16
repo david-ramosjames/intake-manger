@@ -273,6 +273,7 @@ export default async function PriorityPage() {
         })),
         priority: Boolean(lead.priority) || ["sent", "viewed", "signed", "completed"].includes((lead.agreement_status || "").toLowerCase()) || Boolean(lead.agreement_sent_at),
         contactAt: lead.created_at,
+        leadId: lead.id,
       }),
     });
   }

@@ -390,8 +390,9 @@ export default async function LeadListPage({
         rememberLinks(leadId, touch);
       }
     }
+    const now = Date.now();
     for (const job of calls ?? []) {
-      if (!job.lead_id || !job.due_at) continue;
+      if (!job.lead_id || !job.due_at || new Date(job.due_at).getTime() <= now) continue;
       const current = nextCall.get(job.lead_id);
       if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
     }
@@ -556,7 +557,7 @@ export default async function LeadListPage({
         agreementStatus: row.lead.agreement_status,
         callStart: dayOneFor(row.lead, {
           closed: row.cycle === "signed" || row.cycle === "closed",
-          talked: talked.has(row.lead.id),
+          talked: row.cycle !== "contact",
           kind: row.lead.kind,
           agreementStatus: row.lead.agreement_status,
           agreementSentAt: row.lead.agreement_sent_at,
@@ -566,7 +567,7 @@ export default async function LeadListPage({
         pendingCallAt: row.nextAt ?? null,
         callSteps: stepsForLead(callSteps, {
           closed: row.cycle === "signed" || row.cycle === "closed",
-          talked: talked.has(row.lead.id),
+          talked: row.cycle !== "contact",
           kind: row.lead.kind,
           agreementStatus: row.lead.agreement_status,
           agreementSentAt: row.lead.agreement_sent_at,

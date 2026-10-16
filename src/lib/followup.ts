@@ -33,6 +33,8 @@ export function sequenceDayOne(sequence: CallSequenceId, lead: LeadBits): Date {
   if (sequence === "more_info") {
     const consult = dayStart(lead.consultation_date);
     if (consult) return consult;
+    const arrived = dayStart(lead.lead_date) ?? (lead.created_at ? new Date(lead.created_at) : null);
+    if (arrived && !Number.isNaN(arrived.getTime())) return arrived;
   }
   if (sequence === "first_talk") {
     const arrived = dayStart(lead.lead_date) ?? (lead.created_at ? new Date(lead.created_at) : null);
@@ -60,9 +62,16 @@ function closedLead(lead: LeadBits): boolean {
 export function sequenceForLead(lead: LeadBits, manual: "post_consult" | "auto"): CallSequenceId | null {
   if (closedLead(lead)) return null;
   if (contractSent(lead)) return "want_to_sign";
-  if (manual === "post_consult") return "more_info";
-  if (lead.arrival === "missed" || lead.arrival === "form") return "first_talk";
-  return null;
+  if (
+    manual === "post_consult" ||
+    lead.consultation_date ||
+    lead.arrival === "human_call" ||
+    lead.arrival === "qualified_call" ||
+    lead.arrival === "sona"
+  ) {
+    return "more_info";
+  }
+  return "first_talk";
 }
 
 function proposedCaller(sequence: CallSequenceId, position: number, owner: string | null | undefined): string | null {
@@ -146,22 +155,23 @@ export async function enrollFollowUp(
 export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   const { data, error } = await supabase
     .from("leads")
-    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, lead_date")
+    .select("id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date")
+    .eq("follow_up", true)
     .eq("signed_case", false)
     .is("case_id", null)
     .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")
-    .or("agreement_sent_at.not.is.null,agreement_status.in.(sent,viewed)")
-    .order("agreement_sent_at", { ascending: false, nullsFirst: false })
-    .limit(20);
+    .order("created_at", { ascending: false })
+    .limit(80);
   if (error) throw new Error(error.message);
 
-  const leads = ((data ?? []) as LeadBits[]).filter((lead) => contractSent(lead));
+  const leads = (data ?? []) as LeadBits[];
   if (!leads.length) return 0;
   const { data: existing, error: jobsError } = await supabase
     .from("lead_jobs")
-    .select("lead_id, sequence")
+    .select("lead_id, due_at")
     .eq("queue", "call")
-    .eq("sequence", "want_to_sign")
+    .eq("status", "pending")
+    .gt("due_at", new Date().toISOString())
     .in(
       "lead_id",
       leads.map((lead) => lead.id),
@@ -172,8 +182,9 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   let enrolled = 0;
   for (const lead of leads) {
     if (started.has(lead.id)) continue;
-    await enrollFollowUp(supabase, { ...lead, follow_up: true });
+    await enrollFollowUp(supabase, lead);
     enrolled += 1;
+    if (enrolled >= 40) break;
   }
   return enrolled;
 }

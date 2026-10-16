@@ -13,7 +13,7 @@ export const CALL_SEQUENCE_LABEL: Record<CallSequenceId, string> = {
 export const CALL_SEQUENCE_DETAIL: Record<CallSequenceId, string> = {
   want_to_sign: "Day 1 is the day the contract was sent. It runs until the contract is signed or the last day of the cadence.",
   first_talk: "Day 1 is the day the client contacted the firm.",
-  more_info: "Day 1 is the day of the consultation. Starting this sequence begins again at day 1.",
+  more_info: "Day 1 is the consultation, or the day the client was reached when there is no consultation yet.",
 };
 
 export function isCallSequence(value: string | null | undefined): value is CallSequenceId {
@@ -36,7 +36,7 @@ export function leadSequenceId(input: {
     (Boolean(input.agreementSentAt) && !["failed", "signed", "completed", "cancelled", "expired"].includes(agreement));
   if (contractOut) return "want_to_sign";
   if (!input.talked) return "first_talk";
-  return null;
+  return "more_info";
 }
 
 export function splitDelay(minutes: number): { days: number; hours: number } {

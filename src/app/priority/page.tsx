@@ -220,8 +220,9 @@ export default async function PriorityPage() {
     ? await supabase.from("lead_jobs").select("lead_id, due_at").in("lead_id", ids).eq("queue", "call").eq("status", "pending")
     : { data: [] };
   const nextCall = new Map<string, string>();
+  const now = Date.now();
   for (const job of jobsResult.data ?? []) {
-    if (!job.lead_id || !job.due_at) continue;
+    if (!job.lead_id || !job.due_at || new Date(job.due_at).getTime() <= now) continue;
     const current = nextCall.get(job.lead_id);
     if (!current || job.due_at < current) nextCall.set(job.lead_id, job.due_at);
   }
@@ -252,7 +253,7 @@ export default async function PriorityPage() {
         callStart: (() => {
           const sequence = leadSequenceId({
             closed: false,
-            talked: talked.has(lead.id),
+            talked: cycle !== "contact",
             kind: lead.kind,
             agreementStatus: lead.agreement_status,
             agreementSentAt: lead.agreement_sent_at,
@@ -264,7 +265,7 @@ export default async function PriorityPage() {
         pendingCallAt: nextCall.get(lead.id) ?? null,
         callSteps: callSteps.filter((step) => step.sequence === leadSequenceId({
           closed: false,
-          talked: talked.has(lead.id),
+          talked: cycle !== "contact",
           kind: lead.kind,
           agreementStatus: lead.agreement_status,
           agreementSentAt: lead.agreement_sent_at,

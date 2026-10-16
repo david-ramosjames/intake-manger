@@ -46,19 +46,24 @@ function nextCallAt(input: {
   contactAt?: string | null;
 }): string | null {
   if (input.closed || input.sequence === "stop") return null;
-  if (input.pendingCallAt) return input.pendingCallAt;
+  const now = Date.now();
+  if (input.pendingCallAt && new Date(input.pendingCallAt).getTime() > now) return input.pendingCallAt;
   const steps = [...input.callSteps].sort((a, b) => a.position - b.position);
-  if (!steps.length) return null;
-  const step = steps[Math.max(0, input.callsMade)] ?? null;
-  if (!step || !input.callStart) return null;
+  if (!steps.length || !input.callStart) return null;
   const start = new Date(input.callStart).getTime();
   if (Number.isNaN(start)) return null;
-  return scheduleCallback({
-    from: new Date(start + step.delay_minutes * 60_000),
-    window: step.callback_window,
-    index: Math.max(0, input.callsMade),
-    contactAt: input.contactAt ? new Date(input.contactAt) : null,
-    priority: Boolean(input.priority),
-    varyKey: `${input.callStart}:${input.callsMade}`,
-  });
+  const contactAt = input.contactAt ? new Date(input.contactAt) : null;
+  for (let index = Math.max(0, input.callsMade); index < steps.length; index += 1) {
+    const step = steps[index];
+    const at = scheduleCallback({
+      from: new Date(start + step.delay_minutes * 60_000),
+      window: step.callback_window,
+      index,
+      contactAt,
+      priority: Boolean(input.priority),
+      varyKey: `${input.callStart}:${index}`,
+    });
+    if (new Date(at).getTime() > now) return at;
+  }
+  return null;
 }

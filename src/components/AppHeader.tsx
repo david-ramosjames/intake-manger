@@ -8,13 +8,13 @@ const LOGO = "https://res.cloudinary.com/dmmxuoa3p/image/upload/v1783363036/logo
 
 const LINKS = [
   { href: "/", label: "Work queue" },
+  { href: "/staff", label: "Staff" },
   { href: "/review", label: "Review" },
   { href: "/priority", label: "Priority" },
   { href: "/verify", label: "Verify" },
   { href: "/sequences", label: "Sequences" },
   { href: "/calls", label: "Lead channel" },
   { href: "/referrals", label: "Referrals" },
-  { href: "/staff", label: "Staff" },
   { href: "/leads/new", label: "Add lead" },
 ];
 

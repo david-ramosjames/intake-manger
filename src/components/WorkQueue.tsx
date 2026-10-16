@@ -527,7 +527,7 @@ function fieldClass() {
 
 function PanelSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section>
+    <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
       <div className="mt-2 grid grid-cols-2 gap-3">{children}</div>
     </section>
@@ -549,8 +549,10 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
   async function onSubmit(formData: FormData) {
     setPending(true);
     setError(null);
+    const tags = document.getElementById(`lead-tags-${row.id}`);
     try {
       await saveLeadDetails(formData);
+      if (tags instanceof HTMLFormElement) await saveLeadTags(row.id, new FormData(tags));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -560,6 +562,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
   const caseOptions = new Set<string>(PI_CASE_TYPES);
   if (row.caseType) caseOptions.add(row.caseType);
   const formId = `lead-details-${row.id}`;
+  const nameValue = row.leadName || (row.title === "Not captured" ? "" : row.title);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -567,7 +570,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
           <input type="hidden" name="lead_id" value={row.id} />
           <PanelSection title="Contact">
             <FieldLabel label="Name" className="col-span-2">
-              <input name="lead_name" defaultValue={row.leadName} className={fieldClass()} />
+              <input name="lead_name" defaultValue={nameValue} className={fieldClass()} />
             </FieldLabel>
             <FieldLabel label="Phone">
               <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
@@ -610,38 +613,41 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
             <div />
           </PanelSection>
         </form>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</p>
-            <div className="mt-1">
-              <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} align="start" />
+        <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</h3>
+          <div className="mt-2 grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</p>
+              <div className="mt-1">
+                <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} align="start" />
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</p>
+              <div className="mt-1">
+                {row.desiredLocked ? (
+                  <span className="text-sm text-slate-900">{row.desired}</span>
+                ) : (
+                  <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} align="start" />
+                )}
+              </div>
+            </div>
+            <ConsultDate row={row} />
+            <TalkedWith row={row} staff={staff} />
+            <div className="col-span-2 flex flex-wrap items-center gap-3">
+              <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
+              {row.confirmSigned ? (
+                <form action={confirmSigned}>
+                  <input type="hidden" name="lead_id" value={row.id} />
+                  <button className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
+                    Confirm signed
+                  </button>
+                </form>
+              ) : null}
             </div>
           </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</p>
-            <div className="mt-1">
-              {row.desiredLocked ? (
-                <span className="text-sm text-slate-900">{row.desired}</span>
-              ) : (
-                <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} align="start" />
-              )}
-            </div>
-          </div>
-          <ConsultDate row={row} />
-          <TalkedWith row={row} staff={staff} />
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
-          {row.confirmSigned ? (
-            <form action={confirmSigned}>
-              <input type="hidden" name="lead_id" value={row.id} />
-              <button className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
-                Confirm signed
-              </button>
-            </form>
-          ) : null}
-        </div>
-        <TagEditor row={row} />
+        </section>
+        <TagEditor row={row} detailsFormId={formId} />
       </div>
       <div className="border-t border-slate-200 bg-white px-4 py-3">
         {error ? <p className="mb-2 text-sm text-red-700">{error}</p> : null}
@@ -1194,43 +1200,32 @@ function NonLeadChoice({ row }: { row: QueueRow }) {
   );
 }
 
-function TagEditor({ row }: { row: QueueRow }) {
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function onSubmit(formData: FormData) {
-    setPending(true);
-    setError(null);
-    try {
-      await saveLeadTags(row.id, formData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save tags");
-    } finally {
-      setPending(false);
-    }
-  }
-
+function TagEditor({ row, detailsFormId }: { row: QueueRow; detailsFormId: string }) {
   return (
-    <form action={onSubmit}>
-      <LeadTagFields
-        key={`${row.id}:${row.tags.join("|")}:${row.signed ? "signed" : "open"}:${row.qualifiedLabel}`}
-        tags={row.tags}
-        declineReason={row.declineReason}
-        signed={row.signed}
-        desired={row.desired === "Yes" || row.signed}
-        nonPi={row.nonPi}
-        callrail={row.callrail}
-        quiet
-        qualifiedMark={row.qualifiedLabel}
-      />
-      {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
-      <button
-        type="submit"
-        disabled={pending}
-        className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-      >
-        {pending ? "Saving…" : "Save"}
-      </button>
+    <form
+      id={`lead-tags-${row.id}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const details = document.getElementById(detailsFormId);
+        if (details instanceof HTMLFormElement) details.requestSubmit();
+      }}
+    >
+      <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tags</h3>
+        <div className="mt-2">
+          <LeadTagFields
+            key={`${row.id}:${row.tags.join("|")}:${row.signed ? "signed" : "open"}:${row.qualifiedLabel}`}
+            tags={row.tags}
+            declineReason={row.declineReason}
+            signed={row.signed}
+            desired={row.desired === "Yes" || row.signed}
+            nonPi={row.nonPi}
+            callrail={row.callrail}
+            quiet
+            qualifiedMark={row.qualifiedLabel}
+          />
+        </div>
+      </section>
     </form>
   );
 }

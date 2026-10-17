@@ -1532,11 +1532,11 @@ export async function addStaffContact(
     if (!userId) return { error: "That email does not have a firm login yet." };
     const { data: existing, error: existingError } = await supabase
       .from("contacts")
-      .select("id")
-      .or(`user_id.eq.${userId},email.ilike.${email}`)
+      .select("id, email")
+      .ilike("email", email)
       .limit(1);
     if (existingError) return { error: existingError.message };
-    if (existing?.length) return { error: "That person is already on the list." };
+    if (existing?.length) return { error: "That email is already on the list. Add the Slack ID on their row." };
     const now = Date.now();
     const { error } = await supabase.from("contacts").insert({
       user_id: userId,

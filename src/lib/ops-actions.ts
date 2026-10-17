@@ -234,8 +234,6 @@ export async function setNextAction(formData: FormData) {
   if (!leadId) throw new Error("Missing the lead.");
   const callJobId = text(formData, "call_job_id");
   const callAt = text(formData, "call_at");
-  const textAt = text(formData, "text_at");
-  const textJobId = text(formData, "text_job_id");
   const reminderAt = text(formData, "reminder_at");
   const tag = text(formData, "tag");
 
@@ -265,28 +263,6 @@ export async function setNextAction(formData: FormData) {
       event_type: "next_action",
       actor: email,
       payload: { queue: "call", due_at: due, assigned_name: tag },
-    });
-  }
-
-  if (textAt) {
-    const due = chicagoLocalToIso(textAt);
-    const { error } = await supabase.from("leads").update({ text_next_at: due }).eq("id", leadId);
-    if (error) throw new Error(error.message);
-    if (textJobId) {
-      const { error: jobError } = await supabase
-        .from("lead_jobs")
-        .update({ due_at: due })
-        .eq("id", textJobId)
-        .eq("lead_id", leadId)
-        .eq("queue", "text")
-        .eq("status", "pending");
-      if (jobError) throw new Error(jobError.message);
-    }
-    await supabase.from("lead_events").insert({
-      lead_id: leadId,
-      event_type: "next_action",
-      actor: email,
-      payload: { queue: "text", due_at: due },
     });
   }
 

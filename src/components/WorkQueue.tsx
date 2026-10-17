@@ -1047,15 +1047,14 @@ function LeadDrawer({
 
 function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
   const call = row.nextAction.find((line) => line.label === "Call" && line.at);
-  const text = row.nextAction.find((line) => line.label === "Text" && line.at);
   const reminder = row.nextAction.find((line) => line.label === "Reminder" && line.at);
-  const canEdit = Boolean(row.callJobId || text || reminder);
+  const canEdit = Boolean((row.callJobId && call?.at) || reminder?.at);
   if (!canEdit) return null;
   const names = row.callTag && !staff.includes(row.callTag) ? [row.callTag, ...staff] : staff;
   return (
     <form
       action={setNextAction}
-      key={`${row.id}:${row.callJobId ?? ""}:${call?.at ?? ""}:${row.callTag ?? ""}:${text?.at ?? ""}:${reminder?.at ?? ""}`}
+      key={`${row.id}:${row.callJobId ?? ""}:${call?.at ?? ""}:${row.callTag ?? ""}:${reminder?.at ?? ""}`}
       className="mt-3 space-y-2 rounded-md bg-slate-50 px-3 py-2"
     >
       <input type="hidden" name="lead_id" value={row.id} />
@@ -1088,20 +1087,6 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
             </select>
           </label>
           </div>
-        </>
-      ) : null}
-      {text?.at ? (
-        <>
-          {row.textJobId ? <input type="hidden" name="text_job_id" value={row.textJobId} /> : null}
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Text time
-            <input
-              type="datetime-local"
-              name="text_at"
-              defaultValue={chicagoLocalInput(text.at)}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
-            />
-          </label>
         </>
       ) : null}
       {reminder?.at ? (

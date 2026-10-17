@@ -147,7 +147,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
       const priority = Boolean(lead.priority) || sequence === "want_to_sign";
       const nowDate = new Date();
       const weekend = !weekendCallAllowed(nowDate, false);
-      if (weekend && !priority) continue;
+      if (weekend && !priority && !isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
       if (!weekend && sequence && !withinWorkHours(nowDate, hoursBySequence[sequence])) continue;
       const who = lead.lead_name || "Unnamed lead";
       const assigned = isPlaceholderOwner(job.assigned_name) ? "" : job.assigned_name?.trim() || "";

@@ -67,15 +67,30 @@ export async function dispatchDue(supabase: SupabaseClient) {
   const staff = await loadStaff(supabase);
   const hoursBySequence = await loadWorkHours(supabase);
   const result = { texts: 0, calls: 0, slack: 0, skipped: 0, failed: 0 };
+  // Post a reminder when its time arrives. The cron is every 10 minutes, and a
+  // new one waits out the reminder posted just before it, so half an hour still
+  // catches the one that just came due. Older pending jobs stay on the queue
+  // and are not announced.
+  const slackFloor = new Date(Date.now() - 30 * 60_000).toISOString();
+  const dueSelect = "id, lead_id, queue, body, due_at, notified_at, mention, assigned_name";
 
-  const dueJobs = supabase
+  let freshJobs = supabase
     .from("lead_jobs")
-    .select("id, lead_id, queue, body, due_at, notified_at, mention, assigned_name")
+    .select(dueSelect)
     .eq("status", "pending")
     .lte("due_at", now)
+    .gte("due_at", slackFloor)
     .order("due_at")
     .limit(40);
-  let jobsQuery = dueJobs;
+  let waitingJobs = supabase
+    .from("lead_jobs")
+    .select(dueSelect)
+    .eq("status", "pending")
+    .eq("queue", "call")
+    .not("notified_at", "is", null)
+    .lt("due_at", slackFloor)
+    .order("due_at")
+    .limit(40);
   if (slack.testPhone) {
     const tail = phoneTail(slack.testPhone);
     const { data: testLeads, error: testLeadError } = await supabase
@@ -86,10 +101,13 @@ export async function dispatchDue(supabase: SupabaseClient) {
     const testIds = (testLeads ?? []).map((lead) => String(lead.id));
     // Other due reminders stay pending during a test, so the oldest 40 of those
     // would fill this run before the test number is reached.
-    jobsQuery = testIds.length ? dueJobs.in("lead_id", testIds) : dueJobs.limit(0);
+    freshJobs = testIds.length ? freshJobs.in("lead_id", testIds) : freshJobs.limit(0);
+    waitingJobs = testIds.length ? waitingJobs.in("lead_id", testIds) : waitingJobs.limit(0);
   }
-  const { data: jobs, error } = await jobsQuery;
+  const [{ data: fresh, error }, { data: waiting, error: waitingError }] = await Promise.all([freshJobs, waitingJobs]);
   if (error) throw new Error(error.message);
+  if (waitingError) throw new Error(waitingError.message);
+  const jobs = [...(waiting ?? []), ...(fresh ?? [])];
 
   const leadIds = [...new Set((jobs ?? []).map((job) => job.lead_id as string))];
   const { data: leads } = leadIds.length
@@ -233,6 +251,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
     .select("id, lead_id, body, mention")
     .eq("status", "pending")
     .lte("due_at", now)
+    .gte("due_at", slackFloor)
     .order("due_at")
     .limit(20);
   if (postError) throw new Error(postError.message);

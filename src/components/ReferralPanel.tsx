@@ -28,6 +28,8 @@ export function ReferralPanel({
   const [area, setArea] = useState(practiceArea ?? "");
   const [destinationId, setDestinationId] = useState("");
   const [language, setLanguage] = useState<"en" | "es">("en");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const matches = useMemo(
     () => destinations.filter((destination) => destination.practice_areas.includes(area)),
     [destinations, area],
@@ -75,7 +77,18 @@ export function ReferralPanel({
         </button>
       </form>
 
-      <form action={sendReferral.bind(null, leadId)} className="grid gap-3">
+      <form
+        className="grid gap-3"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setPending(true);
+          setError(null);
+          const data = new FormData(event.currentTarget);
+          const result = await sendReferral(leadId, data);
+          setPending(false);
+          if (result.error) setError(result.error);
+        }}
+      >
         <input type="hidden" name="practice_area" value={area} />
         <label className="text-sm">
           <span className="font-medium text-slate-700">Attorney</span>
@@ -112,8 +125,9 @@ export function ReferralPanel({
         {preview ? (
           <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p>
         ) : null}
-        <button type="submit" className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
-          Send text and close
+        {error ? <p className="text-sm text-red-700">{error}</p> : null}
+        <button type="submit" disabled={pending} className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy disabled:opacity-60">
+          {pending ? "Sending…" : "Send text and close"}
         </button>
       </form>
     </div>

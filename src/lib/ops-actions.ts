@@ -20,6 +20,7 @@ import { isPracticeTestPhone } from "./test-phone";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { sendQuoText } from "./quo";
+import { listQuoLines } from "./quo-settings";
 import { DEFAULT_REFERRAL_SMS, isPracticeArea, renderReferralSms } from "./referrals";
 import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
 import { loadSlackSettings } from "./slack-settings";
@@ -95,7 +96,7 @@ export async function startTextSequence(
     if (sequence !== "new-lead" && sequence !== "more-info") return { error: "Choose New lead or More info." };
     const { data: lead, error } = await supabase
       .from("leads")
-      .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, email")
+      .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email")
       .eq("id", leadId)
       .maybeSingle();
     if (error || !lead) return { error: error?.message ?? "Lead not found" };
@@ -118,7 +119,7 @@ export async function startTextSequence(
       assigned_slack_user_id: owner?.slackUserId || null,
       assigned_slack_user_name: owner?.slackUserId ? owner.name : null,
       slack_channel_id: lead.slack_channel_id,
-      slack_thread_ts: lead.slack_thread_ts,
+      slack_thread_ts: lead.slack_thread_ts || lead.slack_message_ts,
       lead_detail: { email: lead.email, started_by: email },
     });
     if (!result.ok) return { error: textSequenceError(result.reason) };
@@ -777,29 +778,29 @@ export async function markReferralOpportunity(leadId: string, formData: FormData
   revalidatePath("/");
 }
 
-export async function sendReferral(leadId: string, formData: FormData) {
+export async function sendReferral(leadId: string, formData: FormData): Promise<{ error?: string }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
   const language = text(formData, "language") === "es" ? "es" : "en";
   const area = text(formData, "practice_area");
-  if (!destinationId) throw new Error("Pick the attorney to refer.");
-  if (!isPracticeArea(area)) throw new Error("Choose the legal practice area.");
+  if (!destinationId) return { error: "Pick the attorney to refer." };
+  if (!isPracticeArea(area)) return { error: "Choose the legal practice area." };
   const { data: destination, error: loadError } = await supabase
     .from("referral_destinations")
     .select("id, name, phone, address, email, website, practice_areas, spanish, notes")
     .eq("id", destinationId)
     .maybeSingle();
-  if (loadError || !destination) throw new Error(loadError?.message ?? "That referral destination is missing.");
-  if (!(destination.practice_areas ?? []).includes(area)) throw new Error("That attorney is not listed for this practice area.");
+  if (loadError || !destination) return { error: loadError?.message ?? "That referral destination is missing." };
+  if (!(destination.practice_areas ?? []).includes(area)) return { error: "That attorney is not listed for this practice area." };
 
   const { data: lead, error: leadError } = await supabase
     .from("leads")
     .select("lead_name, phone, phone_e164, case_type, summary, slack_channel_id, slack_thread_ts")
     .eq("id", leadId)
     .maybeSingle();
-  if (leadError || !lead) throw new Error(leadError?.message ?? "Lead not found");
+  if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
   const to = lead.phone_e164 || toE164(lead.phone);
-  if (!to) throw new Error("This lead needs a phone number before the text can go out.");
+  if (!to) return { error: "This lead needs a phone number before the text can go out." };
 
   const { data: templates } = await supabase.from("referral_templates").select("language, body");
   const stored = (templates ?? []).find((row) => row.language === language)?.body;
@@ -811,7 +812,7 @@ export async function sendReferral(leadId: string, formData: FormData) {
     destination,
   });
   const sent = await sendQuoText(to, message);
-  if (!sent.ok) throw new Error(`${sent.error} The lead is still open.`);
+  if (!sent.ok) return { error: `${sent.error} The lead is still open.` };
 
   const note = text(formData, "note");
   const outside = area !== "personal_injury";
@@ -828,7 +829,7 @@ export async function sendReferral(leadId: string, formData: FormData) {
       caller_class: outside ? "non_pi" : null,
     })
     .eq("id", leadId);
-  if (updateError) throw new Error(`The text was sent. The lead did not close: ${updateError.message}`);
+  if (updateError) return { error: `The text was sent. The lead did not close: ${updateError.message}` };
   await stopFollowUp(supabase, leadId, "Referred out.");
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
@@ -838,7 +839,7 @@ export async function sendReferral(leadId: string, formData: FormData) {
     language,
     message,
   });
-  if (error) throw new Error(`The text was sent and the lead was closed. The referral log did not save: ${error.message}`);
+  if (error) return { error: `The text was sent and the lead was closed. The referral log did not save: ${error.message}` };
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: "referred",
@@ -864,22 +865,23 @@ export async function sendReferral(leadId: string, formData: FormData) {
   revalidatePath("/");
   revalidatePath("/review");
   revalidatePath(`/leads/${leadId}`);
+  return {};
 }
 
-export async function markReferralAlreadySent(leadId: string, formData: FormData) {
+export async function markReferralAlreadySent(leadId: string, formData: FormData): Promise<{ error?: string }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
   const language = text(formData, "language") === "es" ? "es" : "en";
   const area = text(formData, "practice_area");
-  if (!destinationId) throw new Error("Pick the firm.");
-  if (!isPracticeArea(area)) throw new Error("That firm has no practice area for this referral.");
+  if (!destinationId) return { error: "Pick the firm." };
+  if (!isPracticeArea(area)) return { error: "That firm has no practice area for this referral." };
   const { data: destination, error: loadError } = await supabase
     .from("referral_destinations")
     .select("id, name, phone, practice_areas")
     .eq("id", destinationId)
     .maybeSingle();
-  if (loadError || !destination) throw new Error(loadError?.message ?? "That firm is missing.");
-  if (!(destination.practice_areas ?? []).includes(area)) throw new Error("That firm is not listed for this practice area.");
+  if (loadError || !destination) return { error: loadError?.message ?? "That firm is missing." };
+  if (!(destination.practice_areas ?? []).includes(area)) return { error: "That firm is not listed for this practice area." };
   const outside = area !== "personal_injury";
   const { error: updateError } = await supabase
     .from("leads")
@@ -894,7 +896,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
       caller_class: outside ? "non_pi" : null,
     })
     .eq("id", leadId);
-  if (updateError) throw new Error(updateError.message);
+  if (updateError) return { error: updateError.message };
   await stopFollowUp(supabase, leadId, "Referred out.");
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
@@ -904,7 +906,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     language,
     message: null,
   });
-  if (error) throw new Error(error.message);
+  if (error) return { error: error.message };
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: "referred",
@@ -914,6 +916,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
   revalidatePath("/");
   revalidatePath("/review");
   revalidatePath(`/leads/${leadId}`);
+  return {};
 }
 
 export async function saveReferralTemplate(formData: FormData) {
@@ -964,7 +967,7 @@ export async function saveSlackSettings(formData: FormData) {
   const channel = String(formData.get("slack_channel_id") ?? "").trim();
   const { data: current } = await supabase
     .from("intake_settings")
-    .select("slack_bot_token")
+    .select("slack_bot_token, quo_api_key, quo_from_number")
     .eq("id", "default")
     .maybeSingle();
   const token = pasted || (typeof current?.slack_bot_token === "string" ? current.slack_bot_token : null);
@@ -978,9 +981,38 @@ export async function saveSlackSettings(formData: FormData) {
     slack_bot_token: token,
     slack_channel_id: channel || "C026G89PPSS",
     slack_test_phone: testPhone,
+    quo_api_key: typeof current?.quo_api_key === "string" ? current.quo_api_key : null,
+    quo_from_number: typeof current?.quo_from_number === "string" ? current.quo_from_number : null,
     updated_at: new Date().toISOString(),
     updated_by: email,
   });
+  if (error) throw new Error(error.message);
+  revalidatePath("/how-it-fits");
+}
+
+export async function saveQuoSettings(formData: FormData) {
+  const { email } = await requireStaff();
+  const supabase = createSupabaseServiceClient();
+  const pasted = String(formData.get("quo_api_key") ?? "").trim();
+  const { data: current } = await supabase
+    .from("intake_settings")
+    .select("quo_api_key")
+    .eq("id", "default")
+    .maybeSingle();
+  const key = pasted || (typeof current?.quo_api_key === "string" ? current.quo_api_key : null) || process.env.QUO_API_KEY?.trim() || null;
+  const chosen = toE164(String(formData.get("quo_from_number") ?? ""));
+  if (!chosen) throw new Error("Choose the Quo number.");
+  const { lines } = await listQuoLines(key);
+  if (!lines.some((line) => line.number === chosen)) throw new Error("That number is not one of the Quo lines.");
+  const { error } = await supabase
+    .from("intake_settings")
+    .update({
+      quo_api_key: key,
+      quo_from_number: chosen,
+      updated_at: new Date().toISOString(),
+      updated_by: email,
+    })
+    .eq("id", "default");
   if (error) throw new Error(error.message);
   revalidatePath("/how-it-fits");
 }

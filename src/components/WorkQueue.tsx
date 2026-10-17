@@ -808,8 +808,12 @@ function QueueReferral({
     data.set("language", language);
     data.set("practice_area", area);
     try {
-      if (kind === "send") await sendReferral(row.id, data);
-      else await markReferralAlreadySent(row.id, data);
+      const result = kind === "send" ? await sendReferral(row.id, data) : await markReferralAlreadySent(row.id, data);
+      if (result.error) {
+        notify({ tone: "error", text: result.error });
+        setError(result.error);
+        return;
+      }
       notify({ tone: "saved", text: "Saved" });
     } catch (err) {
       notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the referral" });

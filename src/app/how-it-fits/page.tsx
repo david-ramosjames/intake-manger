@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { LeadFlow } from "@/components/LeadFlow";
-import { saveSlackSettings } from "@/lib/ops-actions";
+import { saveQuoSettings, saveSlackSettings } from "@/lib/ops-actions";
+import { listQuoLines, loadQuoSettings, quoLineLabel } from "@/lib/quo-settings";
 import { requireStaff } from "@/lib/session";
 import { loadSlackSettings } from "@/lib/slack-settings";
 
@@ -215,12 +216,12 @@ const ENVS: { service: string; name: string; why: string }[] = [
   {
     service: "Intake Manager",
     name: "QUO_API_KEY",
-    why: "Only if TEXT_SENDING is live.",
+    why: "Optional. The same key can be saved on this page. Referral texts use it. The follow-up queue stays off.",
   },
   {
     service: "Intake Manager",
     name: "QUO_FROM_NUMBER",
-    why: "Only if TEXT_SENDING is live. The Quo number the text is sent from.",
+    why: "Optional. The number is chosen on this page. This variable is only a fallback.",
   },
   {
     service: "Quo Router",
@@ -467,6 +468,11 @@ const ENVS: { service: string; name: string; why: string }[] = [
 export default async function HowItFitsPage() {
   await requireStaff();
   const slack = await loadSlackSettings();
+  const quo = await loadQuoSettings();
+  const numbers = await listQuoLines(quo.apiKey);
+  const lines = numbers.lines.some((line) => line.number === quo.fromNumber) || !quo.fromNumber
+    ? numbers.lines
+    : [{ number: quo.fromNumber, label: "Saved number" }, ...numbers.lines];
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight text-navy">How the intake services fit</h1>
@@ -567,6 +573,47 @@ export default async function HowItFitsPage() {
         </p>
         <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
           Save Slack settings
+        </button>
+      </form>
+
+      <h2 className="mt-10 text-lg font-semibold tracking-tight">Referral texts</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-600">
+        A referral text is sent from the Quo number you pick here. The follow-up queue stays off, so this does not start the other text sequences.
+      </p>
+      <form action={saveQuoSettings} className="mt-4 max-w-xl space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+        <label className="block text-sm">
+          <span className="font-medium text-slate-700">Quo API key</span>
+          <input
+            name="quo_api_key"
+            type="password"
+            autoComplete="off"
+            placeholder={quo.keySet ? "Saved. Paste a new key to replace it." : "Paste the Quo API key"}
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="font-medium text-slate-700">Send referral texts from</span>
+          <select
+            name="quo_from_number"
+            defaultValue={quo.fromNumber ?? ""}
+            required
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+          >
+            <option value="">Choose a number</option>
+            {lines.map((line) => (
+              <option key={line.number} value={line.number}>
+                {quoLineLabel(line)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="text-sm text-slate-500">
+          {quo.fromNumber ? `Referral texts send from ${quoLineLabel(lines.find((line) => line.number === quo.fromNumber) ?? { number: quo.fromNumber, label: "Saved number" })}.` : "No number chosen yet."}
+          {quo.keySet ? " A Quo key is saved." : " No Quo key saved yet. The list shows the firm lines until a key is saved."}
+          {numbers.warning ? ` ${numbers.warning}` : ""}
+        </p>
+        <button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy">
+          Save Quo settings
         </button>
       </form>
 

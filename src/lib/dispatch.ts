@@ -68,13 +68,27 @@ export async function dispatchDue(supabase: SupabaseClient) {
   const hoursBySequence = await loadWorkHours(supabase);
   const result = { texts: 0, calls: 0, slack: 0, skipped: 0, failed: 0 };
 
-  const { data: jobs, error } = await supabase
+  const dueJobs = supabase
     .from("lead_jobs")
     .select("id, lead_id, queue, body, due_at, notified_at, mention, assigned_name")
     .eq("status", "pending")
     .lte("due_at", now)
     .order("due_at")
     .limit(40);
+  let jobsQuery = dueJobs;
+  if (slack.testPhone) {
+    const tail = phoneTail(slack.testPhone);
+    const { data: testLeads, error: testLeadError } = await supabase
+      .from("leads")
+      .select("id")
+      .or(`phone_e164.ilike.%${tail},phone.ilike.%${tail}`);
+    if (testLeadError) throw new Error(testLeadError.message);
+    const testIds = (testLeads ?? []).map((lead) => String(lead.id));
+    // Other due reminders stay pending during a test, so the oldest 40 of those
+    // would fill this run before the test number is reached.
+    jobsQuery = testIds.length ? dueJobs.in("lead_id", testIds) : dueJobs.limit(0);
+  }
+  const { data: jobs, error } = await jobsQuery;
   if (error) throw new Error(error.message);
 
   const leadIds = [...new Set((jobs ?? []).map((job) => job.lead_id as string))];

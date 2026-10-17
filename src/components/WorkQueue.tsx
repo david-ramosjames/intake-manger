@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState, type ReactNode } from "react";
+import { createContext, useActionState, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
@@ -13,6 +13,27 @@ import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
 import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary, buttonSecondary } from "@/lib/ui";
+
+type DrawerNotice = { tone: "saving" | "saved" | "error"; text: string };
+const DrawerNoticeContext = createContext<(notice: DrawerNotice | null) => void>(() => {});
+
+function useNotedSubmit() {
+  const notify = useContext(DrawerNoticeContext);
+  const [pending, setPending] = useState(false);
+  async function submit(task: () => Promise<void>) {
+    setPending(true);
+    notify({ tone: "saving", text: "Saving…" });
+    try {
+      await task();
+      notify({ tone: "saved", text: "Saved" });
+    } catch (err) {
+      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
+    } finally {
+      setPending(false);
+    }
+  }
+  return { pending, submit };
+}
 
 export type QueueRow = {
   id: string;
@@ -429,6 +450,18 @@ function MenuChoice({ current, onPick, children }: { current: boolean; onPick: (
 
 function TextStartButtons({ leadId, compact = false }: { leadId: string; compact?: boolean }) {
   const [state, action, pending] = useActionState(startTextSequence, null);
+  const notify = useContext(DrawerNoticeContext);
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (pending) {
+      wasPending.current = true;
+      notify({ tone: "saving", text: "Saving…" });
+      return;
+    }
+    if (!wasPending.current) return;
+    wasPending.current = false;
+    notify(state?.error ? { tone: "error", text: state.error } : { tone: "saved", text: "Saved" });
+  }, [notify, pending, state]);
   const button = compact
     ? "cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
     : "";
@@ -472,6 +505,7 @@ function YesNoCell({
   fit?: boolean;
 }) {
   const label = field === "qualified" ? "Qualified" : "Desired";
+  const notify = useContext(DrawerNoticeContext);
   const [pending, setPending] = useState<"yes" | "no" | null>(null);
   const [saved, setSaved] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -483,14 +517,17 @@ function YesNoCell({
     setPending(decision);
     setSaved(false);
     setFailed(false);
+    notify({ tone: "saving", text: "Saving…" });
     const data = new FormData();
     data.set("lead_id", row.id);
     data.set("decision", decision);
     try {
       await action(data);
       setSaved(true);
+      notify({ tone: "saved", text: "Saved" });
     } catch {
       setFailed(true);
+      notify({ tone: "error", text: "Could not save." });
     } finally {
       setPending(null);
     }
@@ -607,6 +644,7 @@ function FieldLabel({ label, children, className = "" }: { label: string; childr
 }
 
 function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
+  const notify = useContext(DrawerNoticeContext);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -614,12 +652,15 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
     setPending(true);
     setSaved(false);
     setError(null);
+    notify({ tone: "saving", text: "Saving…" });
     const tags = document.getElementById(`lead-tags-${row.id}`);
     try {
       await saveLeadDetails(formData);
       if (tags instanceof HTMLFormElement) await saveLeadTags(row.id, new FormData(tags));
       setSaved(true);
+      notify({ tone: "saved", text: "Saved" });
     } catch (err) {
+      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save" });
       setError(err instanceof Error ? err.message : "Could not save");
     } finally {
       setPending(false);
@@ -703,12 +744,9 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
             <div className="col-span-2 flex flex-wrap items-center gap-3">
               <FunnelMark label="Signed" value={row.signed ? "Yes" : "—"} />
               {row.confirmSigned ? (
-                <form action={confirmSigned}>
+                <NotedForm action={confirmSigned} idleLabel="Confirm signed">
                   <input type="hidden" name="lead_id" value={row.id} />
-                  <button className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
-                    Confirm signed
-                  </button>
-                </form>
+                </NotedForm>
               ) : null}
             </div>
           </div>
@@ -720,7 +758,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
         <button
           form={formId}
           disabled={pending}
-          className={`${buttonPrimary} w-full`}
+          className={`${buttonPrimary} w-full ${saved && !pending ? "!bg-emerald-600 hover:!bg-emerald-700" : ""}`}
         >
           <ButtonLabel value={pending ? "Saving…" : saved ? "✓ Saved" : "Save"} reserve={["Saving…", "✓ Saved", "Save"]} />
         </button>
@@ -743,6 +781,7 @@ function QueueReferral({
   const [language, setLanguage] = useState<"en" | "es">("en");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const notify = useContext(DrawerNoticeContext);
   const firm = firms.find((item) => item.id === firmId) ?? null;
   const area = firm ? referralFirmArea(firm, row.practiceArea) : "";
   const preview =
@@ -763,6 +802,7 @@ function QueueReferral({
     }
     setPending(true);
     setError(null);
+    notify({ tone: "saving", text: "Saving…" });
     const data = new FormData();
     data.set("destination_id", firm.id);
     data.set("language", language);
@@ -770,7 +810,9 @@ function QueueReferral({
     try {
       if (kind === "send") await sendReferral(row.id, data);
       else await markReferralAlreadySent(row.id, data);
+      notify({ tone: "saved", text: "Saved" });
     } catch (err) {
+      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the referral" });
       setError(err instanceof Error ? err.message : "Could not record the referral");
     } finally {
       setPending(false);
@@ -853,7 +895,16 @@ function LeadDrawer({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"overview" | "details" | "activity">("overview");
+  const [notice, setNotice] = useState<DrawerNotice | null>(null);
   const [touches, setTouches] = useState<Touch[] | null>(null);
+  useEffect(() => {
+    setNotice(null);
+  }, [row.id]);
+  useEffect(() => {
+    if (!notice || notice.tone === "saving") return;
+    const timer = window.setTimeout(() => setNotice(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   useEffect(() => {
     let cancel = false;
     setTouches(null);
@@ -909,6 +960,17 @@ function LeadDrawer({
           </button>
         ))}
       </div>
+      {notice ? (
+        <p
+          role="status"
+          className={`px-4 py-2.5 text-sm font-semibold text-white ${
+            notice.tone === "saved" ? "bg-emerald-600" : notice.tone === "saving" ? "bg-navy" : "bg-red-700"
+          }`}
+        >
+          {notice.text}
+        </p>
+      ) : null}
+      <DrawerNoticeContext.Provider value={setNotice}>
       {tab === "details" ? (
         <LeadFacts row={row} staff={staff} />
       ) : (
@@ -1041,6 +1103,7 @@ function LeadDrawer({
         )}
       </div>
       )}
+      </DrawerNoticeContext.Provider>
     </aside>
   );
 }
@@ -1052,10 +1115,11 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
   if (!canEdit) return null;
   const names = row.callTag && !staff.includes(row.callTag) ? [row.callTag, ...staff] : staff;
   return (
-    <form
+    <NotedForm
       action={setNextAction}
-      key={`${row.id}:${row.callJobId ?? ""}:${call?.at ?? ""}:${row.callTag ?? ""}:${reminder?.at ?? ""}`}
+      formKey={`${row.id}:${row.callJobId ?? ""}:${call?.at ?? ""}:${row.callTag ?? ""}:${reminder?.at ?? ""}`}
       className="mt-3 space-y-2 rounded-md bg-slate-50 px-3 py-2"
+      idleLabel="Save next action"
     >
       <input type="hidden" name="lead_id" value={row.id} />
       {row.callJobId && call?.at ? (
@@ -1100,17 +1164,14 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
           />
         </label>
       ) : null}
-      <button type="submit" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
-        Save next action
-      </button>
-    </form>
+    </NotedForm>
   );
 }
 
 function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
   const names = row.owner && !staff.includes(row.owner) ? [row.owner, ...staff] : staff;
   return (
-    <form action={setTalkedWith}>
+    <NotedForm action={setTalkedWith}>
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
         Talked with
@@ -1129,13 +1190,13 @@ function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
           ))}
         </select>
       </label>
-    </form>
+    </NotedForm>
   );
 }
 
 function ConsultDate({ row }: { row: QueueRow }) {
   return (
-    <form action={setConsultation}>
+    <NotedForm action={setConsultation}>
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
         Consultation date
@@ -1148,6 +1209,42 @@ function ConsultDate({ row }: { row: QueueRow }) {
           className={fieldClass()}
         />
       </label>
+    </NotedForm>
+  );
+}
+
+function NotedForm({
+  action,
+  children,
+  className,
+  formKey,
+  idleLabel,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  children: ReactNode;
+  className?: string;
+  formKey?: string;
+  idleLabel?: string;
+}) {
+  const { pending, submit } = useNotedSubmit();
+  return (
+    <form
+      key={formKey}
+      className={className}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const submitter = (event.nativeEvent as SubmitEvent).submitter;
+        if (submitter instanceof HTMLButtonElement && submitter.name) data.set(submitter.name, submitter.value);
+        void submit(() => action(data));
+      }}
+    >
+      {children}
+      {idleLabel ? (
+        <button type="submit" disabled={pending} className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60">
+          <ButtonLabel value={pending ? "Saving…" : idleLabel} reserve={["Saving…", idleLabel]} />
+        </button>
+      ) : null}
     </form>
   );
 }
@@ -1163,7 +1260,7 @@ function FunnelMark({ label, value }: { label: string; value: string }) {
 
 function PrioritySuggestion({ row }: { row: QueueRow }) {
   return (
-    <form action={reviewPrioritySuggestion} className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm">
+    <NotedForm action={reviewPrioritySuggestion} className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm">
       <input type="hidden" name="lead_id" value={row.id} />
       <p className="font-medium text-sky-950">Suggested priority</p>
       <p className="mt-1 text-sky-900">{row.prioritySuggestion}</p>
@@ -1175,7 +1272,7 @@ function PrioritySuggestion({ row }: { row: QueueRow }) {
           Not a priority
         </button>
       </div>
-    </form>
+    </NotedForm>
   );
 }
 
@@ -1183,7 +1280,7 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
   if (!row.closeSuggestion) return null;
   const suggestion = row.closeSuggestion;
   return (
-    <form action={confirmCloseSuggestion} className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm">
+    <NotedForm action={confirmCloseSuggestion} className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm">
       <input type="hidden" name="lead_id" value={row.id} />
       <input type="hidden" name="suggestion" value={suggestion} />
       <p className="font-medium text-orange-950">Suggested close: {CLOSE_SUGGESTION_LABEL[suggestion]}</p>
@@ -1206,14 +1303,14 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
           Keep open
         </button>
       </div>
-    </form>
+    </NotedForm>
   );
 }
 
 function NonLeadChoice({ row }: { row: QueueRow }) {
   const current = EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? "";
   return (
-    <form action={classifyNonLead} className="rounded-lg border border-slate-200 p-3 text-sm">
+    <NotedForm action={classifyNonLead} className="rounded-lg border border-slate-200 p-3 text-sm" idleLabel="Move to non-leads">
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block font-medium text-slate-700">
         Not a lead
@@ -1231,8 +1328,7 @@ function NonLeadChoice({ row }: { row: QueueRow }) {
           ))}
         </select>
       </label>
-      <button className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">Move to non-leads</button>
-    </form>
+    </NotedForm>
   );
 }
 

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isPracticeTestPhone } from "./test-phone";
 
 export const CLOSED_LEAD_STATUSES = ["Signed", "Promoted", "Lost", "Referred"] as const;
 
@@ -36,7 +37,7 @@ const SIGN_SERIES_LENGTH = 6;
 async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<number> {
   const { data, error } = await supabase
     .from("leads")
-    .select("id, callrail_tags")
+    .select("id, phone, phone_e164, callrail_tags")
     .in("agreement_status", ["sent", "viewed", "cancelled", "expired"])
     .is("agreement_next_reminder_at", null)
     .gte("agreement_reminder_count", SIGN_SERIES_LENGTH)
@@ -44,7 +45,7 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     .is("case_id", null)
     .not("lead_status", "in", CLOSED_LIST);
   if (error) throw new Error(error.message);
-  const rows = data ?? [];
+  const rows = (data ?? []).filter((row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")));
   if (!rows.length) return 0;
   const ids = rows.map((row) => row.id as string);
   const { error: closeError } = await supabase
@@ -85,6 +86,7 @@ async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
     })
     .eq("signed_case", true)
     .not("lead_status", "in", CLOSED_LIST)
+    .not("phone_e164", "eq", "+17654183805")
     .select("id");
   if (error) throw new Error(error.message);
   const ids = (data ?? []).map((row) => row.id as string);
@@ -97,7 +99,7 @@ async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
 async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> {
   const { data: leads, error } = await supabase
     .from("leads")
-    .select("id, callrail_tags")
+    .select("id, phone, phone_e164, callrail_tags")
     .not("lead_status", "in", CLOSED_LIST)
     .eq("signed_case", false)
     .is("case_id", null)
@@ -105,7 +107,9 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
     .order("created_at", { ascending: true })
     .limit(60);
   if (error) throw new Error(error.message);
-  const ids = (leads ?? []).map((row) => row.id as string);
+  const ids = (leads ?? [])
+    .filter((row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")))
+    .map((row) => row.id as string);
   if (!ids.length) return 0;
 
   const { data: jobs, error: jobsError } = await supabase

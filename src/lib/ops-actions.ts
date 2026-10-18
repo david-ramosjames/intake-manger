@@ -556,13 +556,15 @@ export async function saveCallbackPlan(formData: FormData) {
   if (job.queue !== "call" || (job.status !== "pending" && job.status !== "failed")) {
     throw new Error("That reminder already went out.");
   }
+  const staff = await loadStaff(supabase);
+  const person = assigned ? matchStaff(assigned, staff) : null;
   const { error: updateError } = await supabase
     .from("lead_jobs")
     .update({
       due_at: chicagoLocalToIso(due),
       assigned_name: assigned,
-      mention: null,
-      detail: assigned ? `Tag ${assigned}.` : "Any available intake person.",
+      mention: person?.slackUserId || null,
+      detail: assigned ? `Tag ${assigned}.` : "Outbound from #lead-calls topic.",
     })
     .eq("id", jobId);
   if (updateError) throw new Error(updateError.message);
@@ -574,6 +576,8 @@ export async function saveCallbackPlan(formData: FormData) {
   });
   revalidatePath(`/leads/${job.lead_id}`);
   revalidatePath("/");
+  revalidatePath("/open-calls");
+  revalidatePath("/priority");
 }
 
 export async function mergeIntoLead(formData: FormData) {

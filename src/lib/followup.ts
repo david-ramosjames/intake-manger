@@ -82,16 +82,14 @@ export function sequenceForLead(lead: LeadBits, manual: "post_consult" | "auto")
 }
 
 function proposedCaller(
-  sequence: CallSequenceId,
-  position: number,
+  _sequence: CallSequenceId,
+  _position: number,
   owner: string | null | undefined,
   consultation: boolean,
 ): string | null {
   const name = owner?.trim() ?? "";
-  if (isPlaceholderOwner(name)) return null;
-  if (sequence === "want_to_sign") return name;
-  if (sequence === "more_info" && (consultation || position <= 2)) return name;
-  return null;
+  if (isPlaceholderOwner(name) || !consultation) return null;
+  return name;
 }
 
 export async function enrollFollowUp(

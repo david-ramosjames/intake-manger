@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   description: "Lead cockpit for Ramos James Law intake",
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   let email: string | null = null;
   let admin = false;

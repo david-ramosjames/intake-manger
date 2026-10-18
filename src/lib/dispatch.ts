@@ -61,16 +61,31 @@ function closed(lead: LeadRow): boolean {
   return Boolean(lead.signed_case || lead.case_id) || ["Lost", "Referred", "Promoted"].includes(lead.lead_status);
 }
 
+async function resolveCallMention(
+  job: Job,
+  lead: LeadRow,
+  staff: Awaited<ReturnType<typeof loadStaff>>,
+  token: string | null,
+  topicChannel: string,
+): Promise<string> {
+  if (job.mention) {
+    return job.mention.startsWith("<@") ? job.mention : `<@${job.mention.replace(/[<@>]/g, "")}>`;
+  }
+  const assigned = isPlaceholderOwner(job.assigned_name) ? "" : job.assigned_name?.trim() || "";
+  const consult = lead.consultation_date && !isPlaceholderOwner(lead.owner_name) ? lead.owner_name?.trim() || "" : "";
+  const chosen = assigned || consult;
+  if (chosen) return slackMentionFor(chosen, staff) || (await mentionForName(chosen, token));
+  return channelOutboundMention(topicChannel, token);
+}
+
 export async function dispatchDue(supabase: SupabaseClient) {
   const now = new Date().toISOString();
   const slack = await loadSlackSettings();
   const staff = await loadStaff(supabase);
   const hoursBySequence = await loadWorkHours(supabase);
   const result = { texts: 0, calls: 0, slack: 0, skipped: 0, failed: 0 };
-  // Post a reminder when its time arrives. The cron is every 10 minutes, and a
-  // new one waits out the reminder posted just before it, so half an hour still
-  // catches the one that just came due. Older pending jobs stay on the queue
-  // and are not announced.
+  // Newly due jobs open in this half hour. Older pending calls are still checked
+  // against the call log so Open calls can clear ones that already got a return.
   const slackFloor = new Date(Date.now() - 30 * 60_000).toISOString();
   const dueSelect = "id, lead_id, queue, body, due_at, notified_at, mention, assigned_name";
 
@@ -87,10 +102,9 @@ export async function dispatchDue(supabase: SupabaseClient) {
     .select(dueSelect)
     .eq("status", "pending")
     .eq("queue", "call")
-    .not("notified_at", "is", null)
     .lt("due_at", slackFloor)
     .order("due_at")
-    .limit(40);
+    .limit(80);
   if (slack.testPhone) {
     const tail = phoneTail(slack.testPhone);
     const { data: testLeads, error: testLeadError } = await supabase
@@ -131,11 +145,10 @@ export async function dispatchDue(supabase: SupabaseClient) {
     }
 
     if (job.queue === "call") {
-      const channel = lead.slack_channel_id || LEAD_CHANNEL_ID;
       const postThisLead = slackTestMatch(lead, slack.testPhone);
-      if (job.notified_at) {
-        const loggedAt = await callLoggedAfter(supabase, lead, job.notified_at);
-        if (!loggedAt) continue;
+      const since = job.notified_at || job.due_at;
+      const loggedAt = await callLoggedAfter(supabase, lead, since);
+      if (loggedAt) {
         await supabase
           .from("lead_jobs")
           .update({
@@ -148,6 +161,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
           .eq("id", job.id);
         continue;
       }
+      if (job.notified_at) continue;
       if (!postThisLead) continue;
       const sequence =
         leadSequenceId({
@@ -163,15 +177,8 @@ export async function dispatchDue(supabase: SupabaseClient) {
       const weekend = !weekendCallAllowed(nowDate, false);
       if (weekend && !priority && !isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
       if (!weekend && sequence && !withinWorkHours(nowDate, hoursBySequence[sequence])) continue;
-      const assigned = isPlaceholderOwner(job.assigned_name) ? "" : job.assigned_name?.trim() || "";
-      const consultWith = lead.consultation_date && !isPlaceholderOwner(lead.owner_name) ? lead.owner_name?.trim() || "" : "";
-      const chosen = assigned || consultWith;
-      const named = job.mention
-        ? (job.mention.startsWith("<@") ? job.mention : `<@${job.mention.replace(/[<@>]/g, "")}>`)
-        : chosen
-          ? slackMentionFor(chosen, staff) || (await mentionForName(chosen, slack.token))
-          : "";
-      const mention = named || (await channelOutboundMention(channel, slack.token));
+      const topicChannel = slack.channelId || LEAD_CHANNEL_ID;
+      const mention = await resolveCallMention(job, lead, staff, slack.token, topicChannel);
       await supabase
         .from("lead_jobs")
         .update({

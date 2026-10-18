@@ -11,11 +11,15 @@ const LINKS = [
   { href: "/", label: "Work queue" },
   { href: "/review", label: "Review" },
   { href: "/priority", label: "Priority" },
-  { href: "/verify", label: "Verify" },
-  { href: "/sequences", label: "Sequences" },
-  { href: "/calls", label: "Lead channel" },
+  { href: "/open-calls", label: "Open calls" },
   { href: "/referrals", label: "Referrals" },
   { href: "/leads/new", label: "Add lead" },
+];
+
+const ADMIN_LINKS = [
+  { href: "/sequences", label: "Sequences" },
+  { href: "/how-it-fits", label: "How it fits" },
+  { href: "/staff", label: "Staff" },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -23,9 +27,16 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppHeader({ email }: { email: string | null }) {
+export function AppHeader({
+  email,
+  admin = false,
+  priorityCount = 0,
+}: {
+  email: string | null;
+  admin?: boolean;
+  priorityCount?: number;
+}) {
   const pathname = usePathname();
-  const docsActive = isActive(pathname, "/how-it-fits");
   const wide = pathname === "/" || pathname === "/review";
 
   return (
@@ -36,18 +47,23 @@ export function AppHeader({ email }: { email: string | null }) {
           <span className="text-sm font-semibold tracking-tight">Intake Manager</span>
         </Link>
         {email ? (
-          <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             {LINKS.map((link) => {
               const active = isActive(pathname, link.href);
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`${navLink} ${
+                  className={`${navLink} inline-flex items-center gap-1.5 ${
                     active ? "border-accent text-white" : "border-transparent text-white/75 hover:text-white"
                   }`}
                 >
                   {link.label}
+                  {link.href === "/priority" && priorityCount > 0 ? (
+                    <span className="rounded-full bg-accent px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white">
+                      {priorityCount}
+                    </span>
+                  ) : null}
                 </Link>
               );
             })}
@@ -57,24 +73,23 @@ export function AppHeader({ email }: { email: string | null }) {
                 Sign out
               </button>
             </form>
-            <Link
-              href="/staff"
-              className={`${navLink} ${
-                isActive(pathname, "/staff")
-                  ? "border-accent text-white"
-                  : "border-transparent text-white/75 hover:text-white"
-              }`}
-            >
-              Staff
-            </Link>
-            <Link
-              href="/how-it-fits"
-              className={`${navLink} ${
-                docsActive ? "border-accent text-white" : "border-transparent text-white/75 hover:text-white"
-              }`}
-            >
-              How it fits
-            </Link>
+            {admin ? (
+              <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
+                {ADMIN_LINKS.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`${navLink} ${
+                      isActive(pathname, link.href)
+                        ? "border-accent text-white"
+                        : "border-transparent text-white/75 hover:text-white"
+                    }`}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </span>
+            ) : null}
           </nav>
         ) : null}
       </div>

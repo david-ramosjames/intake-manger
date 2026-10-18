@@ -12,7 +12,7 @@ import {
   type CallSequenceId,
   type WorkHours,
 } from "@/lib/sequences";
-import { requireStaff } from "@/lib/session";
+import { requireAdmin } from "@/lib/session";
 import { buttonQuiet } from "@/lib/ui";
 
 type Step = {
@@ -30,7 +30,7 @@ export default async function SequencesPage({
 }) {
   const params = await searchParams;
   const sequence: CallSequenceId = isCallSequence(params.sequence) ? params.sequence : "first_talk";
-  const { supabase } = await requireStaff();
+  const { supabase } = await requireAdmin();
   const [{ data: steps, error }, { data: tags }, hours] = await Promise.all([
     supabase.from("sequence_steps").select("sequence, queue, position, delay_minutes, callback_window").order("position"),
     supabase.from("callrail_tags").select("name").order("name"),

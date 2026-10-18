@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LeadFlow } from "@/components/LeadFlow";
 import { saveQuoSettings, saveSlackSettings } from "@/lib/ops-actions";
 import { listQuoLines, loadQuoSettings, quoLineLabel } from "@/lib/quo-settings";
-import { requireStaff } from "@/lib/session";
+import { requireAdmin } from "@/lib/session";
 import { loadSlackSettings } from "@/lib/slack-settings";
 
 export const metadata: Metadata = {
@@ -466,7 +466,7 @@ const ENVS: { service: string; name: string; why: string }[] = [
 ];
 
 export default async function HowItFitsPage() {
-  await requireStaff();
+  await requireAdmin();
   const slack = await loadSlackSettings();
   const quo = await loadQuoSettings();
   const numbers = await listQuoLines(quo.apiKey);

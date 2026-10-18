@@ -118,14 +118,6 @@ export async function dispatchDue(supabase: SupabaseClient) {
     : { data: [] };
   const byId = new Map((leads ?? []).map((lead) => [lead.id as string, lead as LeadRow]));
   const talked = await talkedIds(supabase, leadIds);
-  const recentReminder = await supabase
-    .from("lead_jobs")
-    .select("id")
-    .eq("queue", "call")
-    .not("notified_at", "is", null)
-    .gte("notified_at", new Date(Date.now() - 15 * 60_000).toISOString())
-    .limit(1);
-  let holdSlack = !slack.testPhone && (recentReminder.data ?? []).length > 0;
 
   for (const job of (jobs ?? []) as Job[]) {
     const lead = byId.get(job.lead_id);
@@ -140,7 +132,6 @@ export async function dispatchDue(supabase: SupabaseClient) {
 
     if (job.queue === "call") {
       const channel = lead.slack_channel_id || LEAD_CHANNEL_ID;
-      const threadTs = lead.slack_thread_ts || lead.slack_message_ts;
       const postThisLead = slackTestMatch(lead, slack.testPhone);
       if (job.notified_at) {
         const loggedAt = await callLoggedAfter(supabase, lead, job.notified_at);
@@ -152,21 +143,12 @@ export async function dispatchDue(supabase: SupabaseClient) {
             completed_at: loggedAt,
             completed_by: "call-log",
             outcome: "answered",
-            detail: "Call log shows a call after the Slack reminder.",
+            detail: "Call log shows a call after this reminder opened.",
           })
           .eq("id", job.id);
-        if (slack.posting && postThisLead) {
-          await postToSlack({
-            token: slack.token,
-            channel,
-            threadTs,
-            text: `Call completed. The call log shows a call with ${lead.lead_name || "this lead"} after the reminder.`,
-          });
-        }
         continue;
       }
-      if (!slack.posting || !postThisLead) continue;
-      if (holdSlack) continue;
+      if (!postThisLead) continue;
       const sequence =
         leadSequenceId({
           closed: false,
@@ -181,7 +163,6 @@ export async function dispatchDue(supabase: SupabaseClient) {
       const weekend = !weekendCallAllowed(nowDate, false);
       if (weekend && !priority && !isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
       if (!weekend && sequence && !withinWorkHours(nowDate, hoursBySequence[sequence])) continue;
-      const who = lead.lead_name || "Unnamed lead";
       const assigned = isPlaceholderOwner(job.assigned_name) ? "" : job.assigned_name?.trim() || "";
       const consultWith = lead.consultation_date && !isPlaceholderOwner(lead.owner_name) ? lead.owner_name?.trim() || "" : "";
       const chosen = assigned || consultWith;
@@ -191,22 +172,14 @@ export async function dispatchDue(supabase: SupabaseClient) {
           ? slackMentionFor(chosen, staff) || (await mentionForName(chosen, slack.token))
           : "";
       const mention = named || (await channelOutboundMention(channel, slack.token));
-      const posted = await postToSlack({
-        token: slack.token,
-        channel: slack.channelId || channel,
-        threadTs,
-        text: `${mention ? `${mention} ` : ""}Call due: ${who}${lead.phone ? ` ${lead.phone}` : ""}\n${job.body}\nThis reminder is not the call. It closes when the call log shows a call.`,
-      });
-      if (!posted.ok) {
-        await supabase.from("lead_jobs").update({ status: "failed", detail: posted.error }).eq("id", job.id);
-        result.failed += 1;
-        continue;
-      }
       await supabase
         .from("lead_jobs")
-        .update({ notified_at: now, detail: "Slack alert posted. Waiting for a call in the call log." })
+        .update({
+          notified_at: now,
+          mention: mention || job.mention,
+          detail: "Call is open. Waiting for a call in the call log.",
+        })
         .eq("id", job.id);
-      holdSlack = true;
       result.calls += 1;
       continue;
     }

@@ -85,6 +85,19 @@ export const PRIORITY_PLACE_LABEL: Record<PriorityPlace, string> = {
   suggested: "Suggested",
 };
 
+export async function countCurrentPriority(
+  supabase: import("@supabase/supabase-js").SupabaseClient,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("leads")
+    .select("id", { count: "exact", head: true })
+    .eq("priority", true)
+    .eq("signed_case", false)
+    .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)");
+  if (error) return 0;
+  return count ?? 0;
+}
+
 export function priorityPlace(lead: {
   signed_case?: boolean | null;
   lead_status?: string | null;

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isAdminEmail } from "./admin";
 import { ALLOWED_DOMAIN, isSupabaseConfigured } from "./supabase/config";
 import { createSupabaseServerClient } from "./supabase/server";
 
@@ -13,5 +14,11 @@ export async function requireStaff() {
   if (!email.toLowerCase().endsWith(`@${ALLOWED_DOMAIN}`)) {
     redirect("/login?error=domain");
   }
-  return { supabase, email, userId: user.id };
+  return { supabase, email, userId: user.id, admin: isAdminEmail(email) };
+}
+
+export async function requireAdmin() {
+  const session = await requireStaff();
+  if (!session.admin) redirect("/");
+  return session;
 }

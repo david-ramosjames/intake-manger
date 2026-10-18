@@ -1,9 +1,9 @@
 import { AddStaffForm, StaffRow } from "@/components/StaffForms";
 import { loadStaffDirectory, loginsMissingFromDirectory, type StaffContact } from "@/lib/staff";
-import { requireStaff } from "@/lib/session";
+import { requireAdmin } from "@/lib/session";
 
 export default async function StaffPage() {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requireAdmin();
   let people: StaffContact[] = [];
   let missing: string[] = [];
   let loadError: string | null = null;

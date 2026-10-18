@@ -1,3 +1,5 @@
+"use client";
+
 import { completeOpenCall, saveCallbackPlan } from "@/lib/ops-actions";
 import type { StaffPerson } from "@/lib/identity";
 import { chicagoLocalInput } from "@/lib/time";

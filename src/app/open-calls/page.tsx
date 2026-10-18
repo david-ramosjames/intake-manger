@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { OpenCallPlan } from "@/components/OpenCallPlan";
+import { OpenCallsList, type OpenCallCard } from "@/components/OpenCallsList";
 import { loadStaff, type StaffPerson } from "@/lib/identity";
 import { leadTitle, slackMessageUrl } from "@/lib/leads";
 import { CALL_SEQUENCE_LABEL, isCallSequence } from "@/lib/sequences";
@@ -8,15 +7,11 @@ import { LEAD_CHANNEL_ID } from "@/lib/slack";
 import { loadSlackSettings } from "@/lib/slack-settings";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { formatChicago } from "@/lib/time";
+import { loadWorkQueueRows } from "@/lib/work-queue-rows";
 
 export const metadata = { title: "Open calls · Intake Manager" };
 
 type CallView = "waiting" | "upcoming";
-
-const VIEWS: { id: CallView; label: string }[] = [
-  { id: "waiting", label: "Open calls" },
-  { id: "upcoming", label: "Upcoming tags" },
-];
 
 type LeadBits = {
   id: string;
@@ -89,76 +84,36 @@ function sequenceLabel(job: JobRow, totals: Map<string, number>): string {
   return `${name} · Call ${job.position}`;
 }
 
-function JobCard({
-  job,
-  staff,
-  channelId,
-  now,
-  totals,
-}: {
-  job: JobRow;
-  staff: StaffPerson[];
-  channelId: string;
-  now: number;
-  totals: Map<string, number>;
-}) {
+function toCard(job: JobRow, staff: StaffPerson[], channelId: string, now: number, totals: Map<string, number>): OpenCallCard {
   const lead = leadOf(job);
   const place = callPlace(lead, channelId);
-  const tagged = taggedAs(job, lead, staff);
-  const overdue = new Date(job.due_at).getTime() < now;
   const assigned = job.assigned_name && !isPlaceholderOwner(job.assigned_name) ? job.assigned_name.trim() : "";
-  const quoUrl = lead?.quo_link || null;
-  return (
-    <li className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Link href={`/?lead=${job.lead_id}`} className="font-medium text-navy hover:underline">
-            {leadTitle({
-              lead_name: lead?.lead_name ?? null,
-              phone: lead?.phone ?? null,
-              identity_status: lead?.identity_status,
-            })}
-          </Link>
-          {lead?.phone ? <span className="text-slate-500"> · {lead.phone}</span> : null}
-          <p className="mt-1 font-medium text-slate-800">{sequenceLabel(job, totals)}</p>
-          <p className="mt-1 text-slate-700">
-            {overdue ? "Waiting since" : "Due"} {formatChicago(job.due_at)}
-          </p>
-        </div>
-        <span className="flex flex-col items-end gap-0.5">
-          {quoUrl ? (
-            <a href={quoUrl} className="font-medium text-navy underline" target="_blank" rel="noreferrer">
-              Quo
-            </a>
-          ) : null}
-          {place.href ? (
-            <a href={place.href} className="font-medium text-navy underline" target="_blank" rel="noreferrer">
-              Slack
-            </a>
-          ) : (
-            <span className="text-slate-500">{place.label}</span>
-          )}
-        </span>
-      </div>
-      <p className="mt-2 text-slate-800">
-        Tag: <span className="font-medium">{tagged}</span>
-        <span className="text-slate-500"> · {place.label}</span>
-      </p>
-      <OpenCallPlan
-        jobId={job.id}
-        dueAt={job.due_at}
-        assignedName={assigned}
-        consultName={consultName(lead)}
-        staff={staff}
-      />
-    </li>
-  );
+  return {
+    id: job.id,
+    leadId: job.lead_id,
+    title: leadTitle({
+      lead_name: lead?.lead_name ?? null,
+      phone: lead?.phone ?? null,
+      identity_status: lead?.identity_status,
+    }),
+    phone: lead?.phone ?? null,
+    sequenceLabel: sequenceLabel(job, totals),
+    dueLabel: formatChicago(job.due_at),
+    overdue: new Date(job.due_at).getTime() < now,
+    tagged: taggedAs(job, lead, staff),
+    placeLabel: place.label,
+    placeHref: place.href,
+    quoUrl: lead?.quo_link || null,
+    assignedName: assigned,
+    consultName: consultName(lead),
+    dueAt: job.due_at,
+  };
 }
 
 export default async function OpenCallsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{ view?: string; lead?: string }>;
 }) {
   const params = await searchParams;
   const view: CallView = params.view === "upcoming" ? "upcoming" : "waiting";
@@ -198,9 +153,14 @@ export default async function OpenCallsPage({
   const upcoming = (upcomingRows ?? []) as JobRow[];
   const error = waitingError?.message || upcomingError?.message || null;
   const rows = view === "upcoming" ? upcoming : waiting;
+  const jobs = rows.map((job) => toCard(job, staff, slack.channelId, now, totals));
+  const shelf = await loadWorkQueueRows(
+    supabase,
+    [...jobs.map((job) => job.leadId), params.lead?.trim() || ""].filter(Boolean),
+  );
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8">
+    <main className="w-full px-4 py-8 xl:px-6">
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Open calls</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
         Check tags that are still waiting for a return call, and the ones coming up. Change the time
@@ -208,44 +168,18 @@ export default async function OpenCallsPage({
         #lead-calls, or the person who already consulted.
       </p>
       {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
-
-      <div className="mt-6 flex flex-wrap gap-2">
-        {VIEWS.map((item) => {
-          const count = item.id === "waiting" ? waiting.length : upcoming.length;
-          const href = item.id === "waiting" ? "/open-calls" : "/open-calls?view=upcoming";
-          return (
-            <Link
-              key={item.id}
-              href={href}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
-                view === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
-              }`}
-            >
-              {item.label}
-              <span
-                className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${
-                  view === item.id ? "bg-accent text-white" : "bg-slate-100 text-slate-700"
-                }`}
-              >
-                {count}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-
-      <section className="mt-6">
-        <ul className="space-y-3">
-          {rows.map((job) => (
-            <JobCard key={job.id} job={job} staff={staff} channelId={slack.channelId} now={now} totals={totals} />
-          ))}
-          {rows.length === 0 && !error ? (
-            <li className="text-sm text-slate-500">
-              {view === "upcoming" ? "No upcoming call tags are scheduled." : "Every due call has a return in the log."}
-            </li>
-          ) : null}
-        </ul>
-      </section>
+      <OpenCallsList
+        view={view}
+        waitingCount={waiting.length}
+        upcomingCount={upcoming.length}
+        jobs={jobs}
+        shelves={shelf.rows}
+        destinations={shelf.destinations}
+        templates={shelf.templates}
+        staff={staff}
+        staffNames={shelf.staffNames}
+        initialId={params.lead?.trim() || ""}
+      />
     </main>
   );
 }

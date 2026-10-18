@@ -885,7 +885,7 @@ function QueueReferral({
   );
 }
 
-function LeadDrawer({
+export function LeadDrawer({
   row,
   destinations,
   templates,

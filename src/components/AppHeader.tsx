@@ -37,7 +37,7 @@ export function AppHeader({
   priorityCount?: number;
 }) {
   const pathname = usePathname();
-  const wide = pathname === "/" || pathname === "/review";
+  const wide = pathname === "/" || pathname === "/review" || pathname === "/open-calls";
 
   return (
     <header className="sticky top-0 z-30 bg-[linear-gradient(100deg,#0A1E41_0%,#0F316D_100%)] text-white">

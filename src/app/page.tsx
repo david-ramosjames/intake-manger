@@ -348,6 +348,11 @@ export default async function LeadListPage({
   for (const lead of [...searched, ...workLeads, ...(queue === "nonleads" ? reviewLeads : [])]) {
     merged.set(lead.id, lead);
   }
+  if (selectedId && !merged.has(selectedId)) {
+    const { data: selectedRows } = await supabase.from("leads").select(LIST_COLUMNS).eq("id", selectedId).limit(1);
+    const selected = selectedRows?.[0] as ListLead | undefined;
+    if (selected) merged.set(selected.id, selected);
+  }
   const leads = [...merged.values()];
   const destinations = ((destinationResult.data ?? []) as ReferralDestination[]).map((destination) => ({
     ...destination,
@@ -547,6 +552,10 @@ export default async function LeadListPage({
       });
     })
     .sort((a, b) => (a.row.lead.id < b.row.lead.id ? -1 : a.row.lead.id > b.row.lead.id ? 1 : 0));
+  if (selectedId && !shown.some((group) => group.row.lead.id === selectedId || group.others.some((other) => other.lead.id === selectedId))) {
+    const extra = combined.find((group) => group.row.lead.id === selectedId || group.others.some((other) => other.lead.id === selectedId));
+    if (extra) shown.unshift(extra);
+  }
 
   const queueRows: QueueRow[] = shown.map(({ row, others }) => {
     const automation = automationLine(row.lead);

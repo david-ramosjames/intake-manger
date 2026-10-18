@@ -1,5 +1,6 @@
 import { contractOutstanding, contractSent, milestoneSigned, signatureNeedsConfirm } from "./desired";
 import type { Lead } from "./leads";
+import { phoneTail } from "./phone";
 
 export type ClientTouch = {
   type: string | null;
@@ -90,12 +91,23 @@ export async function countCurrentPriority(
 ): Promise<number> {
   const { data, error } = await supabase
     .from("leads")
-    .select("signed_case, lead_status, agreement_status, agreement_sent_at, case_id, priority, priority_suggestion")
+    .select("id, phone, signed_case, lead_status, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, case_id, priority, priority_suggestion")
     .eq("signed_case", false)
     .not("lead_status", "in", "(Lost,Referred)")
-    .limit(500);
+    .or("and(case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed,signed,completed)")
+    .order("lead_date", { ascending: false, nullsFirst: false })
+    .limit(300);
   if (error) return 0;
-  return (data ?? []).filter((lead) => priorityPlace(lead)).length;
+  const placed = (data ?? []).filter((lead) => priorityPlace(lead));
+  const phones = [...new Set(placed.map((lead) => lead.phone).filter((phone): phone is string => Boolean(phone)))];
+  if (phones.length === 0) return placed.length;
+  const { data: signedSiblings } = await supabase.from("leads").select("phone, phone_e164").eq("signed_case", true).in("phone", phones);
+  const signedPhones = new Set<string>();
+  for (const row of signedSiblings ?? []) {
+    const key = phoneTail(row.phone) || phoneTail(row.phone_e164);
+    if (key.length >= 10) signedPhones.add(key);
+  }
+  return placed.filter((lead) => phoneTail(lead.phone).length < 10 || !signedPhones.has(phoneTail(lead.phone))).length;
 }
 
 export function priorityPlace(lead: {
@@ -103,6 +115,8 @@ export function priorityPlace(lead: {
   lead_status?: string | null;
   agreement_status?: string | null;
   agreement_sent_at?: string | null;
+  agreement_reminder_count?: number | null;
+  agreement_next_reminder_at?: string | null;
   case_id?: string | null;
   priority?: boolean | null;
   priority_suggestion?: string | null;

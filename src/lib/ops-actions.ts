@@ -1495,8 +1495,47 @@ export async function recordCallOutcome(formData: FormData) {
     payload: { job_id: jobId, outcome, note, next_due_at: nextDue, stopped: stopRest },
   });
   revalidatePath("/queues");
+  revalidatePath("/open-calls");
   revalidatePath(`/leads/${job.lead_id}`);
   revalidatePath("/priority");
+}
+
+export async function completeOpenCall(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const jobId = text(formData, "job_id");
+  if (!jobId) throw new Error("Choose a call to complete.");
+  const { data: job, error } = await supabase
+    .from("lead_jobs")
+    .select("id, lead_id, queue, status")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error || !job) throw new Error(error?.message ?? "That call is not on the queue.");
+  if (job.queue !== "call") throw new Error("That step is not a call.");
+  if (job.status !== "pending" && job.status !== "failed") throw new Error("That call is already finished.");
+  const now = new Date().toISOString();
+  const { error: doneError } = await supabase
+    .from("lead_jobs")
+    .update({
+      status: "completed",
+      outcome: "answered",
+      completed_at: now,
+      completed_by: email,
+      assigned_email: email,
+      detail: `Marked complete on Open calls by ${email}.`,
+    })
+    .eq("id", jobId);
+  if (doneError) throw new Error(doneError.message);
+  await supabase.from("leads").update({ last_action: "Call completed" }).eq("id", job.lead_id);
+  await supabase.from("lead_events").insert({
+    lead_id: job.lead_id,
+    event_type: "call_outcome",
+    actor: email,
+    payload: { job_id: jobId, outcome: "answered", source: "open-calls" },
+  });
+  revalidatePath("/open-calls");
+  revalidatePath("/queues");
+  revalidatePath("/");
+  revalidatePath(`/leads/${job.lead_id}`);
 }
 
 function slackUserId(value: string | null): { id: string | null; error?: string } {

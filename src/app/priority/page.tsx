@@ -304,7 +304,9 @@ export default async function PriorityPage() {
             <section key={reason}>
               <h2 className="text-sm font-semibold text-slate-900">
                 {PRIORITY_PLACE_LABEL[reason]}
-                <span className="ml-2 font-normal text-slate-500">{rows.length}</span>
+                <span className="ml-2 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-accent px-1.5 py-0.5 text-xs font-semibold leading-none text-white">
+                  {rows.length}
+                </span>
               </h2>
               <p className="mt-1 text-sm text-slate-500">{groupDetail(reason)}</p>
               {rows.length === 0 ? (

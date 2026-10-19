@@ -142,6 +142,13 @@ export type LeadChannelMessage = {
   permalink: string;
 };
 
+async function slackTextWithNames(token: string, text: string): Promise<string> {
+  const ids = [...text.matchAll(/@([UW][A-Z0-9]{6,})/g)].map((match) => match[1]);
+  const names = new Map<string, string>();
+  for (const id of [...new Set(ids)]) names.set(id, await slackUserName(token, id, "a teammate"));
+  return text.replace(/@([UW][A-Z0-9]{6,})/g, (mention, id: string) => names.get(id) || mention);
+}
+
 function slackMessageText(message: SlackHistoryMessage): string {
   const chunks = [message.text || ""];
   for (const attachment of message.attachments ?? []) {
@@ -278,9 +285,9 @@ async function slackUserName(token: string, userId: string, fallback: string): P
     ? (info.payload.user as { real_name?: string; profile?: { display_name?: string; real_name?: string } } | undefined)
     : undefined;
   const name =
-    user?.profile?.display_name?.trim() ||
     user?.profile?.real_name?.trim() ||
     user?.real_name?.trim() ||
+    user?.profile?.display_name?.trim() ||
     fallback ||
     "Staff";
   userNameCache.set(userId, { at: Date.now(), name });
@@ -324,7 +331,7 @@ export async function slackThreadNotes(input: {
       ts: message.ts || "",
       occurred_at: slackTsToIso(message.ts || ""),
       userName,
-      text: slackMessageText(message).slice(0, 4000),
+      text: (await slackTextWithNames(input.token, slackMessageText(message))).slice(0, 4000),
     });
   }
   notes.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));

@@ -254,9 +254,9 @@ export async function setNextAction(formData: FormData) {
       .from("lead_jobs")
       .update({
         due_at: due,
-        assigned_name: tag,
+        assigned_name: tag || "Outbound",
         mention: null,
-        detail: tag ? `Tag ${tag}.` : "Any available intake person.",
+        detail: !tag || tag === "Outbound" ? "Tag Slack Outbound." : `Tag ${tag}.`,
       })
       .eq("id", callJobId);
     if (updateError) throw new Error(updateError.message);
@@ -264,7 +264,7 @@ export async function setNextAction(formData: FormData) {
       lead_id: leadId,
       event_type: "next_action",
       actor: email,
-      payload: { queue: "call", due_at: due, assigned_name: tag },
+      payload: { queue: "call", due_at: due, assigned_name: tag || "Outbound" },
     });
   }
 

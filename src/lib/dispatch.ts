@@ -72,6 +72,7 @@ async function resolveCallMention(
     return job.mention.startsWith("<@") ? job.mention : `<@${job.mention.replace(/[<@>]/g, "")}>`;
   }
   const assigned = isPlaceholderOwner(job.assigned_name) ? "" : job.assigned_name?.trim() || "";
+  if (/^outbound$/i.test(assigned)) return channelOutboundMention(topicChannel, token);
   const consult = lead.consultation_date && !isPlaceholderOwner(lead.owner_name) ? lead.owner_name?.trim() || "" : "";
   const chosen = assigned || consult;
   if (chosen) return slackMentionFor(chosen, staff) || (await mentionForName(chosen, token));

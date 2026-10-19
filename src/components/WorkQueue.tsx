@@ -1147,7 +1147,8 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
   const reminder = row.nextAction.find((line) => line.label === "Reminder" && line.at);
   const canEdit = Boolean((row.callJobId && call?.at) || reminder?.at);
   if (!canEdit) return null;
-  const names = row.callTag && !staff.includes(row.callTag) ? [row.callTag, ...staff] : staff;
+  const extra = row.callTag && row.callTag !== "Outbound" && !staff.includes(row.callTag) ? [row.callTag] : [];
+  const names = [...extra, ...staff];
   return (
     <NotedForm
       action={setNextAction}
@@ -1173,10 +1174,10 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
             Slack tag
             <select
               name="tag"
-              defaultValue={row.callTag ?? ""}
+              defaultValue={row.callTag || "Outbound"}
               className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
             >
-              <option value="">{row.consultKey ? "Choose who handled this" : "Whoever is available"}</option>
+              <option value="Outbound">Slack Outbound</option>
               {names.map((name) => (
                 <option key={name} value={name}>
                   {name}

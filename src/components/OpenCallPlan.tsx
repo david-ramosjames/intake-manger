@@ -20,7 +20,7 @@ export function OpenCallPlan({
   consulted: boolean;
   staff: StaffPerson[];
 }) {
-  const selected = assignedName || consultName || "";
+  const selected = assignedName || (consulted ? consultName : "Outbound") || "";
   return (
     <div>
       <form action={saveCallbackPlan} className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
@@ -42,7 +42,8 @@ export function OpenCallPlan({
             defaultValue={selected}
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900"
           >
-            <option value="">{consulted ? "Choose who handled this" : "Outbound (today’s #lead-calls)"}</option>
+            <option value="Outbound">Slack Outbound</option>
+            {consulted ? <option value="">Choose who handled this</option> : null}
             {consultName && !staff.some((person) => person.name === consultName) ? (
               <option value={consultName}>{consultName} (consult)</option>
             ) : null}

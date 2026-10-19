@@ -116,6 +116,23 @@ const NOT_QUALIFIED_SET = new Set<string>(NOT_QUALIFIED_TAGS);
 const SIZE_SET = new Set<string>(SIZE_TAGS);
 const TYPE_SET = new Set<string>(TYPE_TAGS);
 
+const CASE_TO_INJURY: Record<string, (typeof TYPE_TAGS)[number]> = {
+  "Auto Accident": "T: Auto Accident",
+  "Commercial / 18 Wheeler": "T: Commercial / 18 Wheeler",
+  "Dog Bite": "T: Dog Bite",
+  "Other Injury": "T: Other Injury",
+  "Pedestrian / Bicycle / Scooter": "T: Pedestrian / Bicycle / Scooter",
+  "Premises Liability": "T: Premises Liability",
+  "Sexual Assault / Child Abuse": "T: Sexual Assault / Child Abuse",
+  "Wrongful Death": "T: Wrongful Death",
+};
+
+/** The injury tag follows the case type. They are one choice. */
+export function injuryTagForCaseType(caseType: string | null | undefined): string {
+  const text = String(caseType || "").trim();
+  return CASE_TO_INJURY[text] ?? "";
+}
+
 export function selectedOne(tags: string[], options: readonly string[]): string {
   return tags.find((tag) => options.includes(tag)) ?? "";
 }
@@ -157,7 +174,7 @@ export function tagsFromSelection(input: {
   const tags: string[] = qualified ? [qualified, ...coverage] : [...coverage];
   if (decline) tags.push(decline);
   if (notQualified) tags.push(notQualified);
-  if (wanted && SIZE_SET.has(input.size || "")) tags.push(String(input.size));
+  if (SIZE_SET.has(input.size || "")) tags.push(String(input.size));
   if (!nonPi && TYPE_SET.has(input.injuryType || "")) tags.push(String(input.injuryType));
   return {
     tags,

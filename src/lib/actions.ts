@@ -6,7 +6,7 @@ import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
 import { contractSent } from "./desired";
 import { canonicalLeadSource, displayContact, isSourceType } from "./leads";
-import { LEAD_TAGS, tagsFromSelection } from "./tags";
+import { LEAD_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
 import { requireStaff } from "./session";
@@ -101,7 +101,7 @@ function tagsFromForm(formData: FormData) {
     desired: String(formData.get("desired_case") ?? "") === "yes" || signed,
     nonPi: formData.get("non_pi") === "yes",
     size: String(formData.get("size_tag") ?? ""),
-    injuryType: String(formData.get("injury_type") ?? ""),
+    injuryType: injuryTagForCaseType(text(formData, "case_type")) || String(formData.get("injury_type") ?? ""),
     notQualified: String(formData.get("not_qualified_tag") ?? ""),
     requireQualified: false,
   });

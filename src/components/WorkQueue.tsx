@@ -6,10 +6,11 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
-import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
+import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
+import { SIZE_TAGS, selectedOne } from "@/lib/tags";
 import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, scheduleSlackPost, sendReferral, setConsultation, setDesired, setNextAction, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
 import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -178,14 +179,12 @@ export function WorkQueue({
   destinations,
   templates,
   staff,
-  staffMentions = [],
 }: {
   rows: QueueRow[];
   initialId?: string;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staff: string[];
-  staffMentions?: { name: string; slackUserId: string }[];
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
@@ -331,7 +330,7 @@ export function WorkQueue({
         </table>
       </div>
       {selected ? (
-        <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} staff={staff} staffMentions={staffMentions} onClose={() => setSelectedId("")} />
+        <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} staff={staff} onClose={() => setSelectedId("")} />
       ) : null}
     </div>
   );
@@ -663,7 +662,12 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
     const tags = document.getElementById(`lead-tags-${row.id}`);
     try {
       await saveLeadDetails(formData);
-      if (tags instanceof HTMLFormElement) await saveLeadTags(row.id, new FormData(tags));
+      if (tags instanceof HTMLFormElement) {
+        const tagsData = new FormData(tags);
+        const size = formData.get("size_tag");
+        if (typeof size === "string") tagsData.set("size_tag", size);
+        await saveLeadTags(row.id, tagsData);
+      }
       setSaved(true);
       notify({ tone: "saved", text: "Saved" });
     } catch (err) {
@@ -714,7 +718,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
             </FieldLabel>
           </PanelSection>
           <PanelSection title="Case details">
-            <FieldLabel label="Type">
+            <FieldLabel label="Case type">
               <select name="case_type" defaultValue={row.caseType} className={fieldClass()}>
                 <option value="">Not set</option>
                 {[...caseOptions].map((item) => (
@@ -724,7 +728,18 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
                 ))}
               </select>
             </FieldLabel>
-            <div />
+            {row.caseType === "Non-PI Legal Matter" || row.caseType === "Unknown / No Response" ? null : (
+              <FieldLabel label="Size">
+                <select name="size_tag" defaultValue={selectedOne(row.tags, SIZE_TAGS)} className={fieldClass()}>
+                  <option value="">Not set</option>
+                  {SIZE_TAGS.map((tag) => (
+                    <option key={tag} value={tag}>
+                      {tag.slice("S: ".length)}
+                    </option>
+                  ))}
+                </select>
+              </FieldLabel>
+            )}
           </PanelSection>
         </form>
         <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
@@ -759,6 +774,7 @@ function LeadFacts({ row, staff }: { row: QueueRow; staff: string[] }) {
           </div>
         </section>
         <TagEditor row={row} detailsFormId={formId} />
+        {row.signed ? null : <NonLeadChoice row={row} />}
       </div>
       <div className="border-t border-slate-200 bg-white px-4 py-3">
         {error ? <p className="mb-2 text-sm text-red-700">{error}</p> : null}
@@ -897,14 +913,12 @@ export function LeadDrawer({
   destinations,
   templates,
   staff,
-  staffMentions = [],
   onClose,
 }: {
   row: QueueRow;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staff: string[];
-  staffMentions?: { name: string; slackUserId: string }[];
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"overview" | "details" | "activity">("overview");
@@ -1021,7 +1035,6 @@ export function LeadDrawer({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
-        <SlackNote row={row} staffMentions={staffMentions} />
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
             <a href={row.quoUrl} className={buttonSecondary} target="_blank" rel="noreferrer">
@@ -1234,58 +1247,6 @@ function IdentityShelf({ row }: { row: QueueRow }) {
   );
 }
 
-function SlackNote({
-  row,
-  staffMentions,
-}: {
-  row: QueueRow;
-  staffMentions: { name: string; slackUserId: string }[];
-}) {
-  return (
-    <section>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Slack for the team</h3>
-      <NotedForm action={scheduleSlackPost.bind(null, row.id)} className="mt-2 space-y-2" idleLabel="Send or schedule">
-        <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Message
-          <textarea
-            name="body"
-            required
-            rows={3}
-            placeholder="What should the team do?"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
-          />
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            When
-            <input
-              name="due_at"
-              type="datetime-local"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
-            />
-          </label>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Mention
-            <select
-              name="mention"
-              defaultValue=""
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
-            >
-              <option value="">No mention</option>
-              {staffMentions.map((person) => (
-                <option key={person.slackUserId} value={person.slackUserId}>
-                  {person.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <p className="text-xs text-slate-500">Leave When empty to post now.</p>
-      </NotedForm>
-    </section>
-  );
-}
-
 function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
   const names = row.owner && !staff.includes(row.owner) ? [row.owner, ...staff] : staff;
   return (
@@ -1446,9 +1407,9 @@ function NonLeadChoice({ row }: { row: QueueRow }) {
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-normal"
         >
           <option value="">Choose a reason</option>
-          {EXCLUDED_CALLER_CLASSES.map((item) => (
+          {EXCLUDED_CALLER_CLASSES.filter((item) => item !== "spam").map((item) => (
             <option key={item} value={item}>
-              {CALLER_CLASS_LABEL[item]}
+              {NON_LEAD_TAG[item]}
             </option>
           ))}
         </select>
@@ -1458,9 +1419,11 @@ function NonLeadChoice({ row }: { row: QueueRow }) {
 }
 
 function TagEditor({ row, detailsFormId }: { row: QueueRow; detailsFormId: string }) {
+  const show = row.qualifiedLabel === "No";
   return (
     <form
       id={`lead-tags-${row.id}`}
+      className={show ? undefined : "hidden"}
       onSubmit={(event) => {
         event.preventDefault();
         const details = document.getElementById(detailsFormId);

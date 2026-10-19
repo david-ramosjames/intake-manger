@@ -777,9 +777,6 @@ export default async function LeadListPage({
         destinations={destinations}
         templates={referralTemplates}
         staff={staff.map((person) => person.name)}
-        staffMentions={staff
-          .filter((person): person is typeof person & { slackUserId: string } => Boolean(person.slackUserId))
-          .map((person) => ({ name: person.name, slackUserId: person.slackUserId }))}
       />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">

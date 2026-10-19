@@ -4,7 +4,7 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { ReferralPanel } from "@/components/ReferralPanel";
 import { LeadForm } from "@/components/LeadForm";
 import { updateLead } from "@/lib/actions";
-import { confirmLead, confirmSigned, markNotALead, resolveIdentity, saveCallbackPlan, savePriority, scheduleSlackPost, startFollowUp } from "@/lib/ops-actions";
+import { confirmLead, confirmSigned, markNotALead, resolveIdentity, saveCallbackPlan, savePriority, startFollowUp } from "@/lib/ops-actions";
 import { CallWork } from "@/components/CallWork";
 import { callOutcomeLabel } from "@/lib/calls";
 import { describeFollowUp } from "@/lib/followup";
@@ -25,7 +25,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult, slackSettings] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult, slackSettings] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -39,12 +39,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .eq("lead_id", id)
       .order("queue")
       .order("position"),
-    supabase
-      .from("slack_posts")
-      .select("id, body, due_at, status, mention")
-      .eq("lead_id", id)
-      .order("due_at", { ascending: false })
-      .limit(10),
     supabase.from("referral_destinations").select("id, name, phone, practice_areas, address, email, website, spanish, matters, notes, active").eq("active", true).order("name"),
     supabase.from("referral_templates").select("language, body"),
     supabase
@@ -84,13 +78,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     mention: string | null;
     outcome: string | null;
     notified_at: string | null;
-  }[];
-  const posts = (postsResult.data ?? []) as {
-    id: string;
-    body: string;
-    due_at: string;
-    status: string;
-    mention: string | null;
   }[];
   const destinations = (destinationsResult.data ?? []) as ReferralDestination[];
   const templateRows = (templatesResult.data ?? []) as { language: string; body: string }[];
@@ -331,50 +318,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           viewerEmail={email}
           attempts={(attemptsResult.data ?? []) as { id: string; job_id: string | null; outcome: string; note: string | null; actor: string | null; attempted_at: string }[]}
         />
-      </section>
-
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Slack for the team</h2>
-        <form action={scheduleSlackPost.bind(null, lead.id)} className="mt-3 grid gap-3">
-          <textarea
-            name="body"
-            required
-            rows={3}
-            placeholder="What should the team do?"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-sm">
-              <span className="font-medium text-slate-700">When</span>
-              <input name="due_at" type="datetime-local" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="text-sm">
-              <span className="font-medium text-slate-700">Mention</span>
-              <select name="mention" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" defaultValue="">
-                <option value="">No mention</option>
-                {staff
-                  .filter((person) => person.slackUserId)
-                  .map((person) => (
-                    <option key={person.slackUserId} value={person.slackUserId!}>
-                      {person.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
-          <button type="submit" className={`${buttonSecondary} w-fit`}>
-            Schedule
-          </button>
-        </form>
-        <ul className="mt-4 space-y-2 text-sm">
-          {posts.map((post) => (
-            <li key={post.id}>
-              <span className="font-medium">{post.status}</span>
-              <span className="text-slate-500"> · {new Date(post.due_at).toLocaleString()}</span>
-              <p>{post.body}</p>
-            </li>
-          ))}
-        </ul>
       </section>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags, pushCallrailTags } from "./callrail";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG, type ExcludedCallerClass } from "./caller-class";
-import { LEAD_TAGS, NOT_A_LEAD_TAGS, tagsFromSelection } from "./tags";
+import { LEAD_TAGS, NOT_A_LEAD_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
@@ -1295,7 +1295,7 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const { data: before, error } = await supabase
     .from("leads")
-    .select("id, signed_case, desired_case, caller_class, callrail_call_id, callrail_tags, qualified, decline_reason, consultation_date, grade, close_reason, lead_status")
+    .select("id, signed_case, desired_case, caller_class, callrail_call_id, callrail_tags, qualified, decline_reason, consultation_date, grade, close_reason, lead_status, case_type")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
@@ -1314,7 +1314,7 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
     desired: qualifiedNo ? false : Boolean(before.desired_case) || signed,
     nonPi: before.caller_class === "non_pi",
     size: String(formData.get("size_tag") ?? ""),
-    injuryType: String(formData.get("injury_type") ?? ""),
+    injuryType: injuryTagForCaseType(before.case_type) || String(formData.get("injury_type") ?? ""),
     notQualified: String(formData.get("not_qualified_tag") ?? ""),
     requireQualified: false,
   });

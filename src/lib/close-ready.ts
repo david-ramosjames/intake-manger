@@ -1,5 +1,6 @@
+import { isPiCaseType } from "@/lib/leads";
 import { isPlaceholderOwner } from "@/lib/talked-with";
-import { NOT_QUALIFIED_TAGS, SIZE_TAGS, TYPE_TAGS, qualifiedChoice, selectedDecline, selectedOne } from "@/lib/tags";
+import { NOT_QUALIFIED_TAGS, SIZE_TAGS, qualifiedChoice, selectedDecline, selectedOne } from "@/lib/tags";
 
 export type CloseReadyLead = {
   lead_name?: string | null;
@@ -36,8 +37,8 @@ export function closeGaps(lead: CloseReadyLead, kind: "lead" | "nonlead" = "lead
     lead.caller_class === "non_pi" ||
     lead.case_type === "Non-PI Legal Matter" ||
     selectedOne(tags, NOT_QUALIFIED_TAGS) === "NQ: Non-PI Legal Matter";
-  if (!nonPi && qualified !== false && !selectedOne(tags, TYPE_TAGS) && lead.case_type !== "No Injuries / Property Damage") {
-    gaps.push("Injury type");
+  if (!nonPi && qualified !== false && !isPiCaseType(lead.case_type)) {
+    gaps.push("Case type");
   }
   if ((lead.desired_case || lead.signed_case) && !selectedOne(tags, SIZE_TAGS)) gaps.push("Size");
   if (qualified === false && !selectedDecline(tags) && !selectedOne(tags, NOT_QUALIFIED_TAGS)) {

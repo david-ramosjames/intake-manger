@@ -174,9 +174,6 @@ export function OpenCallsList({
             destinations={destinations}
             templates={templates}
             staff={staffNames}
-            staffMentions={staff
-              .filter((person): person is StaffPerson & { slackUserId: string } => Boolean(person.slackUserId))
-              .map((person) => ({ name: person.name, slackUserId: person.slackUserId }))}
             onClose={closeLead}
           />
         ) : null}

@@ -289,7 +289,6 @@ export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promi
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staffNames: string[];
-  staffMentions: { name: string; slackUserId: string }[];
 }> {
   const [destinationResult, templateResult, staff] = await Promise.all([
     supabase
@@ -314,9 +313,6 @@ export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promi
       es: templateRows.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es,
     },
     staffNames: staff.map((person) => person.name),
-    staffMentions: staff
-      .filter((person): person is typeof person & { slackUserId: string } => Boolean(person.slackUserId))
-      .map((person) => ({ name: person.name, slackUserId: person.slackUserId })),
   };
 }
 
@@ -328,11 +324,10 @@ export async function loadWorkQueueRows(
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staffNames: string[];
-  staffMentions: { name: string; slackUserId: string }[];
 }> {
   const ids = [...new Set(leadIds.filter(Boolean))];
   if (ids.length === 0) {
-    return { rows: [], destinations: [], templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es }, staffNames: [], staffMentions: [] };
+    return { rows: [], destinations: [], templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es }, staffNames: [] };
   }
 
   const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }] =
@@ -461,8 +456,5 @@ export async function loadWorkQueueRows(
     destinations,
     templates,
     staffNames: staff.map((person) => person.name),
-    staffMentions: staff
-      .filter((person): person is typeof person & { slackUserId: string } => Boolean(person.slackUserId))
-      .map((person) => ({ name: person.name, slackUserId: person.slackUserId })),
   };
 }

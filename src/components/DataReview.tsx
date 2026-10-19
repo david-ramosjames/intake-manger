@@ -635,7 +635,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
           >
             <option value="">None</option>
             {withCurrent(
-              NOT_QUALIFIED_TAGS.filter((item) => item !== "NQ: Spam / Robo Call"),
+              NOT_QUALIFIED_TAGS,
               draft.notQualified,
             ).map((item) => (
               <option key={item} value={item}>

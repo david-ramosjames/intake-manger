@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { heardClientName } from "@/lib/identity";
 import { leadTitle } from "@/lib/leads";
 import { mergeIntoLead } from "@/lib/ops-actions";
 import { requireStaff } from "@/lib/session";
@@ -65,15 +66,18 @@ export default async function VerifyPage() {
           or closed from here.
         </p>
         <ul className="mt-3 space-y-3">
-          {((identityResult.data ?? []) as { id: string; lead_name: string | null; phone: string | null; identity_status: string; identity_evidence: string | null; lead_status: string }[]).map((lead) => (
+          {((identityResult.data ?? []) as { id: string; lead_name: string | null; phone: string | null; identity_status: string; identity_evidence: string | null; lead_status: string }[]).map((lead) => {
+            const heard = heardClientName(lead.identity_evidence);
+            return (
             <li key={lead.id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
               <Link href={`/leads/${lead.id}`} className="font-medium text-navy underline">
                 {leadTitle(lead)}
               </Link>
               <span className="text-slate-500"> · {lead.lead_status}</span>
-              {lead.identity_evidence ? <p className="mt-1 text-amber-950">{lead.identity_evidence}</p> : null}
+              {heard ? <p className="mt-1 text-amber-950">Heard {heard}</p> : null}
             </li>
-          ))}
+            );
+          })}
           {(identityResult.data ?? []).length === 0 ? (
             <li className="text-sm text-slate-500">No identity conflicts are waiting.</li>
           ) : null}

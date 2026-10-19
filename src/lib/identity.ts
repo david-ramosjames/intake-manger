@@ -52,6 +52,16 @@ export function matchStaff(name: string | null | undefined, staff: StaffPerson[]
   return staff.find((person) => staffAliases(person).some((alias) => norm(alias) === key)) ?? null;
 }
 
+/** The name from the call, without the explanation stored beside older leads. */
+export function heardClientName(evidence: string | null | undefined): string | null {
+  const text = String(evidence || "").trim();
+  if (!text) return null;
+  const current = text.match(/^Heard (.+?)\.?$/);
+  if (current) return current[1];
+  const legacy = text.match(/heard the client name (.+?)\./) || text.match(/used “([^”]+)”/) || text.match(/used "([^"]+)"/);
+  return legacy?.[1] ?? null;
+}
+
 export function suggestClientName(summary: string | null | undefined, staff: StaffPerson[]): string | null {
   const hinted = nameFromSummary(summary);
   if (hinted && !matchStaff(hinted, staff)) return hinted;

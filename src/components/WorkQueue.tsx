@@ -5,6 +5,7 @@ import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
+import { heardClientName } from "@/lib/identity";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
 import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
@@ -1016,7 +1017,6 @@ export function LeadDrawer({
           </section>
         ) : (
           <>
-        {row.signed || row.referralSent ? null : <QueueReferral row={row} destinations={destinations} templates={templates} />}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
@@ -1117,6 +1117,9 @@ export function LeadDrawer({
             </a>
           ) : null}
         </div>
+        {row.nonPi && !row.signed && !row.referralSent ? (
+          <QueueReferral row={row} destinations={destinations} templates={templates} />
+        ) : null}
           </>
         )}
       </div>
@@ -1207,28 +1210,24 @@ function rowCloseGaps(row: QueueRow, kind: "lead" | "nonlead" = "lead") {
 
 function IdentityShelf({ row }: { row: QueueRow }) {
   const currentName = row.leadName || (row.title === "Not captured" ? "" : row.title);
+  const heard = heardClientName(row.identityEvidence);
   return (
     <NotedForm action={resolveIdentity.bind(null, row.id)}>
-      <p className="text-sm font-medium text-amber-950">Identity needs review</p>
-      {row.identityEvidence ? <p className="mt-1 text-sm text-amber-900">{row.identityEvidence}</p> : null}
-      {row.suggestedName ? <p className="mt-1 text-sm text-amber-900">Suggested name: {row.suggestedName}</p> : null}
-      <p className="mt-1 text-sm text-amber-900">Confirm this is the client, or type the correct name and save it.</p>
-      <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-amber-900">
-        Client name
-        <input
-          name="client_name"
-          defaultValue={row.suggestedName || currentName}
-          className="mt-1 w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
-        />
-      </label>
+      <p className="text-sm font-medium text-amber-950">{heard ? `Heard ${heard}` : "Check the name"}</p>
+      <input
+        name="client_name"
+        aria-label="Client name"
+        defaultValue={row.suggestedName || currentName}
+        className="mt-2 w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm text-slate-900"
+      />
       <div className="mt-2 flex flex-wrap gap-2">
         {currentName ? (
           <button name="decision" value="keep" className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-950">
-            Confirm {currentName}
+            Keep {currentName}
           </button>
         ) : null}
         <button name="decision" value="replace" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
-          Save this name
+          Save
         </button>
       </div>
     </NotedForm>

@@ -21,14 +21,24 @@ export function isLeadOpen(status: string | null | undefined): boolean {
 
 const CLOSED_LIST = "(Signed,Promoted,Lost,Referred)";
 
+/** The office lines are shared. A second row there is not the same client. */
+const SHARED_LINES = new Set([
+  "+15125373369",
+  "+19563137771",
+  "+15126010647",
+  "+15125005266",
+  "+15126300907",
+]);
+
 /** Signing closes the lead. A finished call sequence, or a finished Sign Flow reminder series, closes it too. */
 export async function closeFinishedLeads(
   supabase: SupabaseClient,
-): Promise<{ signed: number; expired: number; signSeries: number }> {
+): Promise<{ signed: number; expired: number; signSeries: number; merged: number }> {
+  const merged = await mergeDuplicatePhones(supabase);
   const signed = await closeSignedLeads(supabase);
   const expired = await closeExpiredSequences(supabase);
   const signSeries = await closeExhaustedSignSeries(supabase);
-  return { signed, expired, signSeries };
+  return { signed, expired, signSeries, merged };
 }
 
 /** Sign Flow's default contract series is six reminders. Count 6 with no next reminder means it finished, including after the request is cancelled. */
@@ -72,6 +82,159 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     await supabase.from("leads").update({ callrail_tags: tags, qualified: false, desired_case: false, desired_source: "staff" }).eq("id", row.id);
   }
   return ids.length;
+}
+
+type MergeLead = {
+  id: string;
+  phone_e164: string | null;
+  signed_case: boolean | null;
+  case_id: string | null;
+  lead_status: string | null;
+  agreement_signing_url: string | null;
+  case_type: string | null;
+  case_detail: string | null;
+  lead_name: string | null;
+  email: string | null;
+  summary: string | null;
+  quo_link: string | null;
+  slack_permalink: string | null;
+  slack_channel_id: string | null;
+  slack_message_ts: string | null;
+  slack_thread_ts: string | null;
+  created_at: string;
+};
+
+function keeperFirst(left: MergeLead, right: MergeLead): number {
+  const rank = (row: MergeLead) => {
+    const signed = row.signed_case || row.case_id || row.lead_status === "Signed" || row.lead_status === "Promoted";
+    return [
+      signed ? 0 : 1,
+      row.agreement_signing_url ? 0 : 1,
+      String(row.case_type || "").trim() ? 0 : 1,
+    ];
+  };
+  const a = rank(left);
+  const b = rank(right);
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return right.created_at.localeCompare(left.created_at);
+}
+
+function blank(value: string | null | undefined): string | null {
+  const text = String(value || "").trim();
+  return text && text !== "null" ? text : null;
+}
+
+/** One phone is one lead. A later call keeps the record that already has the contract, the case, or the newer facts. */
+async function mergeDuplicatePhones(supabase: SupabaseClient): Promise<number> {
+  const since = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: recent, error } = await supabase
+    .from("leads")
+    .select("phone_e164")
+    .gte("created_at", since)
+    .not("phone_e164", "is", null)
+    .limit(1000);
+  if (error) throw new Error(error.message);
+  const phones = [...new Set((recent ?? []).map((row) => String(row.phone_e164 || "")).filter((phone) => phone && !SHARED_LINES.has(phone) && !isPracticeTestPhone(phone)))];
+  if (!phones.length) return 0;
+
+  const { data, error: rowsError } = await supabase
+    .from("leads")
+    .select("id, phone_e164, signed_case, case_id, lead_status, agreement_signing_url, case_type, case_detail, lead_name, email, summary, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, created_at")
+    .in("phone_e164", phones);
+  if (rowsError) throw new Error(rowsError.message);
+
+  const groups = new Map<string, MergeLead[]>();
+  for (const row of (data ?? []) as MergeLead[]) {
+    const phone = String(row.phone_e164 || "");
+    const list = groups.get(phone) ?? [];
+    list.push(row);
+    groups.set(phone, list);
+  }
+
+  let count = 0;
+  for (const [phone, rows] of groups) {
+    if (rows.length < 2) continue;
+    const [keeper, ...duplicates] = [...rows].sort(keeperFirst);
+    for (const duplicate of duplicates) {
+      await foldLead(supabase, phone, keeper, duplicate);
+      count += 1;
+    }
+  }
+  return count;
+}
+
+async function foldLead(supabase: SupabaseClient, phone: string, keeper: MergeLead, duplicate: MergeLead): Promise<void> {
+  const detail = blank(duplicate.case_detail);
+  const keeperDetail = blank(keeper.case_detail);
+  let caseDetail = keeper.case_detail;
+  if (detail && !keeperDetail) caseDetail = detail;
+  else if (detail && keeperDetail && !keeperDetail.includes(detail)) caseDetail = `${keeperDetail}\n\n${detail}`.slice(-15000);
+
+  const patch: Record<string, string | null> = {};
+  if (caseDetail !== keeper.case_detail) patch.case_detail = caseDetail;
+  if (!blank(keeper.case_type) && blank(duplicate.case_type)) patch.case_type = blank(duplicate.case_type);
+  if (!blank(keeper.lead_name) && blank(duplicate.lead_name)) patch.lead_name = blank(duplicate.lead_name);
+  if (!blank(keeper.email) && blank(duplicate.email)) patch.email = blank(duplicate.email);
+  if (!blank(keeper.summary) && blank(duplicate.summary)) patch.summary = blank(duplicate.summary);
+  if (!blank(keeper.quo_link) && blank(duplicate.quo_link)) patch.quo_link = blank(duplicate.quo_link);
+  if (!blank(keeper.slack_permalink) && blank(duplicate.slack_permalink)) patch.slack_permalink = blank(duplicate.slack_permalink);
+  if (!blank(keeper.slack_thread_ts) && blank(duplicate.slack_thread_ts)) patch.slack_thread_ts = blank(duplicate.slack_thread_ts);
+  if (!keeper.slack_message_ts && duplicate.slack_channel_id && duplicate.slack_message_ts) {
+    const { count, error } = await supabase
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("slack_channel_id", duplicate.slack_channel_id)
+      .eq("slack_message_ts", duplicate.slack_message_ts)
+      .neq("id", duplicate.id);
+    if (error) throw new Error(error.message);
+    if (!count) {
+      patch.slack_channel_id = duplicate.slack_channel_id;
+      patch.slack_message_ts = duplicate.slack_message_ts;
+    }
+  }
+  if (Object.keys(patch).length) {
+    const { error } = await supabase.from("leads").update(patch).eq("id", keeper.id);
+    if (error) throw new Error(error.message);
+    Object.assign(keeper, patch);
+  }
+
+  for (const table of ["lead_events", "slack_posts", "referral_sends", "call_attempts", "intake_interactions", "lead_channel_posts"] as const) {
+    const { error } = await supabase.from(table).update({ lead_id: keeper.id }).eq("lead_id", duplicate.id);
+    if (error) throw new Error(error.message);
+  }
+
+  const { data: jobs, error: jobsError } = await supabase
+    .from("lead_jobs")
+    .select("id, lead_id, queue, sequence, position")
+    .in("lead_id", [keeper.id, duplicate.id]);
+  if (jobsError) throw new Error(jobsError.message);
+  const taken = new Set(
+    (jobs ?? [])
+      .filter((job) => job.lead_id === keeper.id)
+      .map((job) => `${job.queue}|${job.sequence ?? ""}|${job.position}`),
+  );
+  const blocked = (jobs ?? [])
+    .filter((job) => job.lead_id === duplicate.id && taken.has(`${job.queue}|${job.sequence ?? ""}|${job.position}`))
+    .map((job) => job.id as string);
+  if (blocked.length) {
+    const { error } = await supabase.from("lead_jobs").delete().in("id", blocked);
+    if (error) throw new Error(error.message);
+  }
+  const { error: moveError } = await supabase.from("lead_jobs").update({ lead_id: keeper.id }).eq("lead_id", duplicate.id);
+  if (moveError) throw new Error(moveError.message);
+
+  const { error: eventError } = await supabase.from("lead_events").insert({
+    lead_id: keeper.id,
+    event_type: "merged",
+    actor: "intake-manager",
+    payload: { duplicate_id: duplicate.id, phone },
+  });
+  if (eventError) throw new Error(eventError.message);
+
+  const { error: deleteError } = await supabase.from("leads").delete().eq("id", duplicate.id);
+  if (deleteError) throw new Error(deleteError.message);
 }
 
 async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {

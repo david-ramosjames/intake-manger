@@ -622,7 +622,7 @@ export default async function LeadListPage({
       desired: desiredWord(milestoneDesired(row.lead)),
       desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead) || milestoneQualified(row.lead) === false,
       signed: milestoneSigned(row.lead),
-      nonPi: row.lead.caller_class === "non_pi" && !isPiCaseType(suggestedCaseType(row.lead)),
+      nonPi: row.lead.case_type === "Non-PI Legal Matter",
       practiceArea: row.lead.practice_area,
       referralSent: sentFirm.has(row.lead.id) || row.lead.lead_status === "Referred" || row.lead.close_reason === "referred",
       referralFirm: sentFirm.get(row.lead.id) || null,

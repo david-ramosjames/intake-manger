@@ -11,7 +11,7 @@ import { describeFollowUp } from "@/lib/followup";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
 import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, signatureNeedsConfirm } from "@/lib/desired";
 import { daysOpen, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, priorityReasonText, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
-import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
+import { heardClientName, loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { leadCycle, leadNeed, leadStatusLabel, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { requireStaff } from "@/lib/session";
@@ -576,35 +576,30 @@ function Signals({ lead }: { lead: Lead }) {
 
 function IdentityReview({ lead, staff }: { lead: Lead; staff: StaffPerson[] }) {
   const suggestion = suggestClientName(lead.summary, staff);
+  const heard = heardClientName(lead.identity_evidence);
+  const currentName = lead.lead_name?.trim() || "";
   return (
     <form action={resolveIdentity.bind(null, lead.id)} className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3">
-      <p className="text-sm font-medium text-amber-950">
-        {lead.identity_status === "needs_review" ? "Client identity needs review" : "Name awaiting confirmation"}
-      </p>
-      {lead.identity_evidence ? <p className="mt-1 text-sm text-amber-950">{lead.identity_evidence}</p> : null}
-      {suggestion ? <p className="mt-2 text-sm text-amber-950">Suggested name: {suggestion}</p> : null}
-      <p className="mt-2 text-sm text-amber-950">
-        The current name stays until you save a different one. This does not merge or close the matter.
-      </p>
-      <label className="mt-3 block text-sm">
-        <span className="font-medium text-slate-800">Client name</span>
-        <input
-          name="client_name"
-          defaultValue={suggestion ?? ""}
-          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-        />
-      </label>
+      <p className="text-sm font-medium text-amber-950">{heard ? `Heard ${heard}` : "Check the name"}</p>
+      <input
+        name="client_name"
+        aria-label="Client name"
+        defaultValue={suggestion || currentName}
+        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+      />
       <div className="mt-3 flex flex-wrap gap-2">
+        {currentName ? (
+          <button type="submit" name="decision" value="keep" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
+            Keep {currentName}
+          </button>
+        ) : null}
         <button
           type="submit"
           name="decision"
           value="replace"
           className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy"
         >
-          Save this client name
-        </button>
-        <button type="submit" name="decision" value="keep" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
-          The current name is the client
+          Save
         </button>
       </div>
     </form>

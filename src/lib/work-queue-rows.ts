@@ -232,7 +232,7 @@ function toQueueRow(
     desired: desiredWord(milestoneDesired(lead)),
     desiredLocked: contractSent(lead) || milestoneSigned(lead) || milestoneQualified(lead) === false,
     signed: milestoneSigned(lead),
-    nonPi: lead.caller_class === "non_pi" && !isPiCaseType(suggestedCaseType(lead)),
+    nonPi: lead.case_type === "Non-PI Legal Matter",
     practiceArea: lead.practice_area,
     referralSent: Boolean(input.sentFirm) || lead.lead_status === "Referred" || lead.close_reason === "referred",
     referralFirm: input.sentFirm,

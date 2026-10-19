@@ -18,6 +18,7 @@ import { canonicalLeadSource, isPiCaseType, isSourceType } from "./leads";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { assertCloseReady } from "./close-ready";
+import { isPlaceholderOwner } from "./talked-with";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { sendQuoText } from "./quo";
@@ -289,7 +290,8 @@ export async function setTalkedWith(formData: FormData) {
   const { supabase, email } = await requireStaff();
   const leadId = text(formData, "lead_id");
   if (!leadId) throw new Error("Missing the lead.");
-  const name = text(formData, "owner_name");
+  const written = text(formData, "owner_name");
+  const name = !written || isPlaceholderOwner(written) ? "Outbound" : written;
   const { data: lead, error } = await supabase
     .from("leads")
     .select("id, consultation_date")

@@ -26,7 +26,7 @@ export function closeGaps(lead: CloseReadyLead, kind: "lead" | "nonlead" = "lead
   if (!name || /^not captured$/i.test(name)) gaps.push("Lead name");
   const phone = (lead.phone_e164 || lead.phone || "").replace(/\D/g, "");
   if (phone.length < 7) gaps.push("Phone");
-  if (isPlaceholderOwner(lead.owner_name)) gaps.push("Handled by");
+  if (isPlaceholderOwner(lead.owner_name)) gaps.push("Slack tag");
 
   const tags = lead.callrail_tags ?? [];
   const qualifiedTag = qualifiedChoice(tags);

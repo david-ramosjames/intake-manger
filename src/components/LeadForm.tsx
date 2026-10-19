@@ -175,19 +175,19 @@ export function LeadForm({
         </select>
       </label>
       <label className="text-sm sm:col-span-1">
-        <span className="font-medium text-slate-700">Handled by</span>
+        <span className="font-medium text-slate-700">Slack tag</span>
         <select
           name="owner_name"
-          defaultValue={lead?.owner_name ?? ""}
+          defaultValue={lead?.owner_name && !/^(legal assistant|referred|sona|outbound)$/i.test(lead.owner_name) ? lead.owner_name : "Outbound"}
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
         >
-          <option value="">Unassigned</option>
+          <option value="Outbound">Slack Outbound</option>
           {staff.map((person) => (
             <option key={person.name} value={person.name}>
               {person.name}
             </option>
           ))}
-          {lead?.owner_name && !staff.some((person) => person.name === lead.owner_name) ? (
+          {lead?.owner_name && lead.owner_name !== "Outbound" && !/^(legal assistant|referred|sona)$/i.test(lead.owner_name) && !staff.some((person) => person.name === lead.owner_name) ? (
             <option value={lead.owner_name}>{lead.owner_name}</option>
           ) : null}
         </select>

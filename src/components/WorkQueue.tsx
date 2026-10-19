@@ -10,6 +10,7 @@ import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { SIZE_TAGS, selectedOne } from "@/lib/tags";
 import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
+import { isPlaceholderOwner } from "@/lib/talked-with";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
 import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
@@ -540,8 +541,8 @@ function YesNoCell({
   }
 
   const side = fit
-    ? "flex h-7 min-w-0 flex-1 items-center justify-center whitespace-nowrap px-1 text-[11px] font-medium leading-none transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
-    : "h-9 min-w-0 flex-1 px-2 text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent";
+    ? "flex h-7 min-w-0 flex-1 cursor-pointer items-center justify-center whitespace-nowrap px-1 text-[11px] font-medium leading-none transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent disabled:cursor-default"
+    : "h-9 min-w-0 flex-1 cursor-pointer px-2 text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent disabled:cursor-default";
 
   return (
     <div className={`flex flex-col ${align === "start" ? "items-stretch" : "items-center"}`}>
@@ -554,7 +555,7 @@ function YesNoCell({
             disabled={pending !== null}
             onClick={() => void choose("yes")}
             className={`${side} border-r border-slate-300 ${
-              value === "Yes" ? "bg-emerald-50 text-emerald-900" : "text-slate-500 hover:bg-slate-50"
+              value === "Yes" ? "bg-emerald-50 text-emerald-900 hover:bg-emerald-100" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             }`}
           >
             {value === "Yes" ? "✓ Yes" : "Yes"}
@@ -565,7 +566,7 @@ function YesNoCell({
             aria-pressed={value === "No"}
             disabled={pending !== null}
             onClick={() => void choose("no")}
-            className={`${side} ${value === "No" ? "bg-slate-200 text-slate-900" : "text-slate-500 hover:bg-slate-50"}`}
+            className={`${side} ${value === "No" ? "bg-slate-200 text-slate-900 hover:bg-slate-300" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}
           >
             No
           </button>
@@ -1236,11 +1237,11 @@ function IdentityShelf({ row }: { row: QueueRow }) {
       />
       <div className="mt-2 flex flex-wrap gap-2">
         {currentName ? (
-          <button name="decision" value="keep" className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-950">
+          <button name="decision" value="keep" className="cursor-pointer rounded-md border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-950 transition-colors hover:border-amber-500 hover:bg-amber-100">
             Keep {currentName}
           </button>
         ) : null}
-        <button name="decision" value="replace" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+        <button name="decision" value="replace" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
           Save
         </button>
       </div>
@@ -1249,20 +1250,21 @@ function IdentityShelf({ row }: { row: QueueRow }) {
 }
 
 function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
-  const names = row.owner && !staff.includes(row.owner) ? [row.owner, ...staff] : staff;
+  const known = row.owner && !isPlaceholderOwner(row.owner) && row.owner !== "Outbound" ? row.owner : "";
+  const names = known && !staff.includes(known) ? [known, ...staff] : staff;
   return (
     <NotedForm action={setTalkedWith}>
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-        Handled by
+        Slack tag
         <select
           key={`${row.id}:${row.owner ?? ""}`}
           name="owner_name"
-          defaultValue={row.owner ?? ""}
+          defaultValue={known || "Outbound"}
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          className={fieldClass()}
+          className={`${fieldClass()} cursor-pointer`}
         >
-          <option value="">Not set</option>
+          <option value="Outbound">Slack Outbound</option>
           {names.map((name) => (
             <option key={name} value={name}>
               {name}
@@ -1321,7 +1323,7 @@ function NotedForm({
     >
       {children}
       {idleLabel ? (
-        <button type="submit" disabled={pending} className="mt-3 rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60">
+        <button type="submit" disabled={pending} className="mt-3 cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60">
           <ButtonLabel value={pending ? "Saving…" : idleLabel} reserve={["Saving…", idleLabel]} />
         </button>
       ) : null}
@@ -1345,10 +1347,10 @@ function PrioritySuggestion({ row }: { row: QueueRow }) {
       <p className="font-medium text-sky-950">Suggested priority</p>
       <p className="mt-1 text-sky-900">{row.prioritySuggestion}</p>
       <div className="mt-3 flex flex-wrap gap-2">
-        <button name="decision" value="confirm" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+        <button name="decision" value="confirm" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
           Add to priority
         </button>
-        <button name="decision" value="dismiss" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
+        <button name="decision" value="dismiss" className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
           Not a priority
         </button>
       </div>
@@ -1372,19 +1374,19 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
       <div className="mt-3 flex flex-wrap gap-2">
         {suggestion === "decline" ? (
           <>
-            <button name="decision" value="decline" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+            <button name="decision" value="decline" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
               Decline
             </button>
-            <button name="decision" value="refer" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+            <button name="decision" value="refer" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
               Refer
             </button>
           </>
         ) : (
-          <button name="decision" value="confirm" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+          <button name="decision" value="confirm" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
             Confirm close
           </button>
         )}
-        <button name="decision" value="dismiss" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
+        <button name="decision" value="dismiss" className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy">
           Keep open
         </button>
       </div>

@@ -3,7 +3,7 @@ import { QueueHelp } from "@/components/QueueHelp";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { attachCallrailSources } from "@/lib/callrail";
 import { fillLeadSources } from "@/lib/lead-source-fill";
-import { loadStaff } from "@/lib/identity";
+import { loadStaff, suggestClientName } from "@/lib/identity";
 import { fillTalkedWith, isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
@@ -163,7 +163,7 @@ const LEGACY: { id: LeadView; label: string }[] = [
 ];
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, lead_source, source_type, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -175,6 +175,7 @@ type ListLead = Pick<
   | "phone_e164"
   | "email"
   | "identity_status"
+  | "identity_evidence"
   | "lead_source"
   | "source_channel"
   | "source_type"
@@ -599,6 +600,8 @@ export default async function LeadListPage({
       })),
       closeSuggestion: row.lead.close_suggestion,
       identityStatus: row.lead.identity_status,
+      identityEvidence: row.lead.identity_evidence,
+      suggestedName: suggestClientName(row.lead.summary, staff),
       accident: row.accident,
       when: receivedLabel(row.age),
       priority: row.priority ? PRIORITY_PLACE_LABEL[row.priority] : null,
@@ -768,7 +771,16 @@ export default async function LeadListPage({
         </form>
       </div>
 
-      <WorkQueue rows={queueRows} initialId={selectedId} destinations={destinations} templates={referralTemplates} staff={staff.map((person) => person.name)} />
+      <WorkQueue
+        rows={queueRows}
+        initialId={selectedId}
+        destinations={destinations}
+        templates={referralTemplates}
+        staff={staff.map((person) => person.name)}
+        staffMentions={staff
+          .filter((person): person is typeof person & { slackUserId: string } => Boolean(person.slackUserId))
+          .map((person) => ({ name: person.name, slackUserId: person.slackUserId }))}
+      />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>

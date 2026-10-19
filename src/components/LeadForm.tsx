@@ -175,7 +175,7 @@ export function LeadForm({
         </select>
       </label>
       <label className="text-sm sm:col-span-1">
-        <span className="font-medium text-slate-700">Talked with</span>
+        <span className="font-medium text-slate-700">Handled by</span>
         <select
           name="owner_name"
           defaultValue={lead?.owner_name ?? ""}

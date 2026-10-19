@@ -122,11 +122,9 @@ export function LeadTagFields({
           ))}
         </select>
       </label>
-      {quiet && size ? <input type="hidden" name="size_tag" value={size} /> : null}
-      {quiet && injuryType ? <input type="hidden" name="injury_type" value={injuryType} /> : null}
-      {showSize && !quiet ? (
+      {showSize ? (
         <label className="block">
-          <span className="font-medium text-slate-700">Size</span>
+          <span className={quiet ? "text-xs font-semibold uppercase tracking-wide text-slate-500" : "font-medium text-slate-700"}>Size</span>
           <select
             name="size_tag"
             value={size}
@@ -142,9 +140,9 @@ export function LeadTagFields({
           </select>
         </label>
       ) : null}
-      {showType && !quiet ? (
+      {showType ? (
         <label className="block">
-          <span className="font-medium text-slate-700">Injury type</span>
+          <span className={quiet ? "text-xs font-semibold uppercase tracking-wide text-slate-500" : "font-medium text-slate-700"}>Injury type</span>
           <select
             name="injury_type"
             value={injuryType}

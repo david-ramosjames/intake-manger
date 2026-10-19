@@ -103,6 +103,7 @@ function tagsFromForm(formData: FormData) {
     size: String(formData.get("size_tag") ?? ""),
     injuryType: String(formData.get("injury_type") ?? ""),
     notQualified: String(formData.get("not_qualified_tag") ?? ""),
+    requireQualified: false,
   });
 }
 

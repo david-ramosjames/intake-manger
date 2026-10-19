@@ -10,12 +10,14 @@ export function OpenCallPlan({
   dueAt,
   assignedName,
   consultName,
+  consulted,
   staff,
 }: {
   jobId: string;
   dueAt: string;
   assignedName: string;
   consultName: string;
+  consulted: boolean;
   staff: StaffPerson[];
 }) {
   const selected = assignedName || consultName || "";
@@ -40,7 +42,7 @@ export function OpenCallPlan({
             defaultValue={selected}
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900"
           >
-            <option value="">Outbound (today’s #lead-calls)</option>
+            <option value="">{consulted ? "Choose who handled this" : "Outbound (today’s #lead-calls)"}</option>
             {consultName && !staff.some((person) => person.name === consultName) ? (
               <option value={consultName}>{consultName} (consult)</option>
             ) : null}

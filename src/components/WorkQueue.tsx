@@ -7,7 +7,8 @@ import { LeadTagFields } from "@/components/LeadTagFields";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { CALLER_CLASS_LABEL, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
 import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
+import { closeGaps } from "@/lib/close-ready";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, scheduleSlackPost, sendReferral, setConsultation, setDesired, setNextAction, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
 import { referralFirmArea, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -41,6 +42,8 @@ export type QueueRow = {
   samePhone: { id: string; title: string; label: string }[];
   closeSuggestion: "decline" | "not_interested" | "not_a_lead" | null;
   identityStatus: LeadIdentity | null;
+  identityEvidence: string | null;
+  suggestedName: string | null;
   accident: string;
   caseType: string;
   leadSource: string;
@@ -174,12 +177,14 @@ export function WorkQueue({
   destinations,
   templates,
   staff,
+  staffMentions = [],
 }: {
   rows: QueueRow[];
   initialId?: string;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staff: string[];
+  staffMentions?: { name: string; slackUserId: string }[];
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
@@ -325,7 +330,7 @@ export function WorkQueue({
         </table>
       </div>
       {selected ? (
-        <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} staff={staff} onClose={() => setSelectedId("")} />
+        <LeadDrawer key={selected.id} row={selected} destinations={destinations} templates={templates} staff={staff} staffMentions={staffMentions} onClose={() => setSelectedId("")} />
       ) : null}
     </div>
   );
@@ -891,12 +896,14 @@ export function LeadDrawer({
   destinations,
   templates,
   staff,
+  staffMentions = [],
   onClose,
 }: {
   row: QueueRow;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staff: string[];
+  staffMentions?: { name: string; slackUserId: string }[];
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"overview" | "details" | "activity">("overview");
@@ -976,6 +983,11 @@ export function LeadDrawer({
         </p>
       ) : null}
       <DrawerNoticeContext.Provider value={setNotice}>
+      {row.identityStatus === "needs_review" ? (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
+          <IdentityShelf row={row} />
+        </div>
+      ) : null}
       {tab === "details" ? (
         <LeadFacts row={row} staff={staff} />
       ) : (
@@ -1004,11 +1016,12 @@ export function LeadDrawer({
           </section>
         ) : (
           <>
-        {row.nonPi ? <QueueReferral row={row} destinations={destinations} templates={templates} /> : null}
+        {row.signed || row.referralSent ? null : <QueueReferral row={row} destinations={destinations} templates={templates} />}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
+        <SlackNote row={row} staffMentions={staffMentions} />
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
             <a href={row.quoUrl} className={buttonSecondary} target="_blank" rel="noreferrer">
@@ -1147,7 +1160,7 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
               defaultValue={row.callTag ?? ""}
               className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
             >
-              <option value="">Whoever is available</option>
+              <option value="">{row.consultKey ? "Choose who handled this" : "Whoever is available"}</option>
               {names.map((name) => (
                 <option key={name} value={name}>
                   {name}
@@ -1173,13 +1186,114 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
   );
 }
 
+function rowCloseGaps(row: QueueRow, kind: "lead" | "nonlead" = "lead") {
+  return closeGaps(
+    {
+      lead_name: row.leadName,
+      phone: row.phone,
+      identity_status: row.identityStatus,
+      owner_name: row.owner,
+      qualified: row.qualifiedLabel === "Yes" ? true : row.qualifiedLabel === "No" ? false : null,
+      callrail_tags: row.tags,
+      desired_case: row.desired === "Yes",
+      signed_case: row.signed,
+      caller_class: row.callerClass,
+      case_type: row.caseType,
+      consultation_date: row.consultKey,
+    },
+    kind,
+  );
+}
+
+function IdentityShelf({ row }: { row: QueueRow }) {
+  const currentName = row.leadName || (row.title === "Not captured" ? "" : row.title);
+  return (
+    <NotedForm action={resolveIdentity.bind(null, row.id)}>
+      <p className="text-sm font-medium text-amber-950">Identity needs review</p>
+      {row.identityEvidence ? <p className="mt-1 text-sm text-amber-900">{row.identityEvidence}</p> : null}
+      {row.suggestedName ? <p className="mt-1 text-sm text-amber-900">Suggested name: {row.suggestedName}</p> : null}
+      <p className="mt-1 text-sm text-amber-900">Confirm this is the client, or type the correct name and save it.</p>
+      <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-amber-900">
+        Client name
+        <input
+          name="client_name"
+          defaultValue={row.suggestedName || currentName}
+          className="mt-1 w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
+        />
+      </label>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {currentName ? (
+          <button name="decision" value="keep" className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-950">
+            Confirm {currentName}
+          </button>
+        ) : null}
+        <button name="decision" value="replace" className="rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white">
+          Save this name
+        </button>
+      </div>
+    </NotedForm>
+  );
+}
+
+function SlackNote({
+  row,
+  staffMentions,
+}: {
+  row: QueueRow;
+  staffMentions: { name: string; slackUserId: string }[];
+}) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Slack for the team</h3>
+      <NotedForm action={scheduleSlackPost.bind(null, row.id)} className="mt-2 space-y-2" idleLabel="Send or schedule">
+        <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+          Message
+          <textarea
+            name="body"
+            required
+            rows={3}
+            placeholder="What should the team do?"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            When
+            <input
+              name="due_at"
+              type="datetime-local"
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
+            />
+          </label>
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Mention
+            <select
+              name="mention"
+              defaultValue=""
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900"
+            >
+              <option value="">No mention</option>
+              {staffMentions.map((person) => (
+                <option key={person.slackUserId} value={person.slackUserId}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p className="text-xs text-slate-500">Leave When empty to post now.</p>
+      </NotedForm>
+    </section>
+  );
+}
+
 function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
   const names = row.owner && !staff.includes(row.owner) ? [row.owner, ...staff] : staff;
   return (
     <NotedForm action={setTalkedWith}>
       <input type="hidden" name="lead_id" value={row.id} />
       <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-        Talked with
+        Handled by
         <select
           key={`${row.id}:${row.owner ?? ""}`}
           name="owner_name"
@@ -1289,6 +1403,11 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
       <input type="hidden" name="lead_id" value={row.id} />
       <input type="hidden" name="suggestion" value={suggestion} />
       <p className="font-medium text-orange-950">Suggested close: {CLOSE_SUGGESTION_LABEL[suggestion]}</p>
+      {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : "lead").length ? (
+        <p className="mt-2 text-orange-900">
+          Closing needs: {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : "lead").join(", ")}.
+        </p>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {suggestion === "decline" ? (
           <>
@@ -1314,9 +1433,11 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
 
 function NonLeadChoice({ row }: { row: QueueRow }) {
   const current = EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? "";
+  const gaps = rowCloseGaps(row, "nonlead");
   return (
     <NotedForm action={classifyNonLead} className="rounded-lg border border-slate-200 p-3 text-sm" idleLabel="Move to non-leads">
       <input type="hidden" name="lead_id" value={row.id} />
+      {gaps.length ? <p className="mb-2 text-sm text-orange-800">Closing needs: {gaps.join(", ")}.</p> : null}
       <label className="block font-medium text-slate-700">
         Not a lead
         <select

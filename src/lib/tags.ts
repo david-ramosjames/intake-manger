@@ -130,6 +130,7 @@ export function tagsFromSelection(input: {
   size?: string;
   injuryType?: string;
   notQualified?: string;
+  requireQualified?: boolean;
 }): { tags: string[]; qualified: boolean | null; decline_reason: string | null } {
   const notQualified = NOT_QUALIFIED_SET.has(input.notQualified || "") ? String(input.notQualified) : "";
   const nonPi = Boolean(input.nonPi) || notQualified === "NQ: Non-PI Legal Matter";
@@ -139,7 +140,7 @@ export function tagsFromSelection(input: {
       : input.qualified === QUALIFIED_YES || input.qualified === QUALIFIED_NO
         ? input.qualified
         : "";
-  if (!qualified) throw new Error("Choose Qualified YES or Qualified NO.");
+  if (!qualified && input.requireQualified !== false) throw new Error("Choose Qualified YES or Qualified NO.");
   const decline = DECLINE_SET.has(input.decline) ? input.decline : "";
   const wanted = qualified === QUALIFIED_NO ? false : Boolean(input.desired || input.signed);
   const coverage = COVERAGE_TAGS.filter((tag) => input.coverage.includes(tag)).filter((tag) => {
@@ -153,14 +154,14 @@ export function tagsFromSelection(input: {
     throw new Error("A signed lead is not declined. Clear the decline tag.");
   }
 
-  const tags: string[] = [qualified, ...coverage];
+  const tags: string[] = qualified ? [qualified, ...coverage] : [...coverage];
   if (decline) tags.push(decline);
   if (notQualified) tags.push(notQualified);
   if (wanted && SIZE_SET.has(input.size || "")) tags.push(String(input.size));
   if (!nonPi && TYPE_SET.has(input.injuryType || "")) tags.push(String(input.injuryType));
   return {
     tags,
-    qualified: qualified === QUALIFIED_YES,
+    qualified: qualified === QUALIFIED_YES ? true : qualified === QUALIFIED_NO ? false : null,
     decline_reason: declineReasonFromTag(decline),
   };
 }

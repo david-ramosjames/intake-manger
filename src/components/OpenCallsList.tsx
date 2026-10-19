@@ -20,6 +20,7 @@ export type OpenCallCard = {
   quoUrl: string | null;
   assignedName: string;
   consultName: string;
+  consulted: boolean;
   dueAt: string;
 };
 
@@ -155,6 +156,7 @@ export function OpenCallsList({
                 dueAt={job.dueAt}
                 assignedName={job.assignedName}
                 consultName={job.consultName}
+                consulted={job.consulted}
                 staff={staff}
               />
             </li>
@@ -172,6 +174,9 @@ export function OpenCallsList({
             destinations={destinations}
             templates={templates}
             staff={staffNames}
+            staffMentions={staff
+              .filter((person): person is StaffPerson & { slackUserId: string } => Boolean(person.slackUserId))
+              .map((person) => ({ name: person.name, slackUserId: person.slackUserId }))}
             onClose={closeLead}
           />
         ) : null}
@@ -195,6 +200,8 @@ function fallbackRow(job: OpenCallCard): QueueRow {
     samePhone: [],
     closeSuggestion: null,
     identityStatus: null,
+    identityEvidence: null,
+    suggestedName: null,
     accident: "—",
     caseType: "",
     leadSource: "",

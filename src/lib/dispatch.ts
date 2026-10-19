@@ -75,6 +75,7 @@ async function resolveCallMention(
   const consult = lead.consultation_date && !isPlaceholderOwner(lead.owner_name) ? lead.owner_name?.trim() || "" : "";
   const chosen = assigned || consult;
   if (chosen) return slackMentionFor(chosen, staff) || (await mentionForName(chosen, token));
+  if (lead.consultation_date) return "";
   return channelOutboundMention(topicChannel, token);
 }
 

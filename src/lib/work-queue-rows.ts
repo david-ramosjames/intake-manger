@@ -3,7 +3,7 @@ import type { QueueRow } from "@/components/WorkQueue";
 import { callerClassLabel } from "@/lib/caller-class";
 import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
-import { loadStaff } from "@/lib/identity";
+import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { daysSince, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
@@ -18,7 +18,7 @@ import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, formatCallDay, formatCallWhen } from "@/lib/time";
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, lead_source, source_type, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -30,6 +30,7 @@ type ListLead = Pick<
   | "phone_e164"
   | "email"
   | "identity_status"
+  | "identity_evidence"
   | "lead_source"
   | "source_channel"
   | "source_type"
@@ -168,6 +169,7 @@ function toQueueRow(
     outside: { quo: string | null; slack: string | null };
     callSteps: (CallStep & { sequence: string })[];
     docket: string;
+    staff: StaffPerson[];
   },
 ): QueueRow {
   const cycle = leadCycle(lead, input.talked ? [{ type: "call", direction: "inbound" }] : []);
@@ -208,6 +210,8 @@ function toQueueRow(
     samePhone: [],
     closeSuggestion: lead.close_suggestion,
     identityStatus: lead.identity_status,
+    identityEvidence: lead.identity_evidence,
+    suggestedName: suggestClientName(lead.summary, input.staff),
     accident: listAccident(lead),
     when: receivedLabel(age),
     priority: priority ? PRIORITY_PLACE_LABEL[priority] : null,
@@ -285,6 +289,7 @@ export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promi
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staffNames: string[];
+  staffMentions: { name: string; slackUserId: string }[];
 }> {
   const [destinationResult, templateResult, staff] = await Promise.all([
     supabase
@@ -309,6 +314,9 @@ export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promi
       es: templateRows.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es,
     },
     staffNames: staff.map((person) => person.name),
+    staffMentions: staff
+      .filter((person): person is typeof person & { slackUserId: string } => Boolean(person.slackUserId))
+      .map((person) => ({ name: person.name, slackUserId: person.slackUserId })),
   };
 }
 
@@ -320,10 +328,11 @@ export async function loadWorkQueueRows(
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staffNames: string[];
+  staffMentions: { name: string; slackUserId: string }[];
 }> {
   const ids = [...new Set(leadIds.filter(Boolean))];
   if (ids.length === 0) {
-    return { rows: [], destinations: [], templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es }, staffNames: [] };
+    return { rows: [], destinations: [], templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es }, staffNames: [], staffMentions: [] };
   }
 
   const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }] =
@@ -443,8 +452,17 @@ export async function loadWorkQueueRows(
       outside: outsideLinks.get(lead.id) ?? { quo: null, slack: null },
       callSteps,
       docket,
+      staff,
     }),
   );
 
-  return { rows, destinations, templates, staffNames: staff.map((person) => person.name) };
+  return {
+    rows,
+    destinations,
+    templates,
+    staffNames: staff.map((person) => person.name),
+    staffMentions: staff
+      .filter((person): person is typeof person & { slackUserId: string } => Boolean(person.slackUserId))
+      .map((person) => ({ name: person.name, slackUserId: person.slackUserId })),
+  };
 }

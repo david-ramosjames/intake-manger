@@ -91,6 +91,7 @@ function toCard(job: JobRow, channelId: string, now: number, totals: Map<string,
     quoUrl: lead?.quo_link || null,
     assignedName: assigned,
     consultName: consultName(lead),
+    consulted: Boolean(lead?.consultation_date),
     dueAt: job.due_at,
   };
 }
@@ -150,8 +151,8 @@ export default async function OpenCallsPage({
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Open calls</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
         Check tags that are still waiting for a return call, and the ones coming up. Change the time
-        or who is tagged before it goes out. If nobody is chosen, the tag is today’s Outbound on
-        #lead-calls, or the person who already consulted.
+        or who is tagged before it goes out. After a consult, tag the person who handled it — not
+        Outbound. Uncontacted leads still use today’s Outbound on #lead-calls.
       </p>
       {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
       <OpenCallsList

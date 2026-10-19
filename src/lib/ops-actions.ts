@@ -17,6 +17,7 @@ import { chicagoDay, chicagoLocalToIso } from "./time";
 import { canonicalLeadSource, isPiCaseType, isSourceType } from "./leads";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
+import { assertCloseReady } from "./close-ready";
 import { requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { sendQuoText } from "./quo";
@@ -303,7 +304,7 @@ export async function setTalkedWith(formData: FormData) {
       .update({
         assigned_name: name,
         mention: null,
-        detail: name ? `Tag ${name}.` : "Any available intake person.",
+        detail: name ? `Tag ${name}.` : "Choose who handled this.",
       })
       .eq("lead_id", leadId)
       .eq("queue", "call")
@@ -318,6 +319,7 @@ export async function setTalkedWith(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/priority");
   revalidatePath("/review");
+  revalidatePath("/open-calls");
   revalidatePath(`/leads/${leadId}`);
 }
 
@@ -354,7 +356,10 @@ export async function saveLeadDetails(formData: FormData) {
     patch.phone = phone;
     patch.phone_e164 = phoneE164;
   }
-  if (leadName) patch.identity_status = "confirmed";
+  if (leadName) {
+    patch.identity_status = "confirmed";
+    patch.identity_evidence = null;
+  }
   if (formData.has("lead_date")) patch.lead_date = leadDate && /^\d{4}-\d{2}-\d{2}$/.test(leadDate) ? leadDate : null;
   if (caseType === "Non-PI Legal Matter") {
     patch.caller_class = "non_pi";
@@ -375,6 +380,7 @@ export async function saveLeadDetails(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/priority");
   revalidatePath("/review");
+  revalidatePath("/open-calls");
   revalidatePath(`/leads/${leadId}`);
 }
 
@@ -558,13 +564,15 @@ export async function saveCallbackPlan(formData: FormData) {
   }
   const staff = await loadStaff(supabase);
   const person = assigned ? matchStaff(assigned, staff) : null;
+  const { data: lead } = await supabase.from("leads").select("consultation_date").eq("id", job.lead_id).maybeSingle();
+  const consulted = Boolean(lead?.consultation_date);
   const { error: updateError } = await supabase
     .from("lead_jobs")
     .update({
       due_at: chicagoLocalToIso(due),
       assigned_name: assigned,
       mention: person?.slackUserId || null,
-      detail: assigned ? `Tag ${assigned}.` : "Outbound from #lead-calls topic.",
+      detail: assigned ? `Tag ${assigned}.` : consulted ? "Choose who handled this." : "Outbound from #lead-calls topic.",
     })
     .eq("id", jobId);
   if (updateError) throw new Error(updateError.message);
@@ -652,6 +660,8 @@ export async function scheduleSlackPost(leadId: string, formData: FormData) {
   });
   if (error) throw new Error(error.message);
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/");
+  revalidatePath("/open-calls");
   revalidatePath("/queues");
 }
 
@@ -666,13 +676,14 @@ export async function classifyNonLead(formData: FormData) {
   const reason = callerClass as ExcludedCallerClass;
   const { data, error } = await supabase
     .from("leads")
-    .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags, identity_status")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
   if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
     throw new Error("A signed or promoted matter stays a lead.");
   }
+  assertCloseReady(data, "nonlead");
   const drop = new Set<string>([...NOT_A_LEAD_TAGS, NON_LEAD_TAG.spam, "QUALIFIED YES", "CVR DESIRED"]);
   const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !drop.has(tag));
   if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
@@ -719,13 +730,14 @@ export async function markNotALead(leadId: string) {
   const { supabase, email } = await requireStaff();
   const { data, error } = await supabase
     .from("leads")
-    .select("id, signed_case, case_id, lead_status, text_sequence_status, consultation_date, grade, callrail_tags, decline_reason, qualified")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status, consultation_date, grade, callrail_tags, decline_reason, qualified, identity_status")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
   if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
     throw new Error("A signed or promoted matter stays open.");
   }
+  assertCloseReady(data, "nonlead");
   const { error: updateError } = await supabase
     .from("leads")
     .update({
@@ -799,10 +811,15 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
 
   const { data: lead, error: leadError } = await supabase
     .from("leads")
-    .select("lead_name, phone, phone_e164, case_type, summary, slack_channel_id, slack_thread_ts")
+    .select("lead_name, phone, phone_e164, case_type, summary, slack_channel_id, slack_thread_ts, identity_status, owner_name, qualified, callrail_tags, desired_case, signed_case, caller_class, consultation_date")
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  try {
+    assertCloseReady(lead);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Finish the lead before sending the referral." };
+  }
   const to = lead.phone_e164 || toE164(lead.phone);
   if (!to) return { error: "This lead needs a phone number before the text can go out." };
 
@@ -886,6 +903,17 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     .maybeSingle();
   if (loadError || !destination) return { error: loadError?.message ?? "That firm is missing." };
   if (!(destination.practice_areas ?? []).includes(area)) return { error: "That firm is not listed for this practice area." };
+  const { data: lead, error: leadError } = await supabase
+    .from("leads")
+    .select("lead_name, phone, phone_e164, identity_status, owner_name, qualified, callrail_tags, desired_case, signed_case, caller_class, case_type, consultation_date")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  try {
+    assertCloseReady(lead);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Finish the lead before closing it." };
+  }
   const outside = area !== "personal_injury";
   const { error: updateError } = await supabase
     .from("leads")
@@ -1188,6 +1216,13 @@ async function closeLead(
   email: string,
   change: { lead_status: string; close_reason: string; event: string },
 ) {
+  const { data: lead, error: loadError } = await supabase
+    .from("leads")
+    .select("lead_name, phone, phone_e164, identity_status, owner_name, qualified, callrail_tags, desired_case, signed_case, caller_class, case_type, consultation_date")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
+  assertCloseReady(lead, change.close_reason === "not_a_lead" ? "nonlead" : "lead");
   const { error } = await supabase
     .from("leads")
     .update({
@@ -1281,12 +1316,13 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
     size: String(formData.get("size_tag") ?? ""),
     injuryType: String(formData.get("injury_type") ?? ""),
     notQualified: String(formData.get("not_qualified_tag") ?? ""),
+    requireQualified: false,
   });
   const { error: updateError } = await supabase
     .from("leads")
     .update({
       callrail_tags: tagged.tags,
-      qualified: tagged.qualified,
+      qualified: tagged.qualified ?? before.qualified,
       decline_reason: tagged.decline_reason,
       ...(tagged.qualified === false ? { desired_case: false, desired_source: "staff" } : {}),
     })
@@ -1389,6 +1425,7 @@ export async function resolveIdentity(leadId: string, formData: FormData) {
   }
   revalidatePath("/verify");
   revalidatePath("/");
+  revalidatePath("/open-calls");
   revalidatePath(`/leads/${leadId}`);
 }
 

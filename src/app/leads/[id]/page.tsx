@@ -25,7 +25,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult, slack] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult, slackSettings] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -105,7 +105,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     ? `${docket}/intakes/${encodeURIComponent(lead.intake_call_id)}`
     : null;
   const caseHref = lead.case_id ? `${docket}/cases/${lead.case_id}` : null;
-  const slack = slackMessageUrl(lead);
+  const slackUrl = slackMessageUrl(lead);
   const openFor = daysOpen(lead.lead_date ?? lead.created_at, lead.date_signed ?? lead.signed_at);
   const touches = (historyResult.data ?? []) as { type: string | null; direction: string | null }[];
   const cycle = leadCycle(lead, touches);
@@ -153,8 +153,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               Open in Quo
             </a>
           ) : null}
-          {slack ? (
-            <a href={slack} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
+          {slackUrl ? (
+            <a href={slackUrl} className="font-medium text-slate-900 underline" target="_blank" rel="noreferrer">
               First Slack post
             </a>
           ) : null}
@@ -319,7 +319,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       </section>
 
       <Conversation
-        history={await conversationHistory(lead, (historyResult.data ?? []) as HistoryRow[], slack.token)}
+        history={await conversationHistory(lead, (historyResult.data ?? []) as HistoryRow[], slackSettings.token)}
         error={historyResult.error?.message ?? null}
       />
 

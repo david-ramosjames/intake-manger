@@ -111,6 +111,7 @@ type Touch = {
   direction: string | null;
   content: string | null;
   occurred_at: string | null;
+  actor?: string | null;
 };
 
 type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "last" | "automation";
@@ -984,7 +985,7 @@ export function LeadDrawer({
             {touches === null ? (
               <p className="text-sm text-slate-500">Loading activity…</p>
             ) : touches.length === 0 ? (
-              <p className="text-sm text-slate-500">No calls or texts recorded yet.</p>
+              <p className="text-sm text-slate-500">No calls, texts, or Slack notes yet.</p>
             ) : (
               <ul className="space-y-3">
                 {touches.map((touch) => (
@@ -995,7 +996,7 @@ export function LeadDrawer({
                         {touch.occurred_at ? formatChicago(touch.occurred_at) : ""}
                       </span>
                     </p>
-                    {touch.content ? <p className="mt-0.5 text-slate-600">{touch.content}</p> : null}
+                    {touch.content ? <p className="mt-0.5 whitespace-pre-wrap text-slate-600">{touch.content}</p> : null}
                   </li>
                 ))}
               </ul>
@@ -1386,6 +1387,7 @@ function contractLabel(row: QueueRow): { label: string; bad: boolean } {
 }
 
 function touchLabel(touch: Touch): string {
+  if ((touch.type || "").toLowerCase() === "slack") return touch.actor ? `Slack · ${touch.actor}` : "Slack";
   const type = (touch.type || "note").replaceAll("_", " ");
   const direction = (touch.direction || "").toLowerCase();
   if (direction === "inbound") return `Inbound ${type}`;

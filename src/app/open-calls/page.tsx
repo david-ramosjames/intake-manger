@@ -1,5 +1,5 @@
 import { OpenCallsList, type OpenCallCard } from "@/components/OpenCallsList";
-import { loadStaff, type StaffPerson } from "@/lib/identity";
+import { loadStaff } from "@/lib/identity";
 import { leadTitle, slackMessageUrl } from "@/lib/leads";
 import { CALL_SEQUENCE_LABEL, isCallSequence } from "@/lib/sequences";
 import { requireStaff } from "@/lib/session";
@@ -7,7 +7,7 @@ import { LEAD_CHANNEL_ID } from "@/lib/slack";
 import { loadSlackSettings } from "@/lib/slack-settings";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { formatChicago } from "@/lib/time";
-import { loadWorkQueueRows } from "@/lib/work-queue-rows";
+import { loadWorkQueueRows, loadWorkQueueShelfContext } from "@/lib/work-queue-rows";
 
 export const metadata = { title: "Open calls · Intake Manager" };
 
@@ -48,23 +48,9 @@ function leadOf(job: JobRow): LeadBits | null {
   return Array.isArray(job.leads) ? job.leads[0] ?? null : job.leads;
 }
 
-function slackUserId(mention: string | null): string {
-  return (mention || "").replace(/[<@>]/g, "").trim();
-}
-
 function consultName(lead: LeadBits | null): string {
   if (!lead?.consultation_date || isPlaceholderOwner(lead.owner_name)) return "";
   return lead.owner_name?.trim() || "";
-}
-
-function taggedAs(job: JobRow, lead: LeadBits | null, staff: StaffPerson[]): string {
-  const id = slackUserId(job.mention);
-  const bySlack = id ? staff.find((person) => person.slackUserId === id) : null;
-  if (bySlack) return bySlack.name;
-  if (job.assigned_name && !isPlaceholderOwner(job.assigned_name)) return job.assigned_name.trim();
-  const consult = consultName(lead);
-  if (consult) return consult;
-  return "Outbound (today’s #lead-calls)";
 }
 
 function callPlace(lead: LeadBits | null, channelId: string): { label: string; href: string | null } {
@@ -84,7 +70,7 @@ function sequenceLabel(job: JobRow, totals: Map<string, number>): string {
   return `${name} · Call ${job.position}`;
 }
 
-function toCard(job: JobRow, staff: StaffPerson[], channelId: string, now: number, totals: Map<string, number>): OpenCallCard {
+function toCard(job: JobRow, channelId: string, now: number, totals: Map<string, number>): OpenCallCard {
   const lead = leadOf(job);
   const place = callPlace(lead, channelId);
   const assigned = job.assigned_name && !isPlaceholderOwner(job.assigned_name) ? job.assigned_name.trim() : "";
@@ -100,7 +86,6 @@ function toCard(job: JobRow, staff: StaffPerson[], channelId: string, now: numbe
     sequenceLabel: sequenceLabel(job, totals),
     dueLabel: formatChicago(job.due_at),
     overdue: new Date(job.due_at).getTime() < now,
-    tagged: taggedAs(job, lead, staff),
     placeLabel: place.label,
     placeHref: place.href,
     quoUrl: lead?.quo_link || null,
@@ -153,11 +138,12 @@ export default async function OpenCallsPage({
   const upcoming = (upcomingRows ?? []) as JobRow[];
   const error = waitingError?.message || upcomingError?.message || null;
   const rows = view === "upcoming" ? upcoming : waiting;
-  const jobs = rows.map((job) => toCard(job, staff, slack.channelId, now, totals));
-  const shelf = await loadWorkQueueRows(
-    supabase,
-    [...jobs.map((job) => job.leadId), params.lead?.trim() || ""].filter(Boolean),
-  );
+  const jobs = rows.map((job) => toCard(job, slack.channelId, now, totals));
+  const selectedLead = params.lead?.trim() || "";
+  const [shelf, selected] = await Promise.all([
+    loadWorkQueueShelfContext(supabase),
+    selectedLead ? loadWorkQueueRows(supabase, [selectedLead]) : Promise.resolve({ rows: [] }),
+  ]);
 
   return (
     <main className="w-full px-4 py-8 xl:px-6">
@@ -173,12 +159,11 @@ export default async function OpenCallsPage({
         waitingCount={waiting.length}
         upcomingCount={upcoming.length}
         jobs={jobs}
-        shelves={shelf.rows}
         destinations={shelf.destinations}
         templates={shelf.templates}
         staff={staff}
         staffNames={shelf.staffNames}
-        initialId={params.lead?.trim() || ""}
+        initialRow={selected.rows[0] ?? null}
       />
     </main>
   );

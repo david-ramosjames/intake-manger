@@ -15,6 +15,8 @@ import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { leadCycle, leadNeed, leadStatusLabel, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { requireStaff } from "@/lib/session";
+import { slackThreadNotes } from "@/lib/slack";
+import { loadSlackSettings } from "@/lib/slack-settings";
 import { docketBaseUrl } from "@/lib/supabase/config";
 import { buttonDanger, buttonPrimary, buttonSecondary } from "@/lib/ui";
 
@@ -23,7 +25,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, postsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult, slack] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -58,6 +60,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .eq("lead_id", id)
       .order("occurred_at", { ascending: false })
       .limit(30),
+    loadSlackSettings(),
   ]);
 
   if (error) {
@@ -315,7 +318,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <LeadForm lead={lead} staff={staff} action={updateLead.bind(null, lead.id)} />
       </section>
 
-      <Conversation history={(historyResult.data ?? []) as HistoryRow[]} error={historyResult.error?.message ?? null} />
+      <Conversation
+        history={await conversationHistory(lead, (historyResult.data ?? []) as HistoryRow[], slack.token)}
+        error={historyResult.error?.message ?? null}
+      />
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Follow-up</h2>
@@ -422,7 +428,32 @@ type HistoryRow = {
   transcript: string | null;
   quo_link: string | null;
   occurred_at: string | null;
+  actor?: string | null;
 };
+
+async function conversationHistory(lead: Lead, history: HistoryRow[], token: string | null): Promise<HistoryRow[]> {
+  const notes = await slackThreadNotes({
+    token,
+    channelId: lead.slack_channel_id,
+    threadTs: lead.slack_thread_ts || lead.slack_message_ts,
+    permalink: lead.slack_permalink,
+  });
+  const combined = [
+    ...history,
+    ...notes.map((note) => ({
+      id: note.id,
+      type: "slack",
+      direction: null,
+      content: note.text,
+      transcript: null,
+      quo_link: null,
+      occurred_at: note.occurred_at,
+      actor: note.userName,
+    })),
+  ];
+  combined.sort((a, b) => String(b.occurred_at || "").localeCompare(String(a.occurred_at || "")));
+  return combined;
+}
 
 function LeadNeed({ lead, touches }: { lead: Lead; touches: { type: string | null; direction: string | null }[] }) {
   const need = leadNeed(lead, touches);
@@ -439,7 +470,7 @@ function Conversation({ history, error }: { history: HistoryRow[]; error: string
     <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
       <h2 className="text-sm font-semibold text-slate-900">Conversation</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Calls and texts from Quo, including the texts SMS Follow-Up sends. New facts keep filling the intake until the case is promoted.
+        Calls and texts from Quo, plus what staff wrote in the Slack thread. Quo app posts stay out because those calls and texts are already here.
       </p>
       {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
       <ul className="mt-3 space-y-2">
@@ -448,7 +479,7 @@ function Conversation({ history, error }: { history: HistoryRow[]; error: string
             <p className="text-slate-500">
               {row.occurred_at ? formatChicago(row.occurred_at) : "Time not recorded"}
               {" · "}
-              {row.direction || "unknown"} {row.type || "message"}
+              {row.type === "slack" ? (row.actor ? `Slack · ${row.actor}` : "Slack") : `${row.direction || "unknown"} ${row.type || "message"}`}
               {row.quo_link ? (
                 <>
                   {" · "}
@@ -458,7 +489,11 @@ function Conversation({ history, error }: { history: HistoryRow[]; error: string
                 </>
               ) : null}
             </p>
-            {row.content ? <p className="mt-1 whitespace-pre-wrap text-slate-800">{snippet(row.content)}</p> : null}
+            {row.content ? (
+              <p className="mt-1 whitespace-pre-wrap text-slate-800">
+                {row.type === "slack" ? snippet(row.content, 4000) : snippet(row.content)}
+              </p>
+            ) : null}
             {row.transcript ? (
               <details className="mt-1">
                 <summary className="cursor-pointer text-slate-600">Transcript</summary>
@@ -467,7 +502,7 @@ function Conversation({ history, error }: { history: HistoryRow[]; error: string
             ) : null}
           </li>
         ))}
-        {history.length === 0 && !error ? <li className="text-sm text-slate-500">No calls or texts stored for this lead yet.</li> : null}
+        {history.length === 0 && !error ? <li className="text-sm text-slate-500">No calls, texts, or Slack notes stored for this lead yet.</li> : null}
       </ul>
     </section>
   );

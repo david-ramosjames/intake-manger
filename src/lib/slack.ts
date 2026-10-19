@@ -127,6 +127,10 @@ const SKIP_SUBTYPE = new Set([
 type SlackHistoryMessage = {
   ts?: string;
   text?: string;
+  user?: string;
+  username?: string;
+  bot_id?: string;
+  app_id?: string;
   subtype?: string;
   reply_count?: number;
   attachments?: { fallback?: string; text?: string }[];
@@ -221,4 +225,108 @@ export async function readLeadChannel(input: {
     (history.payload.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? "",
   );
   return { messages, nextCursor: nextCursor || null, error: null };
+}
+
+export type SlackThreadNote = {
+  id: string;
+  ts: string;
+  occurred_at: string;
+  userName: string;
+  text: string;
+};
+
+const userNameCache = new Map<string, { at: number; name: string }>();
+
+function looksLikeQuoPost(text: string): boolean {
+  if (/view in quo|openphone\.com|app\.quo\.com/i.test(text) && /handled by:|summary:|^from:/im.test(text)) return true;
+  const first = text.trim().split("\n")[0]?.replace(/\*/g, "").trim() ?? "";
+  if (first.startsWith("Excluded ·") || first === "Return call") return true;
+  if (/outside practice/i.test(first) && /view in quo|openphone/i.test(text)) return true;
+  if (/human call completed|qualified lead|lead call|missed call/i.test(first) && /handled by:|view in quo/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function isHumanSlackNote(message: SlackHistoryMessage): boolean {
+  if (!message.ts || !message.user) return false;
+  if (message.bot_id || message.app_id) return false;
+  if (message.subtype && message.subtype !== "file_share" && message.subtype !== "thread_broadcast") return false;
+  const text = slackMessageText(message);
+  if (!text || looksLikeQuoPost(text)) return false;
+  return true;
+}
+
+function slackTsToIso(ts: string): string {
+  const seconds = Number(ts);
+  if (!Number.isFinite(seconds)) return new Date().toISOString();
+  return new Date(seconds * 1000).toISOString();
+}
+
+export function parseSlackPermalink(url: string | null | undefined): { channel: string; ts: string } | null {
+  const match = (url || "").match(/\/archives\/([CGD][A-Z0-9]+)\/p(\d{16,})/i);
+  if (!match) return null;
+  const stamp = match[2];
+  return { channel: match[1], ts: `${stamp.slice(0, -6)}.${stamp.slice(-6)}` };
+}
+
+async function slackUserName(token: string, userId: string, fallback: string): Promise<string> {
+  const cached = userNameCache.get(userId);
+  if (cached && Date.now() - cached.at < 30 * 60_000) return cached.name;
+  const info = await slackMethod(token, "users.info", { user: userId });
+  const user = info.ok
+    ? (info.payload.user as { real_name?: string; profile?: { display_name?: string; real_name?: string } } | undefined)
+    : undefined;
+  const name =
+    user?.profile?.display_name?.trim() ||
+    user?.profile?.real_name?.trim() ||
+    user?.real_name?.trim() ||
+    fallback ||
+    "Staff";
+  userNameCache.set(userId, { at: Date.now(), name });
+  return name;
+}
+
+async function threadMessages(token: string, channel: string, ts: string): Promise<SlackHistoryMessage[]> {
+  const rows: SlackHistoryMessage[] = [];
+  let cursor = "";
+  for (let page = 0; page < 8; page += 1) {
+    const params: Record<string, string> = { channel, ts, limit: "200" };
+    if (cursor) params.cursor = cursor;
+    const replies = await slackMethod(token, "conversations.replies", params);
+    if (!replies.ok) break;
+    rows.push(...((replies.payload.messages as SlackHistoryMessage[]) ?? []));
+    cursor = String((replies.payload.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? "");
+    if (!cursor) break;
+  }
+  return rows;
+}
+
+/** Staff notes in the lead Slack thread. Quo app posts are left out; those already live as calls and texts. */
+export async function slackThreadNotes(input: {
+  token: string | null;
+  channelId: string | null;
+  threadTs: string | null;
+  permalink?: string | null;
+}): Promise<SlackThreadNote[]> {
+  if (!input.token) return [];
+  const parsed = parseSlackPermalink(input.permalink);
+  const channel = input.channelId || parsed?.channel || "";
+  const ts = input.threadTs || parsed?.ts || "";
+  if (!channel || !ts) return [];
+  const messages = (await threadMessages(input.token, channel, ts)).filter(isHumanSlackNote);
+  const notes: SlackThreadNote[] = [];
+  for (const message of messages) {
+    const userId = message.user || "";
+    const userName = userId ? await slackUserName(input.token, userId, message.username || "Staff") : message.username || "Staff";
+    notes.push({
+      id: `slack-${message.ts}`,
+      ts: message.ts || "",
+      occurred_at: slackTsToIso(message.ts || ""),
+      userName,
+      text: slackMessageText(message).slice(0, 4000),
+    });
+  }
+  notes.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : a.occurred_at > b.occurred_at ? -1 : 0));
+  return notes;
 }

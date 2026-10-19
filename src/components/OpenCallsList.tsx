@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { OpenCallPlan } from "@/components/OpenCallPlan";
 import { LeadDrawer, type QueueRow } from "@/components/WorkQueue";
 import type { StaffPerson } from "@/lib/identity";
@@ -16,7 +15,6 @@ export type OpenCallCard = {
   sequenceLabel: string;
   dueLabel: string;
   overdue: boolean;
-  tagged: string;
   placeLabel: string;
   placeHref: string | null;
   quoUrl: string | null;
@@ -30,37 +28,53 @@ export function OpenCallsList({
   waitingCount,
   upcomingCount,
   jobs,
-  shelves,
   destinations,
   templates,
   staff,
   staffNames,
-  initialId,
+  initialRow,
 }: {
   view: "waiting" | "upcoming";
   waitingCount: number;
   upcomingCount: number;
   jobs: OpenCallCard[];
-  shelves: QueueRow[];
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   staff: StaffPerson[];
   staffNames: string[];
-  initialId?: string;
+  initialRow?: QueueRow | null;
 }) {
-  const router = useRouter();
-  const [selectedId, setSelectedId] = useState(initialId && shelves.some((row) => row.id === initialId) ? initialId : "");
-  const selected = shelves.find((row) => row.id === selectedId) ?? null;
+  const [selectedId, setSelectedId] = useState(initialRow?.id ?? "");
+  const [row, setRow] = useState<QueueRow | null>(initialRow ?? null);
 
-  function openLead(leadId: string) {
-    setSelectedId(leadId);
-    router.replace(callsHref(view, leadId), { scroll: false });
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancel = false;
+    fetch(`/api/leads/${selectedId}/shelf`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { row?: QueueRow } | null) => {
+        if (!cancel && payload?.row) setRow(payload.row);
+      })
+      .catch(() => {});
+    return () => {
+      cancel = true;
+    };
+  }, [selectedId]);
+
+  function openLead(job: OpenCallCard) {
+    setSelectedId(job.leadId);
+    setRow((current) => (current?.id === job.leadId ? current : fallbackRow(job)));
+    window.history.replaceState(null, "", callsHref(view, job.leadId));
   }
 
   function closeLead() {
     setSelectedId("");
-    router.replace(callsHref(view), { scroll: false });
+    setRow(null);
+    window.history.replaceState(null, "", callsHref(view));
   }
+
+  const job = jobs.find((item) => item.leadId === selectedId);
+  const selected = !selectedId ? null : row?.id === selectedId ? row : job ? fallbackRow(job) : null;
 
   return (
     <>
@@ -97,7 +111,7 @@ export function OpenCallsList({
         </Link>
       </div>
 
-      <div className={`mt-6 grid items-start gap-4 ${selected ? "xl:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
+      <div className={`mt-6 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
         <ul className="min-w-0 space-y-3">
           {jobs.map((job) => (
             <li
@@ -110,8 +124,8 @@ export function OpenCallsList({
                 <div>
                   <button
                     type="button"
-                    onClick={() => openLead(job.leadId)}
-                    className="font-medium text-navy hover:underline"
+                    onClick={() => openLead(job)}
+                    className="text-left text-sm font-medium text-navy hover:underline"
                   >
                     {job.title}
                   </button>
@@ -136,10 +150,6 @@ export function OpenCallsList({
                   )}
                 </span>
               </div>
-              <p className="mt-2 text-slate-800">
-                Tag: <span className="font-medium">{job.tagged}</span>
-                <span className="text-slate-500"> · {job.placeLabel}</span>
-              </p>
               <OpenCallPlan
                 jobId={job.id}
                 dueAt={job.dueAt}
@@ -176,4 +186,74 @@ function callsHref(view: "waiting" | "upcoming", leadId?: string): string {
   if (leadId) params.set("lead", leadId);
   const query = params.toString();
   return query ? `/open-calls?${query}` : "/open-calls";
+}
+
+function fallbackRow(job: OpenCallCard): QueueRow {
+  return {
+    id: job.leadId,
+    title: job.title,
+    samePhone: [],
+    closeSuggestion: null,
+    identityStatus: null,
+    accident: "—",
+    caseType: "",
+    leadSource: "",
+    sourceType: "",
+    when: "",
+    priority: null,
+    prioritySuggestion: null,
+    actionTitle: job.sequenceLabel,
+    label: "Need to contact",
+    stageClassName: "bg-amber-50 text-amber-900",
+    stageStripe: "shadow-[inset_3px_0_0_0_#f59e0b]",
+    step: "—",
+    tags: [],
+    callrail: false,
+    declineReason: null,
+    qualifiedLabel: "—",
+    consultWhen: "—",
+    desired: "—",
+    desiredLocked: false,
+    signed: false,
+    nonPi: false,
+    practiceArea: null,
+    referralSent: false,
+    referralFirm: null,
+    callerClass: null,
+    confirmSigned: false,
+    lastLabel: "Never",
+    lastDays: null,
+    consultKey: "",
+    waiting: job.overdue,
+    automationLabel: "—",
+    automationBad: false,
+    canStartText: false,
+    quoUrl: job.quoUrl,
+    slackUrl: job.placeHref,
+    leadName: job.title,
+    phone: job.phone,
+    email: null,
+    summary: null,
+    owner: job.consultName || job.assignedName || null,
+    grade: null,
+    textsLive: false,
+    textNext: null,
+    sequenceLabel: job.sequenceLabel,
+    agreementStatus: null,
+    agreementSent: null,
+    signingUrl: null,
+    intakeHref: null,
+    caseHref: null,
+    calls: 0,
+    texts: 0,
+    nextCallLabel: job.dueLabel,
+    callJobId: job.id,
+    callTag: job.assignedName || null,
+    textJobId: null,
+    reminderAt: null,
+    nextAction: [{ label: "Call", when: job.dueLabel, at: job.dueAt }],
+    nextActionAt: job.dueAt,
+    nextDayKey: "",
+    nextDayLabel: "",
+  };
 }

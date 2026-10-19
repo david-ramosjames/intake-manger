@@ -281,6 +281,37 @@ function toQueueRow(
   };
 }
 
+export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promise<{
+  destinations: ReferralDestination[];
+  templates: { en: string; es: string };
+  staffNames: string[];
+}> {
+  const [destinationResult, templateResult, staff] = await Promise.all([
+    supabase
+      .from("referral_destinations")
+      .select("id, name, phone, practice_areas, address, email, website, spanish, matters, notes, active")
+      .eq("active", true)
+      .order("name"),
+    supabase.from("referral_templates").select("language, body"),
+    loadStaff(supabase),
+  ]);
+  const destinations = ((destinationResult.data ?? []) as ReferralDestination[]).map((destination) => ({
+    ...destination,
+    practice_areas: destination.practice_areas ?? [],
+    active: destination.active !== false,
+    spanish: Boolean(destination.spanish),
+  }));
+  const templateRows = (templateResult.data ?? []) as { language: string; body: string }[];
+  return {
+    destinations,
+    templates: {
+      en: templateRows.find((row) => row.language === "en")?.body || DEFAULT_REFERRAL_SMS.en,
+      es: templateRows.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es,
+    },
+    staffNames: staff.map((person) => person.name),
+  };
+}
+
 export async function loadWorkQueueRows(
   supabase: SupabaseClient,
   leadIds: string[],

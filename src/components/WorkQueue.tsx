@@ -317,7 +317,7 @@ export function WorkQueue({
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
                     {row.label}
                   </span>
-                  {row.nonPi ? (
+                  {row.nonPi || row.tags.includes("DEC: Referred") ? (
                     row.referralSent ? (
                       <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
                     ) : (
@@ -733,10 +733,14 @@ function LeadFacts({
   row,
   admin,
   canLeave,
+  destinations,
+  templates,
 }: {
   row: QueueRow;
   admin: boolean;
   canLeave: RefObject<() => boolean>;
+  destinations: ReferralDestination[];
+  templates: { en: string; es: string };
 }) {
   const notify = useContext(DrawerNoticeContext);
   const [error, setError] = useState<string | null>(null);
@@ -998,6 +1002,11 @@ function LeadFacts({
                 ))}
               </select>
             </FieldLabel>
+            {decline === "DEC: Referred" ? (
+              <div className="col-span-2 border-t border-slate-200 pt-3">
+                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen />
+              </div>
+            ) : null}
           </PanelSection>
           <PanelSection title="Signed">
             <div>
@@ -1336,7 +1345,13 @@ export function LeadDrawer({
         </div>
       ) : null}
       <div className={tab === "details" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <LeadFacts row={row} admin={admin} canLeave={canLeave ?? { current: () => true }} />
+        <LeadFacts
+          row={row}
+          admin={admin}
+          canLeave={canLeave ?? { current: () => true }}
+          destinations={destinations}
+          templates={templates}
+        />
       </div>
       {tab === "details" ? null : (
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
@@ -1468,8 +1483,13 @@ export function LeadDrawer({
             </a>
           ) : null}
         </div>
-        {row.nonPi && !row.signed && !row.referralSent ? (
-          <QueueReferral row={row} destinations={destinations} templates={templates} startOpen={startReferral} />
+        {(row.nonPi || row.tags.includes("DEC: Referred")) && !row.signed && !row.referralSent ? (
+          <QueueReferral
+            row={row}
+            destinations={destinations}
+            templates={templates}
+            startOpen={startReferral || row.tags.includes("DEC: Referred")}
+          />
         ) : null}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>

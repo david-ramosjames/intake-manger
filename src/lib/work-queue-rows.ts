@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
 import { callerClassLabel } from "@/lib/caller-class";
-import { consultationWhen, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
+import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { fillLeadSources } from "@/lib/lead-source-fill";
@@ -15,10 +15,10 @@ import { leadSequenceId } from "@/lib/sequences";
 import { docketBaseUrl } from "@/lib/supabase/config";
 import { fillTalkedWith, isPlaceholderOwner } from "@/lib/talked-with";
 import { isPracticeTestPhone } from "@/lib/test-phone";
-import { chicagoDay, formatCallDay, formatCallWhen } from "@/lib/time";
+import { chicagoDay, formatCallDay, formatCallWhen, formatQueueStamp } from "@/lib/time";
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -51,6 +51,7 @@ type ListLead = Pick<
   | "next_action"
   | "callrail_tags"
   | "decline_reason"
+  | "consultation"
   | "consultation_date"
   | "desired_case"
   | "desired_source"
@@ -174,6 +175,7 @@ function toQueueRow(
 ): QueueRow {
   const cycle = leadCycle(lead, input.talked ? [{ type: "call", direction: "inbound" }] : []);
   const age = daysSince(lead.lead_date ?? lead.created_at);
+  const opened = formatQueueStamp(lead.created_at || lead.lead_date);
   const outreach = daysSince(input.outreachAt);
   const waiting = waitingTooLong(cycle, age, outreach, input.nextAt ?? undefined);
   const label = (lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType(lead)) ? null : callerClassLabel(lead.caller_class)) ?? leadStatusLabel(lead, cycle);
@@ -214,6 +216,10 @@ function toQueueRow(
     suggestedName: suggestClientName(lead.summary, input.staff),
     accident: listAccident(lead),
     when: receivedLabel(age),
+    openedLabel: opened.label,
+    openedKey: opened.key,
+    consulted: consultedChoice(lead),
+    signedDate: (lead.date_signed || lead.signed_at || "").slice(0, 10),
     priority: priority ? PRIORITY_PLACE_LABEL[priority] : null,
     prioritySuggestion: lead.priority_suggestion,
     actionTitle: openLeadAction(lead, cycle, input.tally.calls),

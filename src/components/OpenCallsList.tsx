@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OpenCallPlan } from "@/components/OpenCallPlan";
 import { LeadDrawer, type QueueRow } from "@/components/WorkQueue";
 import type { StaffPerson } from "@/lib/identity";
@@ -43,6 +43,7 @@ export function OpenCallsList({
   templates: { en: string; es: string };
   staff: StaffPerson[];
   staffNames: string[];
+  admin?: boolean;
   initialRow?: QueueRow | null;
 }) {
   const [selectedId, setSelectedId] = useState(initialRow?.id ?? "");
@@ -204,10 +205,14 @@ function fallbackRow(job: OpenCallCard): QueueRow {
     leadSource: "",
     sourceType: "",
     when: "",
+    openedLabel: "—",
+    openedKey: "",
+    consulted: "",
+    signedDate: "",
     priority: null,
     prioritySuggestion: null,
     actionTitle: job.sequenceLabel,
-    label: "Need to contact",
+    label: "Initial Contact",
     stageClassName: "bg-amber-50 text-amber-900",
     stageStripe: "shadow-[inset_3px_0_0_0_#f59e0b]",
     step: "—",

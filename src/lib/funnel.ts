@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { CLOSE_READY_COLUMNS, closeGaps } from "./close-ready";
 import { isPracticeTestPhone } from "./test-phone";
 
 export const CLOSED_LEAD_STATUSES = ["Signed", "Promoted", "Lost", "Referred"] as const;
@@ -47,7 +48,7 @@ const SIGN_SERIES_LENGTH = 6;
 async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<number> {
   const { data, error } = await supabase
     .from("leads")
-    .select("id, phone, phone_e164, callrail_tags")
+    .select(`id, ${CLOSE_READY_COLUMNS}`)
     .in("agreement_status", ["sent", "viewed", "cancelled", "expired"])
     .is("agreement_next_reminder_at", null)
     .gte("agreement_reminder_count", SIGN_SERIES_LENGTH)
@@ -55,7 +56,9 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     .is("case_id", null)
     .not("lead_status", "in", CLOSED_LIST);
   if (error) throw new Error(error.message);
-  const rows = (data ?? []).filter((row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")));
+  const rows = (data ?? []).filter(
+    (row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")) && closeGaps(row).length === 0,
+  );
   if (!rows.length) return 0;
   const ids = rows.map((row) => row.id as string);
   const { error: closeError } = await supabase
@@ -240,6 +243,17 @@ async function foldLead(supabase: SupabaseClient, phone: string, keeper: MergeLe
 async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
   const { data, error } = await supabase
     .from("leads")
+    .select(`id, ${CLOSE_READY_COLUMNS}`)
+    .eq("signed_case", true)
+    .not("lead_status", "in", CLOSED_LIST)
+    .not("phone_e164", "eq", "+17654183805");
+  if (error) throw new Error(error.message);
+  const ids = (data ?? [])
+    .filter((row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")) && closeGaps(row).length === 0)
+    .map((row) => row.id as string);
+  if (!ids.length) return 0;
+  const { error: closeError } = await supabase
+    .from("leads")
     .update({
       lead_status: "Signed",
       follow_up: false,
@@ -247,12 +261,9 @@ async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
       close_reason: "signed",
       close_suggestion: null,
     })
-    .eq("signed_case", true)
-    .not("lead_status", "in", CLOSED_LIST)
-    .not("phone_e164", "eq", "+17654183805")
-    .select("id");
-  if (error) throw new Error(error.message);
-  const ids = (data ?? []).map((row) => row.id as string);
+    .in("id", ids)
+    .not("lead_status", "in", CLOSED_LIST);
+  if (closeError) throw new Error(closeError.message);
   if (ids.length) {
     await supabase.from("lead_jobs").update({ status: "skipped", detail: "Signed" }).in("lead_id", ids).eq("status", "pending");
   }
@@ -262,7 +273,7 @@ async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
 async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> {
   const { data: leads, error } = await supabase
     .from("leads")
-    .select("id, phone, phone_e164, callrail_tags")
+    .select(`id, ${CLOSE_READY_COLUMNS}`)
     .not("lead_status", "in", CLOSED_LIST)
     .eq("signed_case", false)
     .is("case_id", null)
@@ -324,7 +335,8 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
     if (type === "call" || type === "sona_call" || type === "text" || type === "email") replied.add(leadId);
   }
 
-  const closing = finished.filter((row) => !replied.has(row.id)).map((row) => row.id);
+  const ready = new Set((leads ?? []).filter((row) => closeGaps(row).length === 0).map((row) => String(row.id)));
+  const closing = finished.filter((row) => !replied.has(row.id) && ready.has(row.id)).map((row) => row.id);
   if (!closing.length) return 0;
   const { error: closeError } = await supabase
     .from("leads")

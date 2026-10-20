@@ -17,9 +17,9 @@ import { chicagoDay, chicagoLocalToIso } from "./time";
 import { canonicalLeadSource, isPiCaseType, isSourceType } from "./leads";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
-import { assertCloseReady } from "./close-ready";
+import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage } from "./close-ready";
 import { isPlaceholderOwner } from "./talked-with";
-import { requireStaff } from "./session";
+import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { sendQuoText } from "./quo";
 import { listQuoLines } from "./quo-settings";
@@ -326,7 +326,7 @@ export async function setTalkedWith(formData: FormData) {
 }
 
 export async function saveLeadDetails(formData: FormData) {
-  const { supabase, email: actor } = await requireStaff();
+  const { supabase, email: actor, admin } = await requireStaff();
   const leadId = text(formData, "lead_id");
   if (!leadId) throw new Error("Missing the lead.");
   const caseType = text(formData, "case_type") || null;
@@ -341,9 +341,19 @@ export async function saveLeadDetails(formData: FormData) {
   const phoneE164 = phone ? toE164(phone) : null;
   const keepPhone = formData.get("keep_phone") === "1";
   if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
+  const consulted = text(formData, "consulted");
+  const consultationDate = text(formData, "consultation_date");
+  if (consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {
+    throw new Error("Enter the consultation date.");
+  }
+  const signedDecision = text(formData, "signed_decision");
+  const signedDate = text(formData, "date_signed");
+  if (admin && signedDecision === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(signedDate ?? "")) {
+    throw new Error("Enter the signed date.");
+  }
   const { data: before, error: loadError } = await supabase
     .from("leads")
-    .select("caller_class, close_suggestion")
+    .select("caller_class, close_suggestion, signed_case, date_signed")
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
@@ -363,6 +373,13 @@ export async function saveLeadDetails(formData: FormData) {
     patch.identity_evidence = null;
   }
   if (formData.has("lead_date")) patch.lead_date = leadDate && /^\d{4}-\d{2}-\d{2}$/.test(leadDate) ? leadDate : null;
+  if (consulted === "yes") {
+    patch.consultation = "staff";
+    patch.consultation_date = consultationDate;
+  } else if (consulted === "no") {
+    patch.consultation = "no";
+    patch.consultation_date = null;
+  }
   if (caseType === "Non-PI Legal Matter") {
     patch.caller_class = "non_pi";
     patch.close_suggestion = "decline";
@@ -383,6 +400,27 @@ export async function saveLeadDetails(formData: FormData) {
   revalidatePath("/priority");
   revalidatePath("/review");
   revalidatePath("/open-calls");
+  if (admin && (signedDecision === "yes" || signedDecision === "no")) {
+    const wantSigned = signedDecision === "yes";
+    const nextDate = wantSigned ? signedDate : null;
+    const same = Boolean(before.signed_case) === wantSigned && (before.date_signed ?? null) === nextDate;
+    if (!same) {
+      const signedPatch: { signed_case: boolean; date_signed: string | null; signed_at?: string | null } = {
+        signed_case: wantSigned,
+        date_signed: nextDate,
+      };
+      if (!wantSigned) signedPatch.signed_at = null;
+      else if (!before.signed_case) signedPatch.signed_at = new Date().toISOString();
+      const { error: signedError } = await supabase.from("leads").update(signedPatch).eq("id", leadId);
+      if (signedError) throw new Error(signedError.message);
+      await supabase.from("lead_events").insert({
+        lead_id: leadId,
+        event_type: "signed_override",
+        actor,
+        payload: signedPatch,
+      });
+    }
+  }
   revalidatePath(`/leads/${leadId}`);
 }
 
@@ -813,7 +851,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
 
   const { data: lead, error: leadError } = await supabase
     .from("leads")
-    .select("lead_name, phone, phone_e164, case_type, summary, slack_channel_id, slack_thread_ts, identity_status, owner_name, qualified, callrail_tags, desired_case, signed_case, caller_class, consultation_date")
+    .select(`summary, slack_channel_id, slack_thread_ts, ${CLOSE_READY_COLUMNS}`)
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
@@ -907,7 +945,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
   if (!(destination.practice_areas ?? []).includes(area)) return { error: "That firm is not listed for this practice area." };
   const { data: lead, error: leadError } = await supabase
     .from("leads")
-    .select("lead_name, phone, phone_e164, identity_status, owner_name, qualified, callrail_tags, desired_case, signed_case, caller_class, case_type, consultation_date")
+    .select(CLOSE_READY_COLUMNS)
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
@@ -969,7 +1007,7 @@ export async function saveReferralTemplate(formData: FormData) {
 }
 
 export async function saveDestination(formData: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requireAdmin();
   const name = text(formData, "name");
   if (!name) throw new Error("Name the referral destination.");
   const caseTypes = String(formData.get("case_types") ?? "")
@@ -1220,7 +1258,7 @@ async function closeLead(
 ) {
   const { data: lead, error: loadError } = await supabase
     .from("leads")
-    .select("lead_name, phone, phone_e164, identity_status, owner_name, qualified, callrail_tags, desired_case, signed_case, caller_class, case_type, consultation_date")
+    .select(CLOSE_READY_COLUMNS)
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
@@ -1251,29 +1289,42 @@ export async function confirmSigned(formData: FormData) {
   if (!leadId) throw new Error("Missing the lead.");
   const { data: before, error } = await supabase
     .from("leads")
-    .select("id, signed_case, callrail_call_id, callrail_tags, desired_source, date_signed")
+    .select(`id, callrail_call_id, desired_source, ${CLOSE_READY_COLUMNS}`)
     .eq("id", leadId)
     .maybeSingle();
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
   const tags = Array.from(new Set([...(before.callrail_tags ?? []), "CVR DESIRED", "CVR SIGNED"]));
   const now = new Date().toISOString();
+  const dateSigned = before.date_signed ?? chicagoDay(new Date());
+  const gaps = closeGaps({
+    ...before,
+    signed_case: true,
+    desired_case: true,
+    date_signed: dateSigned,
+    callrail_tags: tags,
+  });
   const { error: updateError } = await supabase
     .from("leads")
     .update({
       signed_case: true,
-      lead_status: "Signed",
-      close_reason: "signed",
-      close_suggestion: null,
-      follow_up: false,
-      sequence: "stop",
       signed_at: now,
-      date_signed: before.date_signed ?? chicagoDay(new Date()),
+      date_signed: dateSigned,
       desired_case: true,
       desired_source: before.desired_source === "staff" ? "staff" : "contract",
       callrail_tags: tags,
+      ...(gaps.length
+        ? {}
+        : {
+            lead_status: "Signed",
+            close_reason: "signed",
+            close_suggestion: null,
+            follow_up: false,
+            sequence: "stop",
+          }),
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);
+  if (gaps.length) throw new Error(closeIncompleteMessage(gaps));
   await supabase.from("lead_jobs").update({ status: "skipped", detail: "Signed" }).eq("lead_id", leadId).eq("status", "pending");
   await supabase.from("lead_events").insert({
     lead_id: leadId,

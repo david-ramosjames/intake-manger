@@ -10,8 +10,8 @@ export type ClientTouch = {
 export type LeadCycle = "contact" | "information" | "signing" | "signed" | "closed";
 
 export const CYCLE_LABEL: Record<LeadCycle, string> = {
-  contact: "Need to contact",
-  information: "Need more information",
+  contact: "Initial Contact",
+  information: "Follow up Contact",
   signing: "Finish signing",
   signed: "Signed",
   closed: "Closed",
@@ -221,12 +221,12 @@ export function leadNeed(lead: Lead, touches: ClientTouch[]): { title: string; d
   }
   if (cycle === "contact") {
     return {
-      title: "Need to contact",
+      title: "Initial Contact",
       detail: "A call or text that they have not answered still counts as not in contact. Reach them before sending a contract.",
     };
   }
   return {
-    title: "Need more information",
+    title: "Follow up Contact",
     detail: "There is a conversation, and this lead still needs more before a contract.",
   };
 }

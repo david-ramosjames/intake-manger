@@ -80,6 +80,17 @@ export function signatureNeedsConfirm(input: {
   return status === "signed" || status === "completed";
 }
 
+export function consultedChoice(input: {
+  consultation_date?: string | null;
+  consultation?: string | null;
+}): "yes" | "no" | "" {
+  if (input.consultation_date) return "yes";
+  const consultation = (input.consultation || "").toLowerCase();
+  if (consultation === "no") return "no";
+  if (consultation) return "yes";
+  return "";
+}
+
 export function consultationWhen(value: string | null | undefined): string {
   if (!value) return "No consult";
   const [year, month, day] = value.slice(0, 10).split("-").map(Number);

@@ -291,7 +291,7 @@ export default async function PriorityPage() {
             A sent contract stays here until the lead is signed or closed. Every row shows the next action.
           </p>
         </div>
-        <Link href="/" className="text-sm font-medium text-slate-900 underline">
+        <Link href="/work" className="text-sm font-medium text-slate-900 underline">
           Work queue
         </Link>
       </div>

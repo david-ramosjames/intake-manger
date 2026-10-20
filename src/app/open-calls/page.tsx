@@ -7,6 +7,7 @@ import { LEAD_CHANNEL_ID } from "@/lib/slack";
 import { loadSlackSettings } from "@/lib/slack-settings";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { formatChicago } from "@/lib/time";
+import { callFinishCounts, collapseDuplicateOpenCalls } from "@/lib/open-calls";
 import { loadWorkQueueRows, loadWorkQueueShelfContext } from "@/lib/work-queue-rows";
 
 export const metadata = { title: "Open calls · Intake Manager" };
@@ -103,7 +104,9 @@ export default async function OpenCallsPage({
 }) {
   const params = await searchParams;
   const view: CallView = params.view === "upcoming" ? "upcoming" : "waiting";
-  const { supabase } = await requireStaff();
+  const { supabase, admin } = await requireStaff();
+  await collapseDuplicateOpenCalls(supabase);
+  const finishCounts = await callFinishCounts(supabase);
   const nowIso = new Date().toISOString();
   const now = Date.now();
   const [{ data: waitingRows, error: waitingError }, { data: upcomingRows, error: upcomingError }, { data: stepRows }, staff, slack] =
@@ -154,6 +157,11 @@ export default async function OpenCallsPage({
         or who is tagged before it goes out. After a consult, tag the person who handled it — not
         Outbound. Uncontacted leads still use today’s Outbound on #lead-calls.
       </p>
+      <p className="mt-3 text-sm text-slate-700">
+        <span className="font-semibold text-navy">{finishCounts.completed}</span> completed
+        <span className="mx-2 text-slate-300">·</span>
+        <span className="font-semibold text-navy">{finishCounts.autoClosed}</span> auto-closed
+      </p>
       {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
       <OpenCallsList
         view={view}
@@ -164,6 +172,7 @@ export default async function OpenCallsPage({
         templates={shelf.templates}
         staff={staff}
         staffNames={shelf.staffNames}
+        admin={admin}
         initialRow={selected.rows[0] ?? null}
       />
     </main>

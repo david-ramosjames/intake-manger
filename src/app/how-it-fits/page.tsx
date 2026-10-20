@@ -109,7 +109,7 @@ const QUESTIONS: { q: string; a: string }[] = [
   },
   {
     q: "What are the two kinds of lead?",
-    a: "Want to sign covers a form fill, a missed call, or a Sona call: we still need the first real conversation, and the text sequence applies. Need more info means we already spoke and are not ready to decide. That lead gets calls only.",
+    a: "Want to sign covers a form fill, a missed call, or a Sona call: we still need the first real conversation, and the text sequence applies. Follow up Contact means we already spoke and are not ready to decide. That lead gets calls only.",
   },
   {
     q: "Where does a new lead first appear?",

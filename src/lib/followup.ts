@@ -166,6 +166,7 @@ export async function enrollFollowUp(
     .eq("queue", "call")
     .eq("sequence", sequence)
     .eq("status", "skipped")
+    .or("outcome_note.is.null,outcome_note.neq.auto_closed")
     .in("position", rows.map((row) => row.position));
   const { error: insertError } = await supabase.from("lead_jobs").upsert(rows, {
     onConflict: "lead_id,queue,sequence,position",

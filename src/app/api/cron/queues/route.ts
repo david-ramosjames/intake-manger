@@ -4,6 +4,8 @@ import { fillOutstandingTalkedWith } from "@/lib/talked-with";
 import { dispatchDue } from "@/lib/dispatch";
 import { closeFinishedLeads } from "@/lib/funnel";
 import { enrollMissingFollowUps } from "@/lib/followup";
+import { syncInboxCalls } from "@/lib/inbox-calls";
+import { collapseDuplicateOpenCalls } from "@/lib/open-calls";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 export const runtime = "nodejs";
@@ -24,9 +26,15 @@ export async function POST(request: Request) {
     const sources = await fillOutstandingLeadSources(supabase);
     const talkedWith = await fillOutstandingTalkedWith(supabase);
     const enrolled = await enrollMissingFollowUps(supabase);
+    const autoClosedCalls = await collapseDuplicateOpenCalls(supabase);
     const closed = await closeFinishedLeads(supabase);
     const result = await dispatchDue(supabase);
-    return Response.json({ ...result, enrolled, closed, contracts, sources, talkedWith });
+    const inboxSync = await syncInboxCalls(supabase, { lookbackHours: 48, maxPairs: 20 }).catch((error: unknown) => ({
+      stored: 0,
+      finished: false,
+      error: error instanceof Error ? error.message : "Inbox sync failed",
+    }));
+    return Response.json({ ...result, enrolled, autoClosedCalls, closed, contracts, sources, talkedWith, inboxSync });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Queue run failed" },

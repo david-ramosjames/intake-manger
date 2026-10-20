@@ -2,6 +2,34 @@ import { DEFAULT_WORK_HOURS, type WorkHours } from "@/lib/sequences";
 
 const ZONE = "America/Chicago";
 
+/** Arrival stamp for the work-queue date column. A date-only value has no clock time. */
+export function formatQueueStamp(value: string | null | undefined): { label: string; key: string } {
+  if (!value) return { label: "—", key: "" };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    const label = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(Date.UTC(year, month - 1, day)));
+    return { label, key: value };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { label: "—", key: "" };
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).formatToParts(date);
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  const label = `${pick("month")} ${pick("day")}, ${pick("year")}\n${pick("hour")}:${pick("minute")} ${pick("dayPeriod")}`.replace("  ", " ");
+  return { label, key: date.toISOString() };
+}
+
 export function formatChicago(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);

@@ -8,10 +8,11 @@ import { navLink } from "@/lib/ui";
 const LOGO = "https://res.cloudinary.com/dmmxuoa3p/image/upload/v1783363036/logo_rdt8yk.webp";
 
 const LINKS = [
-  { href: "/", label: "Work queue" },
-  { href: "/review", label: "Review" },
+  { href: "/", label: "Dashboard" },
+  { href: "/work", label: "Work queue" },
   { href: "/priority", label: "Priority" },
   { href: "/open-calls", label: "Open calls" },
+  { href: "/grades", label: "Call grades" },
   { href: "/referrals", label: "Referrals" },
   { href: "/leads/new", label: "Add lead" },
 ];
@@ -37,7 +38,7 @@ export function AppHeader({
   priorityCount?: number;
 }) {
   const pathname = usePathname();
-  const wide = pathname === "/" || pathname === "/review" || pathname === "/open-calls";
+  const wide = pathname === "/" || pathname === "/work" || pathname === "/review" || pathname === "/open-calls";
 
   return (
     <header className="sticky top-0 z-30 bg-[linear-gradient(100deg,#0A1E41_0%,#0F316D_100%)] text-white">

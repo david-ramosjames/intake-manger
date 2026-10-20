@@ -16,7 +16,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   let query = supabase
     .from("intake_interactions")
-    .select("id, type, direction, content, occurred_at, quo_link")
+    .select("id, type, direction, content, occurred_at, quo_link, source_id")
     .order("occurred_at", { ascending: false })
     .limit(40);
   query = lead?.phone_e164
@@ -24,6 +24,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     : query.eq("lead_id", id);
   const [{ data, error }, slack] = await Promise.all([query, loadSlackSettings()]);
   if (error) return Response.json({ error: error.message }, { status: 500 });
+  const rows = data ?? [];
+  const callIds = [...new Set(rows.map((touch) => touch.source_id).filter((value): value is string => Boolean(value)))];
+  const grades = new Map<string, { grade: string; reason: string | null; handler_name: string | null }>();
+  if (callIds.length) {
+    const { data: gradeRows } = await supabase
+      .from("call_grades")
+      .select("call_id, grade, reason, handler_name")
+      .in("call_id", callIds.slice(0, 80));
+    for (const grade of gradeRows ?? []) {
+      if (grade.call_id) grades.set(grade.call_id, grade);
+    }
+  }
   const touches: {
     id: string;
     type: string | null;
@@ -32,10 +44,23 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     occurred_at: string | null;
     quo_link?: string | null;
     actor?: string | null;
-  }[] = (data ?? []).map((touch) => ({
-    ...touch,
-    content: touch.content ? String(touch.content).slice(0, 500) : null,
-  }));
+    grade?: string | null;
+    gradeReason?: string | null;
+    gradeHandler?: string | null;
+  }[] = rows.map((touch) => {
+    const grade = touch.source_id ? grades.get(touch.source_id) : undefined;
+    return {
+      id: touch.id,
+      type: touch.type,
+      direction: touch.direction,
+      content: touch.content ? String(touch.content).slice(0, 500) : null,
+      occurred_at: touch.occurred_at,
+      quo_link: touch.quo_link,
+      grade: grade?.grade || null,
+      gradeReason: grade?.reason || null,
+      gradeHandler: grade?.handler_name || null,
+    };
+  });
   if (
     touches.length === 0 &&
     lead &&

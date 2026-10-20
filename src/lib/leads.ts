@@ -23,7 +23,7 @@ export const LEAD_SENTIMENT_LABEL: Record<LeadSentiment, string> = {
 
 export const LEAD_KIND_LABEL: Record<LeadKind, string> = {
   pursue: "Want to sign",
-  needs_info: "Need more info",
+  needs_info: "Follow up Contact",
 };
 
 export const SOURCE_CHANNELS = ["Call", "Web form", "Meta", "Facebook", "WhatsApp", "Website"] as const;

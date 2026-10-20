@@ -69,8 +69,8 @@ export function matchesQueue(queue: QueueId, cycle: LeadCycle, attention: boolea
 export function stageClass(label: string): string {
   if (label === "Signed") return "bg-emerald-50 text-emerald-800";
   if (label === "Finish signing" || label === "Confirm signature") return "bg-violet-50 text-violet-800";
-  if (label === "Need more information") return "bg-sky-50 text-sky-800";
-  if (label === "Need to contact") return "bg-amber-50 text-amber-900";
+  if (label === "Follow up Contact") return "bg-sky-50 text-sky-800";
+  if (label === "Initial Contact") return "bg-amber-50 text-amber-900";
   if (label === "Outside practice") return "bg-orange-50 text-orange-900";
   return "bg-slate-100 text-slate-600";
 }
@@ -78,8 +78,8 @@ export function stageClass(label: string): string {
 export function stageStripe(label: string): string {
   if (label === "Signed") return "shadow-[inset_3px_0_0_0_#10b981]";
   if (label === "Finish signing" || label === "Confirm signature") return "shadow-[inset_3px_0_0_0_#8b5cf6]";
-  if (label === "Need more information") return "shadow-[inset_3px_0_0_0_#0ea5e9]";
-  if (label === "Need to contact") return "shadow-[inset_3px_0_0_0_#f59e0b]";
+  if (label === "Follow up Contact") return "shadow-[inset_3px_0_0_0_#0ea5e9]";
+  if (label === "Initial Contact") return "shadow-[inset_3px_0_0_0_#f59e0b]";
   if (label === "Outside practice") return "shadow-[inset_3px_0_0_0_#f97316]";
   return "shadow-[inset_3px_0_0_0_#cbd5e1]";
 }

@@ -733,14 +733,10 @@ function LeadFacts({
   row,
   admin,
   canLeave,
-  destinations,
-  templates,
 }: {
   row: QueueRow;
   admin: boolean;
   canLeave: RefObject<() => boolean>;
-  destinations: ReferralDestination[];
-  templates: { en: string; es: string };
 }) {
   const notify = useContext(DrawerNoticeContext);
   const [error, setError] = useState<string | null>(null);
@@ -1002,11 +998,6 @@ function LeadFacts({
                 ))}
               </select>
             </FieldLabel>
-            {decline === "DEC: Referred" ? (
-              <div className="col-span-2 border-t border-slate-200 pt-3">
-                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen />
-              </div>
-            ) : null}
           </PanelSection>
           <PanelSection title="Signed">
             <div>
@@ -1345,13 +1336,7 @@ export function LeadDrawer({
         </div>
       ) : null}
       <div className={tab === "details" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <LeadFacts
-          row={row}
-          admin={admin}
-          canLeave={canLeave ?? { current: () => true }}
-          destinations={destinations}
-          templates={templates}
-        />
+        <LeadFacts row={row} admin={admin} canLeave={canLeave ?? { current: () => true }} />
       </div>
       {tab === "details" ? null : (
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">

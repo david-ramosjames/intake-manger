@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const autoClosedCalls = await collapseDuplicateOpenCalls(supabase);
     const closed = await closeFinishedLeads(supabase);
     const result = await dispatchDue(supabase);
-    const inboxSync = await syncInboxCalls(supabase, { lookbackHours: 48, maxPairs: 20 }).catch((error: unknown) => ({
+    const inboxSync = await syncInboxCalls(supabase).catch((error: unknown) => ({
       stored: 0,
       finished: false,
       error: error instanceof Error ? error.message : "Inbox sync failed",

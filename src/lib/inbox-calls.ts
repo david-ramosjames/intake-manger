@@ -246,42 +246,69 @@ async function writeState(supabase: SupabaseClient, state: SyncState) {
   if (error) throw new Error(error.message);
 }
 
+const OVERLAP_MS = 15 * 60 * 1000;
+
+async function newestStoredCall(supabase: SupabaseClient): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("quo_inbox_calls")
+    .select("created_at")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.created_at ?? null;
+}
+
+/**
+ * Add calls that are newer than the last saved cursor. Stored rows are the running total.
+ * A finished cursor keeps `request_token` null and `window_start` at the time already covered.
+ * While a pass is still paging, `request_token` is set and `finished_at` is the end of that pass.
+ */
 export async function syncInboxCalls(
   supabase: SupabaseClient,
   options?: { lookbackHours?: number; maxPairs?: number; restart?: boolean },
 ): Promise<{ stored: number; finished: boolean }> {
   const apiKey = await loadKey(supabase);
   if (!apiKey) return { stored: 0, finished: true };
-  const lookbackHours = options?.lookbackHours ?? 48;
-  const maxPairs = options?.maxPairs ?? 20;
+  const maxPairs = options?.maxPairs ?? 80;
   const lines = await listLines(apiKey);
   const lineName = new Map(lines.map((line) => [line.id, line.name]));
   let state = await readState(supabase);
-  const stale =
-    !state?.finished_at || Date.now() - Date.parse(state.finished_at) > 20 * 60 * 1000;
-  if (options?.restart || !state || (state.request_token == null && stale)) {
+  const passing = Boolean(state && state.request_token != null && !options?.restart);
+  if (!passing) {
+    const covered = state?.request_token == null ? state?.window_start : null;
+    let from = covered;
+    if (!from) {
+      const newest = await newestStoredCall(supabase);
+      const lookback = options?.lookbackHours ?? 48;
+      from = newest
+        ? new Date(Date.parse(newest) - OVERLAP_MS).toISOString()
+        : new Date(Date.now() - lookback * 60 * 60 * 1000).toISOString();
+    } else {
+      from = new Date(Date.parse(from) - OVERLAP_MS).toISOString();
+    }
     state = {
-      window_start: new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString(),
+      window_start: from,
       request_token: "",
       pair_index: 0,
-      finished_at: null,
+      finished_at: new Date().toISOString(),
     };
   }
-  if (state.request_token == null) return { stored: 0, finished: true };
-  const windowStart = state.window_start || new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
-  const windowEnd = new Date().toISOString();
-  const page = await conversationPage(apiKey, windowStart, state.request_token);
+  if (!state?.window_start || state.request_token == null) return { stored: 0, finished: true };
+  const from = state.window_start;
+  const through = state.finished_at || new Date().toISOString();
+  const page = await conversationPage(apiKey, from, state.request_token);
   const pairs = pairsOnPage(page.data, lines);
   const slice = pairs.slice(state.pair_index, state.pair_index + maxPairs);
   const rows: InboxCall[] = [];
   for (const pair of slice) {
     try {
-      const calls = await callsForPair(apiKey, pair.phoneNumberId, pair.participant, windowStart, windowEnd);
+      const calls = await callsForPair(apiKey, pair.phoneNumberId, pair.participant, from, through);
       for (const call of calls) {
         const name = lineName.get(typeof call.phoneNumberId === "string" ? call.phoneNumberId : pair.phoneNumberId) || "";
         if (!name || EXCLUDE.has(name.toLowerCase())) continue;
         const row = callRow(call, name);
-        if (row) rows.push(row);
+        if (row && row.created_at >= from && row.created_at < through) rows.push(row);
       }
     } catch {
       // One conversation can fail without stopping the sweep.
@@ -290,20 +317,15 @@ export async function syncInboxCalls(
   await storeCalls(supabase, rows);
   const nextIndex = state.pair_index + slice.length;
   if (nextIndex < pairs.length) {
-    await writeState(supabase, { ...state, window_start: windowStart, pair_index: nextIndex, finished_at: null });
+    await writeState(supabase, { window_start: from, request_token: state.request_token, pair_index: nextIndex, finished_at: through });
     return { stored: rows.length, finished: false };
   }
   if (page.nextPageToken) {
-    await writeState(supabase, {
-      window_start: windowStart,
-      request_token: page.nextPageToken,
-      pair_index: 0,
-      finished_at: null,
-    });
+    await writeState(supabase, { window_start: from, request_token: page.nextPageToken, pair_index: 0, finished_at: through });
     return { stored: rows.length, finished: false };
   }
   await writeState(supabase, {
-    window_start: windowStart,
+    window_start: through,
     request_token: null,
     pair_index: 0,
     finished_at: new Date().toISOString(),

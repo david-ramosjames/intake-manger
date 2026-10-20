@@ -20,6 +20,7 @@ export const NOT_A_LEAD_TAGS = [
   "NL: Law Office",
   "NL: Return Call",
   "NL: Seeking Employment",
+  "NL: Spam / Robo Call",
   "NL: Vendor / Sales",
   "NL: Wrong Number / Misdial",
 ] as const;
@@ -27,7 +28,6 @@ export const NOT_A_LEAD_TAGS = [
 export const NOT_QUALIFIED_TAGS = [
   "NQ: Non-PI Legal Matter",
   "NQ: Outside Service Area",
-  "NQ: Spam / Robo Call",
   "NQ: Unresponsive",
 ] as const;
 
@@ -55,6 +55,9 @@ export const LEAD_TAGS = [
   ...TYPE_TAGS,
 ] as const;
 
+/** Tags this app may replace on a CallRail call. The old spam tag is listed so a push removes it. */
+export const MANAGED_CALLRAIL_TAGS = [...LEAD_TAGS, "NQ: Spam / Robo Call"] as const;
+
 export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
   "QUALIFIED YES": "QUALIFIED YES",
   "QUALIFIED NO": "QUALIFIED NO",
@@ -73,11 +76,11 @@ export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
   "NL: Law Office": "NL: Law Office",
   "NL: Return Call": "NL: Return Call",
   "NL: Seeking Employment": "NL: Seeking Employment",
+  "NL: Spam / Robo Call": "NL: Spam / Robo Call",
   "NL: Vendor / Sales": "NL: Vendor / Sales",
   "NL: Wrong Number / Misdial": "NL: Wrong Number / Misdial",
   "NQ: Non-PI Legal Matter": "NQ: Non-PI Legal Matter",
   "NQ: Outside Service Area": "NQ: Outside Service Area",
-  "NQ: Spam / Robo Call": "NQ: Spam / Robo Call",
   "NQ: Unresponsive": "NQ: Unresponsive",
   "S: Large": "S: Large",
   "S: Medium": "S: Medium",

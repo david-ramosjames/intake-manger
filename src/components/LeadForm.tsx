@@ -5,7 +5,7 @@ import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary } from "@/lib/ui";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
-import { isSourceType, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_SOURCES, LEAD_STATUSES, PI_CASE_TYPES, SOURCE_CHANNELS, SOURCE_TYPES, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { caseTypeChoices, isSourceType, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_SOURCES, LEAD_STATUSES, SOURCE_CHANNELS, SOURCE_TYPE_OPTIONS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
   return (
@@ -88,11 +88,11 @@ export function LeadForm({
         <span className="font-medium text-slate-700">Source type</span>
         <select
           name="source_type"
-          defaultValue={isSourceType(lead?.source_type) ? lead?.source_type : ""}
+          defaultValue={isSourceType(lead?.source_type) && lead.source_type !== "Unknown" ? lead.source_type : ""}
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
         >
           <option value="">Not set</option>
-          {SOURCE_TYPES.map((item) => (
+          {SOURCE_TYPE_OPTIONS.map((item) => (
             <option key={item} value={item}>
               {item}
             </option>
@@ -167,7 +167,9 @@ export function LeadForm({
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
         >
           <option value="">Not scored</option>
-          {(Object.keys(LEAD_SENTIMENT_LABEL) as LeadSentiment[]).map((value) => (
+          {(Object.keys(LEAD_SENTIMENT_LABEL) as LeadSentiment[])
+            .sort((a, b) => LEAD_SENTIMENT_LABEL[a].localeCompare(LEAD_SENTIMENT_LABEL[b]))
+            .map((value) => (
             <option key={value} value={value}>
               {LEAD_SENTIMENT_LABEL[value]}
             </option>
@@ -182,7 +184,10 @@ export function LeadForm({
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
         >
           <option value="Outbound">Slack Outbound</option>
-          {staff.map((person) => (
+          {staff
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((person) => (
             <option key={person.name} value={person.name}>
               {person.name}
             </option>
@@ -199,7 +204,9 @@ export function LeadForm({
           defaultValue={lead?.kind ?? "pursue"}
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
         >
-          {Object.entries(LEAD_KIND_LABEL).map(([value, label]) => (
+          {Object.entries(LEAD_KIND_LABEL)
+            .sort((a, b) => a[1].localeCompare(b[1]))
+            .map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
@@ -213,7 +220,9 @@ export function LeadForm({
           defaultValue={lead?.arrival ?? "manual"}
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
         >
-          {(Object.keys(LEAD_ARRIVAL_LABEL) as LeadArrival[]).map((value) => (
+          {(Object.keys(LEAD_ARRIVAL_LABEL) as LeadArrival[])
+            .sort((a, b) => LEAD_ARRIVAL_LABEL[a].localeCompare(LEAD_ARRIVAL_LABEL[b]))
+            .map((value) => (
             <option key={value} value={value}>
               {LEAD_ARRIVAL_LABEL[value]}
             </option>
@@ -306,14 +315,13 @@ function Field({
 }
 
 function CaseTypeField({ value }: { value: string }) {
-  const options = new Set<string>(PI_CASE_TYPES);
-  if (value && !options.has(value)) options.add(value);
+  const options = caseTypeChoices(value);
   return (
     <label className="block text-sm">
       <span className="font-medium text-slate-700">Case type</span>
-      <select name="case_type" defaultValue={value} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
+      <select name="case_type" defaultValue={value === "Unknown / No Response" ? "" : value} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
         <option value="">Not set</option>
-        {[...options].map((item) => (
+        {options.map((item) => (
           <option key={item} value={item}>
             {item}
           </option>
@@ -324,8 +332,7 @@ function CaseTypeField({ value }: { value: string }) {
 }
 
 function ChannelField({ value }: { value: string }) {
-  const options = new Set<string>(SOURCE_CHANNELS);
-  if (value) options.add(value);
+  const options = [...new Set([value, ...SOURCE_CHANNELS].filter(Boolean))].sort((a, b) => a.localeCompare(b));
   return (
     <label className="block text-sm">
       <span className="font-medium text-slate-700">Source</span>

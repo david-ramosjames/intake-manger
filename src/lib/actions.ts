@@ -6,7 +6,7 @@ import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
 import { contractSent } from "./desired";
 import { canonicalLeadSource, displayContact, isSourceType } from "./leads";
-import { LEAD_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
+import { MANAGED_CALLRAIL_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
 import { requireStaff } from "./session";
@@ -424,7 +424,7 @@ export async function updateLead(leadId: string, formData: FormData) {
 
   if (changes.callrail_tags && callrailConfigured() && before.callrail_call_id) {
     try {
-      await pushCallrailTags(before.callrail_call_id, fields.callrail_tags, LEAD_TAGS);
+      await pushCallrailTags(before.callrail_call_id, fields.callrail_tags, MANAGED_CALLRAIL_TAGS);
     } catch (err) {
       const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
       await supabase.from("lead_events").insert({

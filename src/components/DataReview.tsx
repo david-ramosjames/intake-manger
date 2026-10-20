@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { canonicalLeadSource, isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
+import { canonicalLeadSource, caseTypeChoices, isSourceType, LEAD_SOURCES, SOURCE_TYPE_OPTIONS } from "@/lib/leads";
 import { saveLeadDetails, saveLeadTags, setConsultation, setDesired, setQualified } from "@/lib/ops-actions";
 import { toE164 } from "@/lib/phone";
 import { EMAIL_NOT_AVAILABLE, REVIEW_GAP_LABEL, REVIEW_GAPS, reviewCsv, reviewGaps, type ReviewGap, type ReviewLead } from "@/lib/review";
@@ -454,7 +454,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
         <td className="px-2 py-1.5">
           <select
             aria-label="Source type"
-            value={isSourceType(draft.sourceType) ? draft.sourceType : ""}
+            value={isSourceType(draft.sourceType) && draft.sourceType !== "Unknown" ? draft.sourceType : ""}
             onChange={(event) => {
               const value = event.target.value;
               const next = { ...draft, sourceType: isSourceType(value) ? value : "" };
@@ -463,7 +463,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             className={box(gaps.has("source_type"))}
           >
             <option value="">Not set</option>
-            {SOURCE_TYPES.map((item) => (
+            {SOURCE_TYPE_OPTIONS.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -473,7 +473,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
         <td className="px-2 py-1.5">
           <select
             aria-label="Case type"
-            value={draft.caseType}
+            value={draft.caseType === "Unknown / No Response" ? "" : draft.caseType}
             onChange={(event) => {
               const next = { ...draft, caseType: event.target.value };
               void persistDetails(next, false);
@@ -481,7 +481,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             className={box(gaps.has("case_type"), true)}
           >
             <option value="">Not set</option>
-            {withCurrent(PI_CASE_TYPES, draft.caseType).map((item) => (
+            {caseTypeChoices(draft.caseType).map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>

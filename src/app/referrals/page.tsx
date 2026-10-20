@@ -83,7 +83,7 @@ export default async function ReferralsPage() {
         <input name="name" required placeholder="Name" className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
         <select name="practice_area" required className="rounded-md border border-slate-300 px-3 py-2 text-sm" defaultValue="">
           <option value="">Practice area</option>
-          {PRACTICE_AREAS.map((area) => (
+          {[...PRACTICE_AREAS].sort((a, b) => a.label.localeCompare(b.label)).map((area) => (
             <option key={area.id} value={area.id}>
               {area.label}
             </option>

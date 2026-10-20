@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags, pushCallrailTags } from "./callrail";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG, type ExcludedCallerClass } from "./caller-class";
-import { LEAD_TAGS, NOT_A_LEAD_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
+import { MANAGED_CALLRAIL_TAGS, NOT_A_LEAD_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
@@ -483,7 +483,7 @@ async function saveQueueMilestone(
   });
   if (callrailConfigured() && before.callrail_call_id) {
     try {
-      await pushCallrailTags(before.callrail_call_id, tags, LEAD_TAGS);
+      await pushCallrailTags(before.callrail_call_id, tags, MANAGED_CALLRAIL_TAGS);
     } catch (err) {
       const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
       throw new Error(`Saved on the lead. CallRail did not take the tags. ${message}`);
@@ -724,7 +724,7 @@ export async function classifyNonLead(formData: FormData) {
     throw new Error("A signed or promoted matter stays a lead.");
   }
   assertCloseReady(data, "nonlead");
-  const drop = new Set<string>([...NOT_A_LEAD_TAGS, NON_LEAD_TAG.spam, "QUALIFIED YES", "CVR DESIRED"]);
+  const drop = new Set<string>([...NOT_A_LEAD_TAGS, "NQ: Spam / Robo Call", "QUALIFIED YES", "CVR DESIRED"]);
   const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !drop.has(tag));
   if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
   const reasonTag = NON_LEAD_TAG[reason];
@@ -755,7 +755,7 @@ export async function classifyNonLead(formData: FormData) {
   });
   if (callrailConfigured() && data.callrail_call_id) {
     try {
-      await pushCallrailTags(data.callrail_call_id, tags, LEAD_TAGS);
+      await pushCallrailTags(data.callrail_call_id, tags, MANAGED_CALLRAIL_TAGS);
     } catch (err) {
       const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
       throw new Error(`Moved to non-leads. CallRail did not take the tags. ${message}`);
@@ -1334,7 +1334,7 @@ export async function confirmSigned(formData: FormData) {
   });
   if (callrailConfigured() && before.callrail_call_id) {
     try {
-      await pushCallrailTags(before.callrail_call_id, tags, LEAD_TAGS);
+      await pushCallrailTags(before.callrail_call_id, tags, MANAGED_CALLRAIL_TAGS);
     } catch (err) {
       const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
       throw new Error(`Signed on the lead. CallRail did not take the tags. ${message}`);
@@ -1371,6 +1371,10 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
     notQualified: String(formData.get("not_qualified_tag") ?? ""),
     requireQualified: false,
   });
+  const hadSpam = (before.callrail_tags ?? []).some((tag: string) => tag === "NQ: Spam / Robo Call" || tag === "NL: Spam / Robo Call");
+  if (hadSpam && String(formData.get("qualified_tag") ?? "") !== "QUALIFIED YES" && !String(formData.get("not_qualified_tag") ?? "") && !tagged.tags.includes("NL: Spam / Robo Call")) {
+    tagged.tags.push("NL: Spam / Robo Call");
+  }
   const { error: updateError } = await supabase
     .from("leads")
     .update({
@@ -1395,7 +1399,7 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
 
   if (callrailConfigured() && before.callrail_call_id) {
     try {
-      await pushCallrailTags(before.callrail_call_id, tagged.tags, LEAD_TAGS);
+      await pushCallrailTags(before.callrail_call_id, tagged.tags, MANAGED_CALLRAIL_TAGS);
     } catch (err) {
       const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
       await supabase.from("lead_events").insert({

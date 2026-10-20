@@ -27,7 +27,7 @@ export const CALLER_CLASS_LABEL: Record<CallerClass, string> = {
 };
 
 export const NON_LEAD_TAG: Record<ExcludedCallerClass, string> = {
-  spam: "NQ: Spam / Robo Call",
+  spam: "NL: Spam / Robo Call",
   vendor: "NL: Vendor / Sales",
   employment: "NL: Seeking Employment",
   existing_client: "NL: Existing Client",

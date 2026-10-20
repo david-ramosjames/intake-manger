@@ -26,50 +26,52 @@ export const LEAD_KIND_LABEL: Record<LeadKind, string> = {
   needs_info: "Follow up Contact",
 };
 
-export const SOURCE_CHANNELS = ["Call", "Web form", "Meta", "Facebook", "WhatsApp", "Website"] as const;
+export const SOURCE_CHANNELS = ["Call", "Facebook", "Meta", "Web form", "Website", "WhatsApp"] as const;
 
-export const SOURCE_TYPES = ["Marketing", "Referral", "Unknown", "Repeat"] as const;
+export const SOURCE_TYPES = ["Marketing", "Referral", "Repeat", "Unknown"] as const;
 
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
+/** Source types staff can pick. Unknown stays valid on older rows. */
+export const SOURCE_TYPE_OPTIONS = ["Marketing", "Referral", "Repeat"] as const;
+
 /** Specific lead sources staff should use. Source type is the bucket each one belongs to. */
 export const LEAD_SOURCES: { source: string; type: SourceType }[] = [
+  { source: "Attorney", type: "Referral" },
+  { source: "Avvo", type: "Marketing" },
+  { source: "Bing", type: "Marketing" },
+  { source: "ChatGPT", type: "Marketing" },
+  { source: "Client", type: "Referral" },
+  { source: "Current client", type: "Repeat" },
+  { source: "Direct", type: "Marketing" },
+  { source: "Email", type: "Marketing" },
+  { source: "Employee", type: "Referral" },
+  { source: "Facebook", type: "Marketing" },
+  { source: "Family", type: "Referral" },
+  { source: "Friend", type: "Referral" },
   { source: "Google", type: "Marketing" },
   { source: "Google Maps", type: "Marketing" },
-  { source: "Meta", type: "Marketing" },
-  { source: "Facebook", type: "Marketing" },
   { source: "Instagram", type: "Marketing" },
-  { source: "TikTok", type: "Marketing" },
-  { source: "WhatsApp", type: "Marketing" },
-  { source: "Website", type: "Marketing" },
-  { source: "TV", type: "Marketing" },
-  { source: "Radio", type: "Marketing" },
-  { source: "YouTube", type: "Marketing" },
-  { source: "Bing", type: "Marketing" },
-  { source: "Nextdoor", type: "Marketing" },
-  { source: "Reddit", type: "Marketing" },
-  { source: "ChatGPT", type: "Marketing" },
-  { source: "Email", type: "Marketing" },
-  { source: "Avvo", type: "Marketing" },
-  { source: "Super Lawyers", type: "Marketing" },
   { source: "Internet", type: "Marketing" },
+  { source: "Law firm", type: "Referral" },
+  { source: "Meta", type: "Marketing" },
+  { source: "Neighbor", type: "Referral" },
+  { source: "Nextdoor", type: "Marketing" },
+  { source: "Previous client", type: "Repeat" },
+  { source: "Radio", type: "Marketing" },
+  { source: "Reddit", type: "Marketing" },
+  { source: "Repeat", type: "Repeat" },
+  { source: "Returning client", type: "Repeat" },
   { source: "Social media", type: "Marketing" },
+  { source: "Super Lawyers", type: "Marketing" },
+  { source: "TikTok", type: "Marketing" },
+  { source: "TV", type: "Marketing" },
   { source: "Walk-in", type: "Marketing" },
   { source: "Web chat", type: "Marketing" },
-  { source: "Direct", type: "Marketing" },
-  { source: "Friend", type: "Referral" },
-  { source: "Family", type: "Referral" },
-  { source: "Attorney", type: "Referral" },
-  { source: "Law firm", type: "Referral" },
-  { source: "Client", type: "Referral" },
-  { source: "Neighbor", type: "Referral" },
-  { source: "Employee", type: "Referral" },
+  { source: "Website", type: "Marketing" },
+  { source: "WhatsApp", type: "Marketing" },
   { source: "Word of mouth", type: "Referral" },
-  { source: "Repeat", type: "Repeat" },
-  { source: "Current client", type: "Repeat" },
-  { source: "Previous client", type: "Repeat" },
-  { source: "Returning client", type: "Repeat" },
-  { source: "Unknown", type: "Unknown" },
+  { source: "YouTube", type: "Marketing" },
 ];
 
 const LEAD_SOURCE_ALIASES: Record<string, string> = {
@@ -252,19 +254,18 @@ export function leadSourceFromText(text: string | null | undefined): { source: s
 }
 
 export const PI_CASE_TYPES = [
-  "Other Injury",
-  "Premises Liability",
-  "Auto Accident",
   "Non-PI Legal Matter",
-  "Unknown / No Response",
+  "Auto Accident",
+  "Commercial / 18 Wheeler",
+  "Dog Bite",
+  "MedMal",
+  "No Injuries / Property Damage",
+  "Other Injury",
+  "Pedestrian / Bicycle / Scooter",
+  "Premises Liability",
   "Sexual Assault / Child Abuse",
   "Work Injury",
   "Workers Comp",
-  "No Injuries / Property Damage",
-  "Commercial / 18 Wheeler",
-  "MedMal",
-  "Pedestrian / Bicycle / Scooter",
-  "Dog Bite",
   "Wrongful Death",
 ] as const;
 
@@ -583,10 +584,19 @@ export function isPiCaseType(value: string | null | undefined): boolean {
   return Boolean(official && !OUTSIDE_CASE_TYPES.has(official));
 }
 
-export function officialCaseType(value: string | null | undefined): (typeof PI_CASE_TYPES)[number] | null {
+export function officialCaseType(value: string | null | undefined): (typeof PI_CASE_TYPES)[number] | "Unknown / No Response" | null {
   const text = usableFact(value);
   if (!text) return null;
+  if (text.toLowerCase() === "unknown / no response") return "Unknown / No Response";
   return CASE_TYPE_ALIASES[text.toLowerCase()] ?? PI_CASE_TYPES.find((item) => item.toLowerCase() === text.toLowerCase()) ?? null;
+}
+
+/** Case types for a dropdown. Non-PI stays first. Unknown is not offered. */
+export function caseTypeChoices(current?: string | null): string[] {
+  const choices: string[] = [...PI_CASE_TYPES];
+  const extra = (current || "").trim();
+  if (extra && extra !== "Unknown / No Response" && !choices.includes(extra)) choices.push(extra);
+  return choices;
 }
 
 export function canonicalCaseType(value: string | null | undefined): string | null {

@@ -31,7 +31,7 @@ export function ReferralPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const matches = useMemo(
-    () => destinations.filter((destination) => destination.practice_areas.includes(area)),
+    () => destinations.filter((destination) => destination.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name)),
     [destinations, area],
   );
   const destination = matches.find((item) => item.id === destinationId) ?? matches[0] ?? null;
@@ -65,7 +65,7 @@ export function ReferralPanel({
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
           >
             <option value="">Choose the legal area</option>
-            {PRACTICE_AREAS.map((item) => (
+            {[...PRACTICE_AREAS].sort((a, b) => a.label.localeCompare(b.label)).map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
               </option>

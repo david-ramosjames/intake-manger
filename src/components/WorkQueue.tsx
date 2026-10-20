@@ -7,7 +7,7 @@ import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, NOT_QUALIFIED_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
-import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
+import { caseTypeChoices, isSourceType, LEAD_SOURCES, SOURCE_TYPE_OPTIONS } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, startTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
@@ -733,10 +733,16 @@ function LeadFacts({
   row,
   admin,
   canLeave,
+  destinations,
+  templates,
+  startReferral = false,
 }: {
   row: QueueRow;
   admin: boolean;
   canLeave: RefObject<() => boolean>;
+  destinations: ReferralDestination[];
+  templates: { en: string; es: string };
+  startReferral?: boolean;
 }) {
   const notify = useContext(DrawerNoticeContext);
   const [error, setError] = useState<string | null>(null);
@@ -823,8 +829,7 @@ function LeadFacts({
       setPending(false);
     }
   }
-  const caseOptions = new Set<string>(PI_CASE_TYPES);
-  if (row.caseType) caseOptions.add(row.caseType);
+  const caseOptions = caseTypeChoices(row.caseType);
   const formId = `lead-details-${row.id}`;
   const nameValue = row.leadName || (row.title === "Not captured" ? "" : row.title);
   return (
@@ -845,11 +850,12 @@ function LeadFacts({
           </PanelSection>
           <input type="hidden" name="consulted" value={consulted} />
           {admin ? <input type="hidden" name="signed_decision" value={signedChoice} /> : null}
+          {row.signed ? null : <NonLeadChoice row={row} />}
           <PanelSection title="Marketing">
             <FieldLabel label="Source type">
-              <select name="source_type" defaultValue={isSourceType(row.sourceType) ? row.sourceType : ""} className={fieldClass()}>
+              <select name="source_type" defaultValue={isSourceType(row.sourceType) && row.sourceType !== "Unknown" ? row.sourceType : ""} className={fieldClass()}>
                 <option value="">Not set</option>
-                {SOURCE_TYPES.map((item) => (
+                {SOURCE_TYPE_OPTIONS.map((item) => (
                   <option key={item} value={item}>
                     {item}
                   </option>
@@ -865,10 +871,9 @@ function LeadFacts({
               </datalist>
             </FieldLabel>
           </PanelSection>
-          {row.signed ? null : <NonLeadChoice row={row} />}
           <PanelSection title="Case type">
             <FieldLabel label="Case type" className="col-span-2">
-              <select name="case_type" defaultValue={row.caseType} className={fieldClass()}>
+              <select name="case_type" defaultValue={caseOptions.includes(row.caseType) ? row.caseType : ""} className={fieldClass()}>
                 <option value="">Not set</option>
                 {[...caseOptions].map((item) => (
                   <option key={item} value={item}>
@@ -998,6 +1003,11 @@ function LeadFacts({
                 ))}
               </select>
             </FieldLabel>
+            {decline === "DEC: Referred" || row.nonPi || startReferral ? (
+              <div className="col-span-2 border-t border-slate-200 pt-3">
+                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen />
+              </div>
+            ) : null}
           </PanelSection>
           <PanelSection title="Signed">
             <div>
@@ -1073,7 +1083,9 @@ function QueueReferral({
   startOpen?: boolean;
 }) {
   const firms = referralFirms(destinations);
-  const types = PRACTICE_AREAS.filter((area) => firms.some((firm) => firm.practice_areas.includes(area.id)));
+  const types = PRACTICE_AREAS.filter((area) => firms.some((firm) => firm.practice_areas.includes(area.id))).sort((a, b) =>
+    a.label.localeCompare(b.label),
+  );
   const sectionRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(startOpen);
   const [area, setArea] = useState(types.some((item) => item.id === row.practiceArea) ? (row.practiceArea ?? "") : "");
@@ -1082,7 +1094,9 @@ function QueueReferral({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const notify = useContext(DrawerNoticeContext);
-  const partners = area ? firms.filter((firm) => firm.practice_areas.includes(area)) : [];
+  const partners = area
+    ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
   const firm = partners.find((item) => item.id === firmId) ?? null;
   useEffect(() => {
     if (!startOpen) return;
@@ -1242,7 +1256,7 @@ export function LeadDrawer({
 }) {
   const [tab, setTab] = useState<"overview" | "details" | "activity">("overview");
   useEffect(() => {
-    if (startReferral) setTab("overview");
+    if (startReferral) setTab("details");
   }, [startReferral]);
   const [notice, setNotice] = useState<DrawerNotice | null>(null);
   const [touches, setTouches] = useState<Touch[] | null>(null);
@@ -1336,7 +1350,14 @@ export function LeadDrawer({
         </div>
       ) : null}
       <div className={tab === "details" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <LeadFacts row={row} admin={admin} canLeave={canLeave ?? { current: () => true }} />
+        <LeadFacts
+          row={row}
+          admin={admin}
+          canLeave={canLeave ?? { current: () => true }}
+          destinations={destinations}
+          templates={templates}
+          startReferral={startReferral}
+        />
       </div>
       {tab === "details" ? null : (
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
@@ -1468,14 +1489,6 @@ export function LeadDrawer({
             </a>
           ) : null}
         </div>
-        {(row.nonPi || row.tags.includes("DEC: Referred")) && !row.signed && !row.referralSent ? (
-          <QueueReferral
-            row={row}
-            destinations={destinations}
-            templates={templates}
-            startOpen={startReferral || row.tags.includes("DEC: Referred")}
-          />
-        ) : null}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
@@ -1700,7 +1713,8 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
 }
 
 function NonLeadChoice({ row }: { row: QueueRow }) {
-  const current = EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? "";
+  const taggedSpam = row.tags.includes("NQ: Spam / Robo Call") || row.tags.includes("NL: Spam / Robo Call");
+  const current = EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? (taggedSpam ? "spam" : "");
   const gaps = rowCloseGaps(row, "nonlead");
   const { pending, submit } = useNotedSubmit();
   const [reason, setReason] = useState(current);
@@ -1716,11 +1730,13 @@ function NonLeadChoice({ row }: { row: QueueRow }) {
           className={fieldClass()}
         >
           <option value="">Choose a reason</option>
-          {EXCLUDED_CALLER_CLASSES.filter((item) => item !== "spam").map((item) => (
-            <option key={item} value={item}>
-              {NON_LEAD_TAG[item]}
-            </option>
-          ))}
+          {[...EXCLUDED_CALLER_CLASSES]
+            .sort((a, b) => NON_LEAD_TAG[a].localeCompare(NON_LEAD_TAG[b]))
+            .map((item) => (
+              <option key={item} value={item}>
+                {NON_LEAD_TAG[item]}
+              </option>
+            ))}
         </select>
       </label>
       <button

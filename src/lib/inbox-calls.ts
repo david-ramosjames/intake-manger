@@ -1,3 +1,4 @@
+import { Pool } from "pg";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -13,6 +14,7 @@ export const ANSWER_RATE_INBOXES = ["Leads", "RJL Main Line", "RGV Number", "RJL
 
 const QUO_BASE = (process.env.QUO_API_BASE || "https://api.quo.com/v1").replace(/\/$/, "");
 const SYNC_ID = "default";
+const LEDGER_SYNC_ID = "ledger";
 
 type Line = { id: string; name: string; number: string };
 
@@ -160,12 +162,19 @@ function callRow(call: Record<string, unknown>, lineName: string): InboxCall | n
   };
 }
 
-async function storeCalls(supabase: SupabaseClient, rows: InboxCall[]) {
+async function storeCalls(supabase: SupabaseClient, rows: InboxCall[], options?: { preserveAi?: boolean }) {
   const unique = [...new Map(rows.map((row) => [row.id, row])).values()];
   if (!unique.length) return;
   const now = new Date().toISOString();
   const { error } = await supabase.from("quo_inbox_calls").upsert(
-    unique.map((row) => ({ ...row, synced_at: now })),
+    unique.map((row) => {
+      const item: Record<string, unknown> = { ...row, synced_at: now };
+      if (!item.answered_by) delete item.answered_by;
+      // The webhook ledger does not carry Quo's aiHandled flag. A false here
+      // would wipe the person-vs-agent mark the list API already stored.
+      if (options?.preserveAi && !item.ai_handled) delete item.ai_handled;
+      return item;
+    }),
     { onConflict: "id" },
   );
   if (error) throw new Error(error.message);
@@ -241,8 +250,8 @@ async function readState(supabase: SupabaseClient): Promise<SyncState | null> {
   };
 }
 
-async function writeState(supabase: SupabaseClient, state: SyncState) {
-  const { error } = await supabase.from("quo_inbox_sync").upsert({ id: SYNC_ID, ...state, updated_at: new Date().toISOString() });
+async function writeState(supabase: SupabaseClient, state: SyncState, id = SYNC_ID) {
+  const { error } = await supabase.from("quo_inbox_sync").upsert({ id, ...state, updated_at: new Date().toISOString() });
   if (error) throw new Error(error.message);
 }
 
@@ -407,4 +416,109 @@ export async function loadInboxAnswerRate(
     .limit(1)
     .maybeSingle();
   return { ...tally, earliest: earliestRow?.created_at ?? null };
+}
+
+type LedgerCall = {
+  call_id: string;
+  phone_number_id: string | null;
+  direction: string | null;
+  status: string | null;
+  answered_by: string | null;
+  ai_handled: boolean | null;
+  created_at: Date | string | null;
+  line_name: string | null;
+  updated_at: Date | string | null;
+};
+
+function iso(value: Date | string | null | undefined): string {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+}
+
+/**
+ * Copy the reporter webhook ledger into the dashboard call table.
+ * The email counts these rows. The Quo list API leaves out auto-forward and transfer legs.
+ */
+export async function syncCallLedger(supabase: SupabaseClient): Promise<{ stored: number; connected: boolean; finished: boolean }> {
+  const connectionString = process.env.REPORTING_DATABASE_URL?.trim();
+  if (!connectionString) return { stored: 0, connected: false, finished: true };
+  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(connectionString);
+  const pool = new Pool({
+    connectionString,
+    ssl: local ? false : { rejectUnauthorized: false },
+    max: 1,
+    connectionTimeoutMillis: 10000,
+  });
+  try {
+    const apiKey = await loadKey(supabase);
+    const lineName = new Map<string, string>();
+    if (apiKey) {
+      for (const line of await listLines(apiKey)) lineName.set(line.id, line.name);
+    }
+    const state = await readStateRow(supabase, LEDGER_SYNC_ID);
+    const since = state?.window_start || "2026-01-01T00:00:00.000Z";
+    const afterId = state?.request_token || "";
+    const { rows } = await pool.query<LedgerCall>(
+      `SELECT call_id, phone_number_id, direction, status, answered_by, ai_handled, created_at, line_name, updated_at
+       FROM quo_calls
+       WHERE COALESCE(updated_at, created_at) > $1
+          OR (COALESCE(updated_at, created_at) = $1 AND call_id > $2)
+       ORDER BY COALESCE(updated_at, created_at) ASC, call_id ASC
+       LIMIT 1000`,
+      [since, afterId],
+    );
+    const calls: InboxCall[] = [];
+    for (const row of rows) {
+      const createdAt = iso(row.created_at);
+      if (!row.call_id || !createdAt) continue;
+      const phoneNumberId = row.phone_number_id || "";
+      const name = (row.line_name || "").trim() || lineName.get(phoneNumberId) || "";
+      if (!name || EXCLUDE.has(name.toLowerCase())) continue;
+      calls.push({
+        id: `${row.call_id}::${phoneNumberId}`,
+        call_id: row.call_id,
+        line_name: name,
+        direction: row.direction || "",
+        status: (row.status || "").toLowerCase(),
+        answered_by: row.answered_by,
+        ai_handled: Boolean(row.ai_handled) || (row.status || "").toLowerCase().includes("ai"),
+        created_at: createdAt,
+      });
+    }
+    await storeCalls(supabase, calls, { preserveAi: true });
+    const last = rows[rows.length - 1];
+    if (last) {
+      await writeState(
+        supabase,
+        {
+          window_start: iso(last.updated_at) || iso(last.created_at) || since,
+          request_token: last.call_id,
+          pair_index: 0,
+          finished_at: new Date().toISOString(),
+        },
+        LEDGER_SYNC_ID,
+      );
+    }
+    return { stored: calls.length, connected: true, finished: rows.length < 1000 };
+  } finally {
+    await pool.end();
+  }
+}
+
+async function readStateRow(supabase: SupabaseClient, id: string): Promise<SyncState | null> {
+  const { data, error } = await supabase
+    .from("quo_inbox_sync")
+    .select("window_start, request_token, pair_index, finished_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return {
+    window_start: data.window_start,
+    request_token: data.request_token,
+    pair_index: data.pair_index ?? 0,
+    finished_at: data.finished_at,
+  };
 }

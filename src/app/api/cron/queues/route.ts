@@ -4,7 +4,7 @@ import { fillOutstandingTalkedWith } from "@/lib/talked-with";
 import { dispatchDue } from "@/lib/dispatch";
 import { closeFinishedLeads } from "@/lib/funnel";
 import { enrollMissingFollowUps } from "@/lib/followup";
-import { syncInboxCalls } from "@/lib/inbox-calls";
+import { syncCallLedger, syncInboxCalls } from "@/lib/inbox-calls";
 import { collapseDuplicateOpenCalls } from "@/lib/open-calls";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -34,7 +34,13 @@ export async function POST(request: Request) {
       finished: false,
       error: error instanceof Error ? error.message : "Inbox sync failed",
     }));
-    return Response.json({ ...result, enrolled, autoClosedCalls, closed, contracts, sources, talkedWith, inboxSync });
+    const callLedger = await syncCallLedger(supabase).catch((error: unknown) => ({
+      stored: 0,
+      connected: false,
+      finished: false,
+      error: error instanceof Error ? error.message : "Call ledger sync failed",
+    }));
+    return Response.json({ ...result, enrolled, autoClosedCalls, closed, contracts, sources, talkedWith, inboxSync, callLedger });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Queue run failed" },

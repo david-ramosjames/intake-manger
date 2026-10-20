@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isWorkLead } from "@/lib/caller-class";
+import { slackMessageUrl } from "@/lib/leads";
 import { milestoneDesired, milestoneQualified, milestoneSigned } from "@/lib/desired";
 import { averageCallGrade } from "@/lib/call-grade";
 import { priorityPlace } from "@/lib/next-step";
@@ -404,7 +405,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         goal: "Goal: contacted within 2 minutes",
         detail: speed.total ? `${statusWord(speedTone)} · ${speed.met} of ${speed.total} contacted in time` : statusWord(speedTone),
         definition:
-          "Share of missed calls, Sona calls, and form fills contacted with an outbound call or text within 2 minutes. The automatic first text counts when it is stored on that lead or that phone number. A form text that lands up to 2 minutes before the lead record is saved still counts, because that text often goes out first. Form fills are Meta form, site form, web chat, and website leads. One with no outbound call or text stored counts as not contacted in time. Open the card to see each one and its call and text log.",
+          "Share of missed calls, Sona calls, and form fills from intake leads contacted with an outbound call or text within 2 minutes. Insurance companies, existing clients, and other non-leads are left out. The automatic first text counts when it is stored on that lead or that phone number. A form text that lands up to 2 minutes before the lead record is saved still counts, because that text often goes out first. Form fills are Meta form, site form, web chat, and website leads. One with no outbound call or text stored counts as not contacted in time. Open the card to see each one, its call and text log, and the Slack post.",
         tone: speedTone,
       },
       {
@@ -572,6 +573,7 @@ export type SpeedTouch = {
   at: string;
   label: string;
   note: string | null;
+  slack: string | null;
 };
 
 export type SpeedEvent = {
@@ -581,6 +583,7 @@ export type SpeedEvent = {
   leadId: string | null;
   name: string;
   phone: string;
+  slack: string | null;
   met: boolean;
   wait: string;
   log: SpeedTouch[];
@@ -610,7 +613,37 @@ type SpeedDraft = {
   leadId: string | null;
   name: string;
   phone: string;
+  slack: string | null;
 };
+
+type LeadStamp = {
+  id: string;
+  lead_name: string | null;
+  caller_class: string | null;
+  summary: string | null;
+  phone_e164: string | null;
+  slack_permalink: string | null;
+  slack_channel_id: string | null;
+  slack_message_ts: string | null;
+  slack_thread_ts: string | null;
+};
+
+const LEAD_STAMP = "id, lead_name, caller_class, summary, phone_e164, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+
+/** The caller is an insurer or adjuster, not a person asking the firm for help. */
+function callerIsInsurer(text: string): boolean {
+  const value = text.replace(/\s+/g, " ");
+  if (/lawsuit from|sued by|attempted to reach|insurance company attempted/i.test(value)) return false;
+  return /\b(from|representing)\s+(an?\s+)?(insurance company|allstate|geico|progressive|liberty mutual|state farm|farmers|usaa|nationwide|travelers|the hartford|aaa insurance|go auto)\b/i.test(
+    value,
+  );
+}
+
+function intakeCaller(lead: LeadStamp | null, content: string | null): boolean {
+  if (lead && !isWorkLead(lead)) return false;
+  if ((!lead || !lead.caller_class) && callerIsInsurer(`${lead?.summary || ""} ${content || ""}`)) return false;
+  return true;
+}
 
 type SpeedHit = { at: number; kind: "text" | "call" };
 
@@ -621,6 +654,7 @@ type LogRow = {
   direction: string | null;
   occurred_at: string | null;
   content: string | null;
+  slack_permalink: string | null;
 };
 
 function firstHit(list: SpeedHit[] | undefined, at: number, lookbackMs: number): SpeedHit | null {
@@ -642,11 +676,12 @@ export async function loadSpeedDetail(
   const drafts: SpeedDraft[] = [];
   const coveredCalls = new Set<string>();
   const names = new Map<string, string>();
-  const inbound: { lead_id: string | null; phone_e164: string | null; occurred_at: string; type: string }[] = [];
+  const slackByLead = new Map<string, string>();
+  const inbound: { lead_id: string | null; phone_e164: string | null; occurred_at: string; type: string; content: string | null; slack_permalink: string | null }[] = [];
   for (let from = 0; from < 5000; from += 1000) {
     const { data, error } = await supabase
       .from("intake_interactions")
-      .select("lead_id, phone_e164, occurred_at, type")
+      .select("lead_id, phone_e164, occurred_at, type, content, slack_permalink")
       .eq("direction", "inbound")
       .in("type", ["missed_call", "sona_call"])
       .gte("occurred_at", period.fromIso)
@@ -657,20 +692,51 @@ export async function loadSpeedDetail(
     inbound.push(...batch);
     if (batch.length < 1000) break;
   }
+  const stamps = new Map<string, LeadStamp>();
+  const stampsByPhone = new Map<string, LeadStamp[]>();
+  const remember = (lead: LeadStamp) => {
+    stamps.set(lead.id, lead);
+    const phone = phoneTail(lead.phone_e164);
+    if (phone.length < 10) return;
+    const list = stampsByPhone.get(phone) ?? [];
+    if (!list.some((row) => row.id === lead.id)) list.push(lead);
+    stampsByPhone.set(phone, list);
+  };
+  const inboundIds = [...new Set(inbound.map((row) => row.lead_id).filter((id): id is string => Boolean(id)))];
+  for (let index = 0; index < inboundIds.length; index += 80) {
+    const { data, error } = await supabase.from("leads").select(LEAD_STAMP).in("id", inboundIds.slice(index, index + 80));
+    if (error) throw new Error(error.message);
+    for (const lead of (data ?? []) as LeadStamp[]) remember(lead);
+  }
+  const inboundPhones = [...new Set(inbound.map((row) => row.phone_e164).filter((phone): phone is string => Boolean(phone && phoneTail(phone).length >= 10)))];
+  for (let index = 0; index < inboundPhones.length; index += 80) {
+    const { data, error } = await supabase.from("leads").select(LEAD_STAMP).in("phone_e164", inboundPhones.slice(index, index + 80));
+    if (error) throw new Error(error.message);
+    for (const lead of (data ?? []) as LeadStamp[]) remember(lead);
+  }
   for (const row of inbound) {
     if (isPracticeTestPhone(row.phone_e164)) continue;
     const at = new Date(row.occurred_at).getTime();
     if (!Number.isFinite(at)) continue;
+    if (row.lead_id) coveredCalls.add(row.lead_id);
     const phone = phoneTail(row.phone_e164);
+    const linked = row.lead_id ? stamps.get(row.lead_id) ?? null : null;
+    const phoneLead = phone.length >= 10 ? (stampsByPhone.get(phone) ?? []).find((lead) => isWorkLead(lead)) ?? stampsByPhone.get(phone)?.[0] ?? null : null;
+    const lead = linked ?? phoneLead;
+    if (lead) coveredCalls.add(lead.id);
+    if (!intakeCaller(lead, row.content)) continue;
+    const slack = (lead ? slackMessageUrl(lead) : null) || row.slack_permalink;
+    if (lead?.id && slack) slackByLead.set(lead.id, slack);
+    if (lead?.lead_name) names.set(lead.id, lead.lead_name);
     drafts.push({
-      id: `${row.type}-${row.lead_id || phone}-${row.occurred_at}`,
+      id: `${row.type}-${lead?.id || row.lead_id || phone}-${row.occurred_at}`,
       kind: row.type === "sona_call" ? "Sona call" : "Missed call",
       at,
-      leadId: row.lead_id,
-      name: "",
+      leadId: lead?.id ?? row.lead_id,
+      name: lead?.lead_name?.trim() || "",
       phone,
+      slack,
     });
-    if (row.lead_id) coveredCalls.add(row.lead_id);
   }
 
   const leadRows: {
@@ -684,11 +750,15 @@ export async function loadSpeedDetail(
     lead_source: string | null;
     summary: string | null;
     caller_class: string | null;
+    slack_permalink: string | null;
+    slack_channel_id: string | null;
+    slack_message_ts: string | null;
+    slack_thread_ts: string | null;
   }[] = [];
   for (let from = 0; from < 20000; from += 1000) {
     const { data, error: leadError } = await supabase
       .from("leads")
-      .select("id, lead_name, phone, phone_e164, created_at, lead_date, arrival, lead_source, summary, caller_class")
+      .select("id, lead_name, phone, phone_e164, created_at, lead_date, arrival, lead_source, summary, caller_class, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts")
       .or(`and(created_at.gte."${period.fromIso}",created_at.lt."${period.toIso}"),and(lead_date.gte.${period.start},lead_date.lte.${period.end})`)
       .range(from, from + 999);
     if (leadError) throw new Error(leadError.message);
@@ -698,9 +768,12 @@ export async function loadSpeedDetail(
   }
   for (const lead of leadRows) {
     if (!isWorkLead(lead) || isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
+    if (!lead.caller_class && callerIsInsurer(lead.summary || "")) continue;
     const day = arrivalDay(lead);
     if (day < period.start || day > period.end) continue;
     if (lead.lead_name) names.set(lead.id, lead.lead_name);
+    const slack = slackMessageUrl(lead);
+    if (slack) slackByLead.set(lead.id, slack);
     if (!lead.created_at) continue;
     const callArrival = lead.arrival === "missed" || lead.arrival === "sona";
     if (!isFormFill(lead) && !(callArrival && !coveredCalls.has(lead.id))) continue;
@@ -714,6 +787,7 @@ export async function loadSpeedDetail(
       leadId: lead.id,
       name: lead.lead_name?.trim() || "",
       phone: phoneTail(lead.phone_e164 || lead.phone),
+      slack: slackByLead.get(lead.id) ?? null,
     });
   }
 
@@ -730,7 +804,7 @@ export async function loadSpeedDetail(
   const later = chicagoLocalToIso(`${addDays(period.end, 1)}T00:00`);
   const logRows: LogRow[] = [];
   for (let from = 0; from < 80000; from += 1000) {
-    let query = supabase.from("intake_interactions").select("lead_id, phone_e164, type, direction, occurred_at, content");
+    let query = supabase.from("intake_interactions").select("lead_id, phone_e164, type, direction, occurred_at, content, slack_permalink");
     query = withLog
       ? query.in("type", ["call", "text", "missed_call", "sona_call"])
       : query.eq("direction", "outbound").in("type", ["call", "text"]);
@@ -803,10 +877,11 @@ export async function loadSpeedDetail(
               at: row.occurred_at || "",
               label: touchLabel(row.type || "", row.direction || ""),
               note: row.content ? row.content.replace(/\s+/g, " ").trim().slice(0, 180) : null,
+              slack: row.slack_permalink,
             }))
         : [];
       if (withLog) {
-        const opener = { at: new Date(event.at).toISOString(), label: event.kind, note: null };
+        const opener = { at: new Date(event.at).toISOString(), label: event.kind, note: null, slack: event.slack };
         const opened = log.some((item) => item.label === event.kind && Math.abs(new Date(item.at).getTime() - event.at) < 2000);
         if (!opened) log.unshift(opener);
       }
@@ -818,6 +893,7 @@ export async function loadSpeedDetail(
         leadId: event.leadId,
         name: (event.leadId && names.get(event.leadId)) || event.name || "Unknown",
         phone,
+        slack: event.slack || (event.leadId ? slackByLead.get(event.leadId) ?? null : null),
         met: seconds != null && seconds >= -120 && seconds <= 120,
         wait: waitText(seconds, contact?.kind ?? null),
         log,

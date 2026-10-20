@@ -31,7 +31,7 @@ export default async function SpeedPage({
           : "Nothing in this period."}
       </p>
       <p className="mt-1 text-sm text-slate-500">
-        The first outbound text or call counts, including the automatic text, when it is stored on the lead or the same phone number. A form text that goes out just before the lead record is saved still counts. Open a row to see the log.
+        Only intake leads are listed. Insurance companies, existing clients, and other non-leads are left out. The first outbound text or call counts, including the automatic text, when it is stored on the lead or the same phone number. Open a row for the log and the Slack post.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -68,17 +68,31 @@ function SpeedRow({ event }: { event: SpeedEvent }) {
           <p className={`text-sm font-medium ${event.met ? "text-emerald-700" : "text-red-700"}`}>{event.wait}</p>
         </div>
       </summary>
-      {event.leadId ? (
-        <Link href={`/leads/${event.leadId}`} className="mt-3 inline-block text-sm text-navy hover:underline">
-          Open {event.name}
-        </Link>
-      ) : null}
+      <div className="mt-3 flex flex-wrap gap-4">
+        {event.leadId ? (
+          <Link href={`/leads/${event.leadId}`} className="text-sm text-navy hover:underline">
+            Open {event.name}
+          </Link>
+        ) : null}
+        {event.slack ? (
+          <a href={event.slack} target="_blank" rel="noreferrer" className="text-sm text-navy hover:underline">
+            Slack post
+          </a>
+        ) : (
+          <span className="text-sm text-slate-400">No Slack post stored</span>
+        )}
+      </div>
       <ol className="mt-3 space-y-2 border-l border-slate-200 pl-3">
         {event.log.map((touch, index) => (
           <li key={`${touch.at}-${touch.label}-${index}`} className="text-sm">
             <p className="text-slate-800">
               <span className="font-medium">{touch.label}</span>
               <span className="ml-2 text-xs text-slate-500">{formatChicago(touch.at)}</span>
+              {touch.slack ? (
+                <a href={touch.slack} target="_blank" rel="noreferrer" className="ml-2 text-xs text-navy hover:underline">
+                  Slack
+                </a>
+              ) : null}
             </p>
             {touch.note ? <p className="text-slate-600">{touch.note}</p> : null}
           </li>

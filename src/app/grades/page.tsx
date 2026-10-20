@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isWorkLead } from "@/lib/caller-class";
 import { averageCallGrade, callGradeClass } from "@/lib/call-grade";
 import { requireStaff } from "@/lib/session";
 import { chicagoDay, formatChicago } from "@/lib/time";
@@ -17,6 +18,7 @@ type GradeRow = {
   direction: string | null;
   quo_link: string | null;
   occurred_at: string;
+  leads: { caller_class: string | null } | { caller_class: string | null }[] | null;
 };
 
 function shiftDay(day: string, days: number): string {
@@ -41,11 +43,14 @@ export default async function CallGradesPage({
   const since = new Date(Date.now() - 28 * 86_400_000).toISOString();
   const { data, error } = await supabase
     .from("call_grades")
-    .select("id, call_id, lead_id, handler_name, grade, score, reason, track, direction, quo_link, occurred_at")
+    .select("id, call_id, lead_id, handler_name, grade, score, reason, track, direction, quo_link, occurred_at, leads(caller_class)")
     .gte("occurred_at", since)
     .order("occurred_at", { ascending: false })
     .limit(500);
-  const rows = (data ?? []) as GradeRow[];
+  const rows = ((data ?? []) as GradeRow[]).filter((row) => {
+    const lead = Array.isArray(row.leads) ? row.leads[0] : row.leads;
+    return Boolean(row.lead_id) && isWorkLead({ caller_class: lead?.caller_class });
+  });
   const names = [...new Set(rows.map((row) => row.handler_name || "Unknown"))].sort((a, b) => a.localeCompare(b));
   const selected = params.user && names.includes(params.user) ? params.user : "";
   const shown = selected ? rows.filter((row) => (row.handler_name || "Unknown") === selected) : rows;

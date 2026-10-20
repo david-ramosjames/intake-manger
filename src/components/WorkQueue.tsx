@@ -9,8 +9,7 @@ import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, NOT_QUALIFIED_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
 import { isSourceType, LEAD_SOURCES, PI_CASE_TYPES, SOURCE_TYPES } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
-import { isPlaceholderOwner } from "@/lib/talked-with";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, setTalkedWith, startTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, startTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -130,9 +129,9 @@ type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desire
 type SortColumn = Column | "opened";
 
 const COLUMNS: { id: Column; label: string; width: string }[] = [
-  { id: "stage", label: "Stage", width: "9%" },
+  { id: "stage", label: "Stage", width: "7%" },
   { id: "priority", label: "Priority", width: "7%" },
-  { id: "grade", label: "Grade", width: "5%" },
+  { id: "grade", label: "Case grade", width: "7%" },
   { id: "consult", label: "Consult", width: "7%" },
   { id: "qualified", label: "Qualified", width: "8%" },
   { id: "desired", label: "Desired", width: "8%" },
@@ -732,12 +731,10 @@ function detailGap(input: {
 
 function LeadFacts({
   row,
-  staff,
   admin,
   canLeave,
 }: {
   row: QueueRow;
-  staff: string[];
   admin: boolean;
   canLeave: RefObject<() => boolean>;
 }) {
@@ -1048,7 +1045,6 @@ function LeadFacts({
               </button>
             ) : null}
           </PanelSection>
-          <TalkedWith row={row} staff={staff} />
         </form>
       </div>
       <div className="border-t border-slate-200 bg-white px-4 py-3">
@@ -1340,7 +1336,7 @@ export function LeadDrawer({
         </div>
       ) : null}
       <div className={tab === "details" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-        <LeadFacts row={row} staff={staff} admin={admin} canLeave={canLeave ?? { current: () => true }} />
+        <LeadFacts row={row} admin={admin} canLeave={canLeave ?? { current: () => true }} />
       </div>
       {tab === "details" ? null : (
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
@@ -1596,37 +1592,6 @@ function IdentityShelf({ row }: { row: QueueRow }) {
         </button>
       </div>
     </NotedForm>
-  );
-}
-
-function TalkedWith({ row, staff }: { row: QueueRow; staff: string[] }) {
-  const known = row.owner && !isPlaceholderOwner(row.owner) && row.owner !== "Outbound" ? row.owner : "";
-  const names = known && !staff.includes(known) ? [known, ...staff] : staff;
-  const { pending, submit } = useNotedSubmit();
-  return (
-    <PanelSection title="Slack tag">
-      <FieldLabel label="Slack tag" className="col-span-2">
-        <select
-          key={`${row.id}:${row.owner ?? ""}`}
-          defaultValue={known || "Outbound"}
-          disabled={pending}
-          onChange={(event) => {
-            const data = new FormData();
-            data.set("lead_id", row.id);
-            data.set("owner_name", event.target.value);
-            void submit(() => setTalkedWith(data));
-          }}
-          className={`${fieldClass()} cursor-pointer`}
-        >
-          <option value="Outbound">Slack Outbound</option>
-          {names.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-      </FieldLabel>
-    </PanelSection>
   );
 }
 

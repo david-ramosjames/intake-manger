@@ -88,16 +88,19 @@ async function loadTouches(
 ): Promise<HistoryTouch[]> {
   const rows: HistoryTouch[] = [];
   const page = 1000;
-  for (let from = 0; from < 20000; from += page) {
-    const { data } = await supabase
-      .from("intake_interactions")
-      .select("lead_id, phone, type, direction, occurred_at, quo_link, slack_permalink")
-      .in("lead_id", ids)
-      .order("occurred_at", { ascending: false })
-      .range(from, from + page - 1);
-    const batch = (data ?? []) as HistoryTouch[];
-    rows.push(...batch);
-    if (batch.length < page) break;
+  for (let index = 0; index < ids.length; index += 80) {
+    const slice = ids.slice(index, index + 80);
+    for (let from = 0; from < 20000; from += page) {
+      const { data } = await supabase
+        .from("intake_interactions")
+        .select("lead_id, phone, type, direction, occurred_at, quo_link, slack_permalink")
+        .in("lead_id", slice)
+        .order("occurred_at", { ascending: false })
+        .range(from, from + page - 1);
+      const batch = (data ?? []) as HistoryTouch[];
+      rows.push(...batch);
+      if (batch.length < page) break;
+    }
   }
   return rows;
 }
@@ -109,16 +112,19 @@ async function loadTouchesByPhone(
   if (!phones.length) return [];
   const rows: HistoryTouch[] = [];
   const page = 1000;
-  for (let from = 0; from < 20000; from += page) {
-    const { data } = await supabase
-      .from("intake_interactions")
-      .select("lead_id, phone, phone_e164, type, direction, occurred_at, quo_link, slack_permalink")
-      .in("phone_e164", phones.map((phone) => `+1${phone}`))
-      .order("occurred_at", { ascending: false })
-      .range(from, from + page - 1);
-    const batch = (data ?? []) as HistoryTouch[];
-    rows.push(...batch);
-    if (batch.length < page) break;
+  for (let index = 0; index < phones.length; index += 80) {
+    const slice = phones.slice(index, index + 80).map((phone) => `+1${phone}`);
+    for (let from = 0; from < 20000; from += page) {
+      const { data } = await supabase
+        .from("intake_interactions")
+        .select("lead_id, phone, phone_e164, type, direction, occurred_at, quo_link, slack_permalink")
+        .in("phone_e164", slice)
+        .order("occurred_at", { ascending: false })
+        .range(from, from + page - 1);
+      const batch = (data ?? []) as HistoryTouch[];
+      rows.push(...batch);
+      if (batch.length < page) break;
+    }
   }
   return rows;
 }
@@ -246,6 +252,28 @@ function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: 
   return query ? `/work?${query}` : "/work";
 }
 
+async function loadOpenWorkLeads(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+): Promise<{ data: ListLead[]; error: null }> {
+  const rows: ListLead[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("leads")
+      .select(LIST_COLUMNS)
+      .or("caller_class.is.null,caller_class.eq.non_pi")
+      .not("lead_status", "in", "(Signed,Promoted,Lost,Referred)")
+      .eq("signed_case", false)
+      .is("case_id", null)
+      .order("lead_date", { ascending: false, nullsFirst: false })
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    const batch = (data ?? []) as ListLead[];
+    rows.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  return { data: rows, error: null };
+}
+
 async function searchLeads(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
   q: string,
@@ -311,18 +339,16 @@ export default async function LeadListPage({
       focusedLeads.push(...((focusedRows ?? []) as ListLead[]));
     }
   }
-  let leadQuery = supabase
+  const closedQuery = supabase
     .from("leads")
     .select(LIST_COLUMNS)
     .or("caller_class.is.null,caller_class.eq.non_pi")
+    .or("lead_status.in.(Signed,Promoted,Lost,Referred),signed_case.eq.true,case_id.not.is.null")
     .order("lead_date", { ascending: false, nullsFirst: false })
     .limit(300);
-  if (!focusIds) leadQuery = funnel === "closed"
-    ? leadQuery.or("lead_status.in.(Signed,Promoted,Lost,Referred),signed_case.eq.true,case_id.not.is.null")
-    : leadQuery.not("lead_status", "in", "(Signed,Promoted,Lost,Referred)").eq("signed_case", false).is("case_id", null);
   const since = recentCutoff();
   const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, desiredCount, { data: stepRows }, destinationResult, templateResult] = await Promise.all([
-    focusIds ? Promise.resolve({ data: [] as ListLead[], error: null }) : leadQuery,
+    focusIds ? Promise.resolve({ data: [] as ListLead[], error: null }) : funnel === "closed" ? closedQuery : loadOpenWorkLeads(supabase),
     queue === "nonleads"
       ? supabase
           .from("leads")
@@ -394,13 +420,16 @@ export default async function LeadListPage({
   const firmName = new Map(destinations.map((destination) => [destination.id, destination.name]));
   const sentFirm = new Map<string, string>();
   if (leads.length) {
-    const { data: sendRows } = await supabase
-      .from("referral_sends")
-      .select("lead_id, destination_id, created_at")
-      .in("lead_id", leads.map((lead) => lead.id));
-    const sends = [...((sendRows ?? []) as { lead_id: string; destination_id: string; created_at: string }[])].sort((a, b) =>
-      a.created_at.localeCompare(b.created_at),
-    );
+    const leadIds = leads.map((lead) => lead.id);
+    const sends: { lead_id: string; destination_id: string; created_at: string }[] = [];
+    for (let index = 0; index < leadIds.length; index += 80) {
+      const { data: sendRows } = await supabase
+        .from("referral_sends")
+        .select("lead_id, destination_id, created_at")
+        .in("lead_id", leadIds.slice(index, index + 80));
+      sends.push(...((sendRows ?? []) as { lead_id: string; destination_id: string; created_at: string }[]));
+    }
+    sends.sort((a, b) => a.created_at.localeCompare(b.created_at));
     for (const send of sends) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
   }
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
@@ -441,10 +470,21 @@ export default async function LeadListPage({
     idsByPhone.set(key, list);
   }
   if (ids.length) {
-    const [{ data: calls }, touches] = await Promise.all([
-      supabase.from("lead_jobs").select("id, lead_id, due_at, queue, assigned_name, position").in("lead_id", ids).eq("status", "pending"),
-      loadTouches(supabase, ids),
-    ]);
+    const calls: { id: string | null; lead_id: string | null; due_at: string | null; queue: string | null; assigned_name: string | null; position: number | null }[] = [];
+    for (let index = 0; index < ids.length; index += 80) {
+      for (let from = 0; ; from += 1000) {
+        const { data } = await supabase
+          .from("lead_jobs")
+          .select("id, lead_id, due_at, queue, assigned_name, position")
+          .in("lead_id", ids.slice(index, index + 80))
+          .eq("status", "pending")
+          .range(from, from + 999);
+        const batch = (data ?? []) as typeof calls;
+        calls.push(...batch);
+        if (batch.length < 1000) break;
+      }
+    }
+    const touches = await loadTouches(supabase, ids);
     for (const touch of touches) {
       const type = String(touch.type || "").toLowerCase();
       const direction = String(touch.direction || "").toLowerCase();

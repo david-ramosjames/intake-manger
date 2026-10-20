@@ -1,3 +1,4 @@
+import { isWorkLead } from "@/lib/caller-class";
 import { requireStaff } from "@/lib/session";
 import { slackThreadNotes } from "@/lib/slack";
 import { loadSlackSettings } from "@/lib/slack-settings";
@@ -9,7 +10,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { supabase } = await requireStaff();
   const { data: lead, error: leadError } = await supabase
     .from("leads")
-    .select("phone_e164, summary, quo_link, created_at, arrival, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts")
+    .select("phone_e164, summary, quo_link, created_at, arrival, caller_class, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts")
     .eq("id", id)
     .maybeSingle();
   if (leadError) return Response.json({ error: leadError.message }, { status: 500 });
@@ -27,7 +28,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const rows = data ?? [];
   const callIds = [...new Set(rows.map((touch) => touch.source_id).filter((value): value is string => Boolean(value)))];
   const grades = new Map<string, { grade: string; reason: string | null; handler_name: string | null }>();
-  if (callIds.length) {
+  if (callIds.length && isWorkLead(lead ?? {})) {
     const { data: gradeRows } = await supabase
       .from("call_grades")
       .select("call_id, grade, reason, handler_name")

@@ -43,9 +43,9 @@ export function AppHeader({
   return (
     <header className="sticky top-0 z-30 bg-[linear-gradient(100deg,#0A1E41_0%,#0F316D_100%)] text-white">
       <div className={`mx-auto flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 xl:px-6 ${wide ? "" : "max-w-7xl"}`}>
-        <Link href="/" className="flex items-center gap-3">
+        <Link href="/" className="flex flex-col items-center gap-0.5">
           <img src={LOGO} alt="Ramos James Law" className="h-12 w-auto" />
-          <span className="text-sm font-semibold tracking-tight">Intake Manager</span>
+          <span className="text-[11px] font-semibold leading-none tracking-tight">Intake Manager</span>
         </Link>
         {email ? (
           <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm">

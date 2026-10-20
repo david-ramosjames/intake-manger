@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isWorkLead } from "@/lib/caller-class";
 import { milestoneDesired, milestoneQualified, milestoneSigned } from "@/lib/desired";
-import { isPiCaseType } from "@/lib/leads";
+import { averageCallGrade } from "@/lib/call-grade";
 import { priorityPlace } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { ANSWER_RATE_INBOXES, loadInboxAnswerRate } from "@/lib/inbox-calls";
@@ -220,10 +220,12 @@ type CohortLead = {
   agreement_status: string | null;
   agreement_sent_at: string | null;
   arrival: string | null;
+  lead_source: string | null;
+  summary: string | null;
 };
 
 const COHORT_COLUMNS =
-  "id, lead_date, created_at, phone, phone_e164, case_type, grade, qualified, desired_case, desired_source, signed_case, date_signed, signed_at, lead_status, close_reason, caller_class, consultation_date, callrail_tags, agreement_status, agreement_sent_at, arrival";
+  "id, lead_date, created_at, phone, phone_e164, case_type, grade, qualified, desired_case, desired_source, signed_case, date_signed, signed_at, lead_status, close_reason, caller_class, consultation_date, callrail_tags, agreement_status, agreement_sent_at, arrival, lead_source, summary";
 
 export type RateMetric = {
   label: string;
@@ -314,9 +316,6 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
   const qualified = cohort.filter((lead) => milestoneQualified(lead) === true).length;
   const signedCohort = cohort.filter((lead) => milestoneSigned(lead)).length;
   const signedDesired = desiredLeads.filter((lead) => milestoneSigned(lead)).length;
-  const injury = cohort.filter((lead) => isPiCaseType(lead.case_type));
-  const gradeA = injury.filter((lead) => lead.grade === "A").length;
-
   const referred = new Set<string>();
   for (const lead of cohort) {
     if (!desiredIds.has(lead.id) && (lead.lead_status === "Referred" || lead.close_reason === "referred")) referred.add(lead.id);
@@ -359,9 +358,12 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
     loadInboxAnswerRate(supabase, period.fromIso, period.toIso),
   ]);
 
-  const speed = await speedToLead(supabase, period, cohort);
-  const consults = await countConsults(supabase, period);
-  const signedInPeriod = await countSigned(supabase, period);
+  const [speed, consults, signedInPeriod, callQuality] = await Promise.all([
+    speedToLead(supabase, period, cohort),
+    countConsults(supabase, period),
+    countSigned(supabase, period),
+    loadCallQuality(supabase, period),
+  ]);
 
   const answer = percent(inbox.answered, inbox.incoming);
   const inboxPartial = Boolean(inbox.earliest && Date.parse(inbox.earliest) > Date.parse(period.fromIso) + 60 * 60 * 1000);
@@ -371,7 +373,6 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
   const neverRate = percent(never, oldIds.length);
   const qualification = percent(qualified, cohort.length);
   const conversion = percent(signedCohort, cohort.length);
-  const quality = percent(gradeA, injury.length);
   const speedRate = percent(speed.met, speed.total);
 
   const answerTone = higher(answer, 90);
@@ -403,7 +404,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         goal: "Goal: contacted within 2 minutes",
         detail: speed.total ? `${statusWord(speedTone)} · ${speed.met} of ${speed.total} contacted in time` : statusWord(speedTone),
         definition:
-          "Share of missed calls and web form fills in this period that have an outbound call or text within 2 minutes. The clock starts at the missed call or the form arrival. A lead with no outbound call or text stored counts as not contacted in time.",
+          "Share of missed calls, Sona calls, and form fills contacted with an outbound call or text within 2 minutes. Form fills are Meta form, site form, web chat, and website leads. The clock starts when the call or form comes in. One with no outbound call or text stored counts as not contacted in time.",
         tone: speedTone,
       },
       {
@@ -452,12 +453,14 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
       },
       {
         label: "Call quality",
-        display: showPercent(quality),
-        goal: "Goal > X%",
-        detail: injury.length ? `${gradeA} of ${injury.length} injury leads graded A` : "No injury leads in this period",
+        display: callQuality?.letter ?? "—",
+        goal: "Intake call average",
+        detail: callQuality
+          ? `${callQuality.score} average · ${callQuality.count} intake ${callQuality.count === 1 ? "call" : "calls"}`
+          : "No graded intake calls in this period",
         definition:
-          "Injury leads with an A grade, divided by injury leads that arrived in this period. Non-PI and Unknown stay out. The numeric target is not set yet.",
-        tone: injury.length ? "open" : "empty",
+          "Average grade of intake calls in this period, the same average as the Call grades page. This is how the intake was handled. The case grade on the work queue is separate.",
+        tone: callQuality ? "open" : "empty",
       },
     ],
     counts: [
@@ -522,32 +525,74 @@ async function countSigned(supabase: SupabaseClient, period: ResolvedPeriod): Pr
   return ids.size;
 }
 
+async function loadCallQuality(
+  supabase: SupabaseClient,
+  period: ResolvedPeriod,
+): Promise<{ letter: "A" | "B" | "C" | "D" | "F"; score: number; count: number } | null> {
+  const rows: { score: number | null; lead_id: string | null; leads: { caller_class: string | null } | { caller_class: string | null }[] | null }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("call_grades")
+      .select("score, lead_id, leads(caller_class)")
+      .gte("occurred_at", period.fromIso)
+      .lt("occurred_at", period.toIso)
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    const batch = (data ?? []) as typeof rows;
+    rows.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  const scores = rows
+    .filter((row) => {
+      const lead = Array.isArray(row.leads) ? row.leads[0] : row.leads;
+      return Boolean(row.lead_id) && isWorkLead({ caller_class: lead?.caller_class });
+    })
+    .map((row) => row.score ?? Number.NaN);
+  const average = averageCallGrade(scores);
+  if (!average) return null;
+  return { ...average, count: scores.filter((score) => Number.isFinite(score)).length };
+}
+
+function isFormFill(lead: { arrival: string | null; lead_source: string | null; summary: string | null }): boolean {
+  if (lead.arrival === "form") return true;
+  const text = `${lead.lead_source || ""} ${lead.summary || ""}`.toLowerCase();
+  return /meta form|website lead|site form|web chat|webchat|chat inquiry/.test(text);
+}
+
 async function speedToLead(
   supabase: SupabaseClient,
   period: ResolvedPeriod,
   cohort: CohortLead[],
 ): Promise<{ met: number; total: number }> {
   const events: { at: number; leadId: string | null; phone: string }[] = [];
-  const missed: { lead_id: string | null; phone_e164: string | null; occurred_at: string }[] = [];
+  const coveredCalls = new Set<string>();
+  const calls: { lead_id: string | null; phone_e164: string | null; occurred_at: string }[] = [];
   for (let from = 0; from < 5000; from += 1000) {
     const { data, error } = await supabase
       .from("intake_interactions")
       .select("lead_id, phone_e164, occurred_at")
-      .eq("type", "missed_call")
+      .eq("direction", "inbound")
+      .in("type", ["missed_call", "sona_call"])
       .gte("occurred_at", period.fromIso)
       .lt("occurred_at", period.toIso)
       .range(from, from + 999);
     if (error) throw new Error(error.message);
     const batch = (data ?? []) as { lead_id: string | null; phone_e164: string | null; occurred_at: string }[];
-    missed.push(...batch);
+    calls.push(...batch);
     if (batch.length < 1000) break;
   }
-  for (const row of missed) {
+  for (const row of calls) {
+    if (isPracticeTestPhone(row.phone_e164)) continue;
     const at = new Date(row.occurred_at).getTime();
-    if (Number.isFinite(at)) events.push({ at, leadId: row.lead_id, phone: phoneTail(row.phone_e164) });
+    if (!Number.isFinite(at)) continue;
+    events.push({ at, leadId: row.lead_id, phone: phoneTail(row.phone_e164) });
+    if (row.lead_id) coveredCalls.add(row.lead_id);
   }
   for (const lead of cohort) {
-    if (lead.arrival !== "form" || !lead.created_at) continue;
+    if (!lead.created_at || isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
+    const callArrival = lead.arrival === "missed" || lead.arrival === "sona";
+    if (!isFormFill(lead) && !(callArrival && !coveredCalls.has(lead.id))) continue;
+    if (callArrival && coveredCalls.has(lead.id)) continue;
     const at = new Date(lead.created_at).getTime();
     if (Number.isFinite(at)) events.push({ at, leadId: lead.id, phone: phoneTail(lead.phone_e164 || lead.phone) });
   }

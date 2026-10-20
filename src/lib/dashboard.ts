@@ -359,7 +359,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
   ]);
 
   const [speed, consults, signedInPeriod, callQuality] = await Promise.all([
-    speedToLead(supabase, period, cohort),
+    loadSpeedDetail(supabase, period),
     countConsults(supabase, period),
     countSigned(supabase, period),
     loadCallQuality(supabase, period),
@@ -404,7 +404,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         goal: "Goal: contacted within 2 minutes",
         detail: speed.total ? `${statusWord(speedTone)} · ${speed.met} of ${speed.total} contacted in time` : statusWord(speedTone),
         definition:
-          "Share of missed calls, Sona calls, and form fills contacted with an outbound call or text within 2 minutes. Form fills are Meta form, site form, web chat, and website leads. The clock starts when the call or form comes in. One with no outbound call or text stored counts as not contacted in time.",
+          "Share of missed calls, Sona calls, and form fills contacted with an outbound call or text within 2 minutes. The automatic first text counts when it is stored on that lead or that phone number. A form text that lands up to 2 minutes before the lead record is saved still counts, because that text often goes out first. Form fills are Meta form, site form, web chat, and website leads. One with no outbound call or text stored counts as not contacted in time. Open the card to see each one and its call and text log.",
         tone: speedTone,
       },
       {
@@ -559,87 +559,271 @@ function isFormFill(lead: { arrival: string | null; lead_source: string | null; 
   return /meta form|website lead|site form|web chat|webchat|chat inquiry/.test(text);
 }
 
-async function speedToLead(
+function formKind(lead: { lead_source: string | null; summary: string | null }): string {
+  const text = `${lead.lead_source || ""} ${lead.summary || ""}`.toLowerCase();
+  if (text.includes("meta form")) return "Meta form";
+  if (text.includes("site form")) return "Site form";
+  if (/web chat|webchat|chat inquiry/.test(text)) return "Web chat";
+  if (text.includes("website")) return "Website form";
+  return "Form";
+}
+
+export type SpeedTouch = {
+  at: string;
+  label: string;
+  note: string | null;
+};
+
+export type SpeedEvent = {
+  id: string;
+  kind: string;
+  at: string;
+  leadId: string | null;
+  name: string;
+  phone: string;
+  met: boolean;
+  wait: string;
+  log: SpeedTouch[];
+};
+
+function waitText(seconds: number | null, kind: "text" | "call" | null): string {
+  if (seconds == null || !kind) return "No contact stored";
+  const word = kind === "text" ? "Text" : "Call";
+  const span = Math.abs(seconds);
+  const clock = span < 60 ? `${span}s` : span < 90 * 60 ? `${Math.round(span / 60)}m` : `${Math.round(span / 3600)}h`;
+  if (seconds < 0) return `${word} ${clock} before the record`;
+  return `${word} in ${clock}`;
+}
+
+function touchLabel(type: string, direction: string): string {
+  if (type === "missed_call") return "Missed call";
+  if (type === "sona_call") return "Sona call";
+  if (type === "text") return direction === "outbound" ? "Text out" : "Text in";
+  if (type === "call") return direction === "outbound" ? "Call out" : "Call in";
+  return type;
+}
+
+type SpeedDraft = {
+  id: string;
+  kind: string;
+  at: number;
+  leadId: string | null;
+  name: string;
+  phone: string;
+};
+
+type SpeedHit = { at: number; kind: "text" | "call" };
+
+type LogRow = {
+  lead_id: string | null;
+  phone_e164: string | null;
+  type: string | null;
+  direction: string | null;
+  occurred_at: string | null;
+  content: string | null;
+};
+
+function firstHit(list: SpeedHit[] | undefined, at: number, lookbackMs: number): SpeedHit | null {
+  return list?.find((hit) => hit.at >= at - lookbackMs) ?? null;
+}
+
+function earlier(left: SpeedHit | null, right: SpeedHit | null): SpeedHit | null {
+  if (!left) return right;
+  if (!right) return left;
+  return left.at <= right.at ? left : right;
+}
+
+export async function loadSpeedDetail(
   supabase: SupabaseClient,
   period: ResolvedPeriod,
-  cohort: CohortLead[],
-): Promise<{ met: number; total: number }> {
-  const events: { at: number; leadId: string | null; phone: string }[] = [];
+  options?: { log?: boolean },
+): Promise<{ met: number; total: number; events: SpeedEvent[] }> {
+  const withLog = options?.log === true;
+  const drafts: SpeedDraft[] = [];
   const coveredCalls = new Set<string>();
-  const calls: { lead_id: string | null; phone_e164: string | null; occurred_at: string }[] = [];
+  const names = new Map<string, string>();
+  const inbound: { lead_id: string | null; phone_e164: string | null; occurred_at: string; type: string }[] = [];
   for (let from = 0; from < 5000; from += 1000) {
     const { data, error } = await supabase
       .from("intake_interactions")
-      .select("lead_id, phone_e164, occurred_at")
+      .select("lead_id, phone_e164, occurred_at, type")
       .eq("direction", "inbound")
       .in("type", ["missed_call", "sona_call"])
       .gte("occurred_at", period.fromIso)
       .lt("occurred_at", period.toIso)
       .range(from, from + 999);
     if (error) throw new Error(error.message);
-    const batch = (data ?? []) as { lead_id: string | null; phone_e164: string | null; occurred_at: string }[];
-    calls.push(...batch);
+    const batch = (data ?? []) as typeof inbound;
+    inbound.push(...batch);
     if (batch.length < 1000) break;
   }
-  for (const row of calls) {
+  for (const row of inbound) {
     if (isPracticeTestPhone(row.phone_e164)) continue;
     const at = new Date(row.occurred_at).getTime();
     if (!Number.isFinite(at)) continue;
-    events.push({ at, leadId: row.lead_id, phone: phoneTail(row.phone_e164) });
+    const phone = phoneTail(row.phone_e164);
+    drafts.push({
+      id: `${row.type}-${row.lead_id || phone}-${row.occurred_at}`,
+      kind: row.type === "sona_call" ? "Sona call" : "Missed call",
+      at,
+      leadId: row.lead_id,
+      name: "",
+      phone,
+    });
     if (row.lead_id) coveredCalls.add(row.lead_id);
   }
-  for (const lead of cohort) {
-    if (!lead.created_at || isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
+
+  const leadRows: {
+    id: string;
+    lead_name: string | null;
+    phone: string | null;
+    phone_e164: string | null;
+    created_at: string | null;
+    lead_date: string | null;
+    arrival: string | null;
+    lead_source: string | null;
+    summary: string | null;
+    caller_class: string | null;
+  }[] = [];
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data, error: leadError } = await supabase
+      .from("leads")
+      .select("id, lead_name, phone, phone_e164, created_at, lead_date, arrival, lead_source, summary, caller_class")
+      .or(`and(created_at.gte."${period.fromIso}",created_at.lt."${period.toIso}"),and(lead_date.gte.${period.start},lead_date.lte.${period.end})`)
+      .range(from, from + 999);
+    if (leadError) throw new Error(leadError.message);
+    const batch = data ?? [];
+    leadRows.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  for (const lead of leadRows) {
+    if (!isWorkLead(lead) || isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
+    const day = arrivalDay(lead);
+    if (day < period.start || day > period.end) continue;
+    if (lead.lead_name) names.set(lead.id, lead.lead_name);
+    if (!lead.created_at) continue;
     const callArrival = lead.arrival === "missed" || lead.arrival === "sona";
     if (!isFormFill(lead) && !(callArrival && !coveredCalls.has(lead.id))) continue;
     if (callArrival && coveredCalls.has(lead.id)) continue;
     const at = new Date(lead.created_at).getTime();
-    if (Number.isFinite(at)) events.push({ at, leadId: lead.id, phone: phoneTail(lead.phone_e164 || lead.phone) });
+    if (!Number.isFinite(at)) continue;
+    drafts.push({
+      id: `lead-${lead.id}`,
+      kind: callArrival ? (lead.arrival === "sona" ? "Sona call" : "Missed call") : formKind(lead),
+      at,
+      leadId: lead.id,
+      name: lead.lead_name?.trim() || "",
+      phone: phoneTail(lead.phone_e164 || lead.phone),
+    });
   }
-  if (!events.length) return { met: 0, total: 0 };
+
+  const missingNames = withLog
+    ? [...new Set(drafts.map((event) => event.leadId).filter((id): id is string => Boolean(id && !names.has(id))))]
+    : [];
+  for (let index = 0; index < missingNames.length; index += 80) {
+    const { data } = await supabase.from("leads").select("id, lead_name").in("id", missingNames.slice(index, index + 80));
+    for (const lead of data ?? []) {
+      if (lead.lead_name) names.set(lead.id, lead.lead_name);
+    }
+  }
 
   const later = chicagoLocalToIso(`${addDays(period.end, 1)}T00:00`);
-  const outbound: { lead_id: string | null; phone_e164: string | null; occurred_at: string }[] = [];
-  for (let from = 0; from < 20000; from += 1000) {
-    const { data, error: outboundError } = await supabase
-      .from("intake_interactions")
-      .select("lead_id, phone_e164, occurred_at")
-      .eq("direction", "outbound")
-      .in("type", ["call", "text"])
+  const logRows: LogRow[] = [];
+  for (let from = 0; from < 80000; from += 1000) {
+    let query = supabase.from("intake_interactions").select("lead_id, phone_e164, type, direction, occurred_at, content");
+    query = withLog
+      ? query.in("type", ["call", "text", "missed_call", "sona_call"])
+      : query.eq("direction", "outbound").in("type", ["call", "text"]);
+    const { data, error } = await query
       .gte("occurred_at", period.fromIso)
       .lt("occurred_at", later)
       .order("occurred_at", { ascending: true })
       .range(from, from + 999);
-    if (outboundError) throw new Error(outboundError.message);
-    const batch = (data ?? []) as { lead_id: string | null; phone_e164: string | null; occurred_at: string }[];
-    outbound.push(...batch);
+    if (error) throw new Error(error.message);
+    const batch = (data ?? []) as LogRow[];
+    logRows.push(...batch);
     if (batch.length < 1000) break;
   }
-  const byLead = new Map<string, number[]>();
-  const byPhone = new Map<string, number[]>();
-  for (const row of outbound) {
-    const at = new Date(row.occurred_at).getTime();
-    if (!Number.isFinite(at)) continue;
-    if (row.lead_id) {
-      const list = byLead.get(row.lead_id) ?? [];
-      list.push(at);
-      byLead.set(row.lead_id, list);
-    }
-    const phone = phoneTail(row.phone_e164);
-    if (phone.length >= 10) {
-      const list = byPhone.get(phone) ?? [];
-      list.push(at);
-      byPhone.set(phone, list);
-    }
-  }
-  for (const list of byLead.values()) list.sort((left, right) => left - right);
-  for (const list of byPhone.values()) list.sort((left, right) => left - right);
 
-  let met = 0;
-  for (const event of events) {
-    const times = (event.leadId ? byLead.get(event.leadId) : undefined) ?? (event.phone.length >= 10 ? byPhone.get(event.phone) : undefined);
-    const contact = times?.find((time) => time >= event.at);
-    if (contact != null && contact - event.at <= 2 * 60 * 1000) met += 1;
+  const hitsByLead = new Map<string, SpeedHit[]>();
+  const hitsByPhone = new Map<string, SpeedHit[]>();
+  const logByLead = new Map<string, LogRow[]>();
+  const logByPhone = new Map<string, LogRow[]>();
+  for (const row of logRows) {
+    const at = row.occurred_at ? new Date(row.occurred_at).getTime() : Number.NaN;
+    const phone = phoneTail(row.phone_e164);
+    if (withLog) {
+      if (row.lead_id) {
+        const list = logByLead.get(row.lead_id) ?? [];
+        list.push(row);
+        logByLead.set(row.lead_id, list);
+      }
+      if (phone.length >= 10) {
+        const list = logByPhone.get(phone) ?? [];
+        list.push(row);
+        logByPhone.set(phone, list);
+      }
+    }
+    if (!Number.isFinite(at) || row.direction !== "outbound" || (row.type !== "call" && row.type !== "text")) continue;
+    const hit = { at, kind: row.type as "text" | "call" };
+    if (row.lead_id) {
+      const list = hitsByLead.get(row.lead_id) ?? [];
+      list.push(hit);
+      hitsByLead.set(row.lead_id, list);
+    }
+    if (phone.length >= 10) {
+      const list = hitsByPhone.get(phone) ?? [];
+      list.push(hit);
+      hitsByPhone.set(phone, list);
+    }
   }
-  return { met, total: events.length };
+
+  const events = drafts
+    .map((event) => {
+      const lookback = event.kind === "Missed call" || event.kind === "Sona call" ? 0 : 2 * 60 * 1000;
+      const contact = earlier(
+        event.leadId ? firstHit(hitsByLead.get(event.leadId), event.at, lookback) : null,
+        event.phone.length >= 10 ? firstHit(hitsByPhone.get(event.phone), event.at, lookback) : null,
+      );
+      const seconds = contact ? Math.round((contact.at - event.at) / 1000) : null;
+      const seen = new Set<string>();
+      const log: SpeedTouch[] = withLog
+        ? [...(event.leadId ? logByLead.get(event.leadId) ?? [] : []), ...(event.phone.length >= 10 ? logByPhone.get(event.phone) ?? [] : [])]
+            .filter((row) => {
+              const at = row.occurred_at ? new Date(row.occurred_at).getTime() : Number.NaN;
+              if (!Number.isFinite(at) || at < event.at - 2 * 60 * 1000 || at > event.at + 36 * 60 * 60 * 1000) return false;
+              const key = `${row.occurred_at}|${row.type}|${row.direction}|${phoneTail(row.phone_e164)}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .sort((left, right) => (left.occurred_at || "").localeCompare(right.occurred_at || ""))
+            .slice(0, 12)
+            .map((row) => ({
+              at: row.occurred_at || "",
+              label: touchLabel(row.type || "", row.direction || ""),
+              note: row.content ? row.content.replace(/\s+/g, " ").trim().slice(0, 180) : null,
+            }))
+        : [];
+      if (withLog) {
+        const opener = { at: new Date(event.at).toISOString(), label: event.kind, note: null };
+        const opened = log.some((item) => item.label === event.kind && Math.abs(new Date(item.at).getTime() - event.at) < 2000);
+        if (!opened) log.unshift(opener);
+      }
+      const phone = event.phone.length === 10 ? `(${event.phone.slice(0, 3)}) ${event.phone.slice(3, 6)}-${event.phone.slice(6)}` : event.phone || "No number";
+      return {
+        id: event.id,
+        kind: event.kind,
+        at: new Date(event.at).toISOString(),
+        leadId: event.leadId,
+        name: (event.leadId && names.get(event.leadId)) || event.name || "Unknown",
+        phone,
+        met: seconds != null && seconds >= -120 && seconds <= 120,
+        wait: waitText(seconds, contact?.kind ?? null),
+        log,
+      };
+    })
+    .sort((left, right) => right.at.localeCompare(left.at));
+
+  return { met: events.filter((event) => event.met).length, total: events.length, events };
 }

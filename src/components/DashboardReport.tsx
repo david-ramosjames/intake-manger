@@ -103,17 +103,25 @@ export function DashboardReport({
           <p className="text-sm text-slate-500">Rates follow leads that arrived in this period, except calls and speed to lead.</p>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {rates.map((rate) => (
-            <article key={rate.label} className={`rounded-xl border border-slate-200 border-l-4 bg-white px-4 py-3 ${TONE[rate.tone]}`}>
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="text-sm font-medium text-slate-800">{rate.label}</h3>
-                <Tip text={rate.definition} />
-              </div>
-              <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-navy">{rate.display}</p>
-              <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{rate.goal}</p>
-              <p className={`mt-2 text-xs ${TONE_TEXT[rate.tone]}`}>{rate.detail}</p>
-            </article>
-          ))}
+          {rates.map((rate) => {
+            const href = rate.label === "Missed calls and form fills" ? speedHref(period) : null;
+            return (
+              <article key={rate.label} className={`rounded-xl border border-slate-200 border-l-4 bg-white px-4 py-3 ${TONE[rate.tone]}`}>
+                <div className="flex items-start gap-2">
+                  {href ? (
+                    <Link href={href} className="min-w-0 flex-1 rounded-md hover:text-navy">
+                      <RateBody rate={rate} linked />
+                    </Link>
+                  ) : (
+                    <div className="min-w-0 flex-1">
+                      <RateBody rate={rate} />
+                    </div>
+                  )}
+                  <Tip text={rate.definition} />
+                </div>
+              </article>
+            );
+          })}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 sm:grid-cols-3 lg:grid-cols-6">
@@ -130,6 +138,29 @@ export function DashboardReport({
       </section>
     </main>
   );
+}
+
+function RateBody({ rate, linked }: { rate: RateMetric; linked?: boolean }) {
+  return (
+    <>
+      <h3 className="text-sm font-medium text-slate-800">{rate.label}</h3>
+      <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-navy">{rate.display}</p>
+      <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{rate.goal}</p>
+      <p className={`mt-2 text-xs ${TONE_TEXT[rate.tone]}`}>
+        {rate.detail}
+        {linked ? " · Open the log" : ""}
+      </p>
+    </>
+  );
+}
+
+function speedHref(period: ResolvedPeriod): string {
+  const params = new URLSearchParams({ period: period.id });
+  if (period.id === "custom") {
+    params.set("from", period.start);
+    params.set("to", period.end);
+  }
+  return `/speed?${params}`;
 }
 
 function periodHref(id: PeriodId): string {

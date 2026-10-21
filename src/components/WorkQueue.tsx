@@ -260,28 +260,6 @@ function sortValue(row: QueueRow, column: SortColumn): string | number {
   return columnValue(row, column).toLowerCase();
 }
 
-export function workGradeOptions(rows: QueueRow[]): string[] {
-  return [...new Set(rows.map(gradeLabel))].sort((left, right) =>
-    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
-  );
-}
-
-export function workPriorityOptions(rows: QueueRow[]): string[] {
-  const priorityOrder = ["Flagged", "Suggested", "Contract out", "None"];
-  return [...new Set(rows.map(priorityLabel))].sort((left, right) => {
-    const leftPlace = priorityOrder.indexOf(left);
-    const rightPlace = priorityOrder.indexOf(right);
-    return (leftPlace === -1 ? 99 : leftPlace) - (rightPlace === -1 ? 99 : rightPlace) || left.localeCompare(right);
-  });
-}
-
-export function workHandlerOptions(rows: QueueRow[], kind: "screen" | "intake"): string[] {
-  const labels = rows.map((row) => (kind === "screen" ? screenByLabel(row) : intakeByLabel(row)));
-  return [...new Set(labels)].sort((left, right) =>
-    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
-  );
-}
-
 export function WorkQueue({
   rows,
   initialId,

@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
 import { signOut } from "@/lib/auth-actions";
 import { navLink } from "@/lib/ui";
 
@@ -28,14 +29,67 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function HeaderLinkFace({
+  label,
+  active,
+  badge,
+}: {
+  label: string;
+  active: boolean;
+  badge?: ReactNode;
+}) {
+  const { pending } = useLinkStatus();
+  return (
+    <>
+      <span
+        className={
+          pending && !active ? "text-white underline decoration-accent decoration-2 underline-offset-4" : undefined
+        }
+      >
+        {label}
+      </span>
+      {badge}
+      <span
+        aria-hidden
+        className={`ml-0.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent transition-opacity duration-150 ${
+          pending ? "animate-pulse opacity-100" : "opacity-0"
+        }`}
+      />
+    </>
+  );
+}
+
+function HeaderLink({
+  href,
+  label,
+  active,
+  badge,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+  badge?: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`${navLink} group inline-flex items-center gap-1.5 ${
+        active ? "border-accent text-white" : "border-transparent text-white/75 hover:text-white"
+      }`}
+    >
+      <HeaderLinkFace label={label} active={active} badge={badge} />
+    </Link>
+  );
+}
+
 export function AppHeader({
   email,
   admin = false,
-  priorityCount = 0,
+  priorityBadge,
 }: {
   email: string | null;
   admin?: boolean;
-  priorityCount?: number;
+  priorityBadge?: ReactNode;
 }) {
   const pathname = usePathname();
   const wide = pathname === "/" || pathname === "/work" || pathname === "/review" || pathname === "/open-calls";
@@ -49,25 +103,15 @@ export function AppHeader({
         </Link>
         {email ? (
           <nav className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-            {LINKS.map((link) => {
-              const active = isActive(pathname, link.href);
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={`${navLink} inline-flex items-center gap-1.5 ${
-                    active ? "border-accent text-white" : "border-transparent text-white/75 hover:text-white"
-                  }`}
-                >
-                  {link.label}
-                  {link.href === "/priority" ? (
-                    <span className="min-w-[1.25rem] rounded-full bg-accent px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-white">
-                      {priorityCount}
-                    </span>
-                  ) : null}
-                </Link>
-              );
-            })}
+            {LINKS.map((link) => (
+              <HeaderLink
+                key={link.href}
+                href={link.href}
+                label={link.label}
+                active={isActive(pathname, link.href)}
+                badge={link.href === "/priority" ? priorityBadge : undefined}
+              />
+            ))}
             <span className="hidden text-white/60 sm:inline">{email}</span>
             <form action={signOut}>
               <button type="submit" className="text-white/75 hover:text-white">
@@ -77,17 +121,7 @@ export function AppHeader({
             {admin ? (
               <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
                 {ADMIN_LINKS.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={`${navLink} ${
-                      isActive(pathname, link.href)
-                        ? "border-accent text-white"
-                        : "border-transparent text-white/75 hover:text-white"
-                    }`}
-                  >
-                    {link.label}
-                  </Link>
+                  <HeaderLink key={link.href} href={link.href} label={link.label} active={isActive(pathname, link.href)} />
                 ))}
               </span>
             ) : null}

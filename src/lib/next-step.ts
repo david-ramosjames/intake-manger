@@ -87,22 +87,29 @@ export const PRIORITY_PLACE_LABEL: Record<PriorityPlace, string> = {
   suggested: "Suggested",
 };
 
+/** Badge count for the header — keep the select lean; signed-sibling filter still applies. */
 export async function countCurrentPriority(
   supabase: import("@supabase/supabase-js").SupabaseClient,
 ): Promise<number> {
   const { data, error } = await supabase
     .from("leads")
-    .select("id, phone, signed_case, lead_status, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, case_id, priority, priority_suggestion")
+    .select(
+      "id, phone, signed_case, lead_status, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, case_id, priority, priority_suggestion",
+    )
     .eq("signed_case", false)
     .not("lead_status", "in", "(Lost,Referred)")
     .or("and(case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed,signed,completed)")
     .order("lead_date", { ascending: false, nullsFirst: false })
-    .limit(300);
+    .limit(200);
   if (error) return 0;
   const placed = (data ?? []).filter((lead) => priorityPlace(lead));
   const phones = [...new Set(placed.map((lead) => lead.phone).filter((phone): phone is string => Boolean(phone)))];
   if (phones.length === 0) return placed.length;
-  const { data: signedSiblings } = await supabase.from("leads").select("phone, phone_e164").eq("signed_case", true).in("phone", phones);
+  const { data: signedSiblings } = await supabase
+    .from("leads")
+    .select("phone, phone_e164")
+    .eq("signed_case", true)
+    .in("phone", phones.slice(0, 100));
   const signedPhones = new Set<string>();
   for (const row of signedSiblings ?? []) {
     const key = phoneTail(row.phone) || phoneTail(row.phone_e164);

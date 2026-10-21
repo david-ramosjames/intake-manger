@@ -24,7 +24,7 @@ const COLUMNS = [
   "Decline",
   "Injury",
   "Size",
-  "Not qualified",
+  "Unresponsive",
   "Handled by",
   "Still blank",
 ] as const;

@@ -78,12 +78,6 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     .update({ status: "skipped", detail: "Sign Flow reminder series finished with no signature." })
     .in("lead_id", ids)
     .eq("status", "pending");
-  for (const row of rows) {
-    const tags = ((row.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES" && tag !== "CVR DESIRED");
-    if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
-    if (!tags.includes("NQ: Unresponsive")) tags.push("NQ: Unresponsive");
-    await supabase.from("leads").update({ callrail_tags: tags, qualified: false, desired_case: false, desired_source: "staff" }).eq("id", row.id);
-  }
   return ids.length;
 }
 
@@ -335,8 +329,7 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
     if (type === "call" || type === "sona_call" || type === "text" || type === "email") replied.add(leadId);
   }
 
-  const ready = new Set((leads ?? []).filter((row) => closeGaps(row).length === 0).map((row) => String(row.id)));
-  const closing = finished.filter((row) => !replied.has(row.id) && ready.has(row.id)).map((row) => row.id);
+  const closing = finished.filter((row) => !replied.has(row.id)).map((row) => row.id);
   if (!closing.length) return 0;
   const { error: closeError } = await supabase
     .from("leads")

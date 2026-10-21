@@ -1,13 +1,13 @@
 "use client";
 
-import { createContext, useActionState, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useActionState, useContext, useEffect, useLayoutEffect, useRef, useState, useTransition, type MouseEvent, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { IdentityMark } from "@/components/IdentityMark";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
-import { DECLINE_TAGS, NOT_QUALIFIED_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
-import { caseTypeChoices, isSourceType, LEAD_SOURCES, SOURCE_TYPE_OPTIONS } from "@/lib/leads";
+import { DECLINE_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
+import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, startTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
@@ -125,19 +125,26 @@ type Touch = {
   gradeHandler?: string | null;
 };
 
-type Column = "stage" | "priority" | "grade" | "consult" | "qualified" | "desired" | "last" | "automation";
+type Column = "type" | "stage" | "consult" | "qualified" | "desired" | "last" | "automation";
 type SortColumn = Column | "opened";
 
-const COLUMNS: { id: Column; label: string; width: string }[] = [
-  { id: "stage", label: "Stage", width: "7%" },
-  { id: "priority", label: "Priority", width: "7%" },
-  { id: "grade", label: "Case grade", width: "7%" },
-  { id: "consult", label: "Consult", width: "7%" },
+const COLUMNS: { id: Exclude<Column, "type">; label: string; width: string }[] = [
+  { id: "stage", label: "Stage", width: "8%" },
+  { id: "consult", label: "Consult", width: "8%" },
   { id: "qualified", label: "Qualified", width: "8%" },
   { id: "desired", label: "Desired", width: "8%" },
-  { id: "last", label: "Last contacted", width: "8%" },
+  { id: "last", label: "Last contacted", width: "9%" },
   { id: "automation", label: "Automation", width: "8%" },
 ];
+
+const TYPE_SHORT: Record<string, string> = {
+  "Non-PI Legal Matter": "Non-PI",
+  "Commercial / 18 Wheeler": "18 Wheeler",
+  "No Injuries / Property Damage": "Property damage",
+  "Pedestrian / Bicycle / Scooter": "Ped / bike",
+  "Premises Liability": "Premises",
+  "Sexual Assault / Child Abuse": "Assault",
+};
 
 function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; layout?: "stack" | "row" }) {
   const shown = lines.filter((line) => line.when !== "None");
@@ -162,20 +169,74 @@ function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; lay
   );
 }
 
+function shortType(text: string): string | null {
+  const official = officialCaseType(text);
+  if (official === "Unknown / No Response") return null;
+  if (official) return TYPE_SHORT[official] ?? official;
+  if (/resbal|slip|ca[ií]da|premises/i.test(text)) return "Premises";
+  if (/18-?\s*wheeler|tractor-?trailer/i.test(text)) return "18 Wheeler";
+  if (/unknown|no response|not captured|unclassified|personal injury claim|^n\/?a$/i.test(text)) return null;
+  const head = text.split(/\s*[\/|]\s*/)[0].replace(/\s+/g, " ").trim();
+  if (!head) return null;
+  if (head.length <= 22) return head;
+  const words = head.split(/\s+/);
+  let built = "";
+  for (const word of words) {
+    const next = built ? `${built} ${word}` : word;
+    if (next.length > 18) break;
+    built = next;
+  }
+  return built || null;
+}
+
+function typeLabel(row: Pick<QueueRow, "accident" | "caseType">): string {
+  const candidates = [row.caseType, row.accident].map((value) => (value || "").trim()).filter((value) => value && value !== "—");
+  for (const text of candidates) {
+    const label = shortType(text);
+    if (label) return label;
+  }
+  return "TBD";
+}
+
+function gradeLabel(row: QueueRow): string {
+  return row.grade?.trim() || "Not set";
+}
+
+function priorityLabel(row: QueueRow): string {
+  return row.priority ?? "None";
+}
+
 function columnValue(row: QueueRow, column: Column): string {
+  if (column === "type") return typeLabel(row);
   if (column === "stage") return row.label;
-  if (column === "priority") return row.priority ?? "—";
-  if (column === "grade") return row.grade ?? "—";
   if (column === "consult") return row.consultWhen;
-  if (column === "qualified") return row.qualifiedLabel;
-  if (column === "desired") return row.desired;
+  if (column === "qualified") return decisionLabel(row.qualifiedLabel);
+  if (column === "desired") return decisionLabel(row.desired);
   if (column === "last") return row.lastLabel;
   return row.automationLabel;
 }
 
+function compareRecent(a: QueueRow, b: QueueRow): number {
+  const left = a.openedKey || "";
+  const right = b.openedKey || "";
+  if (left !== right) return right < left ? -1 : 1;
+  return a.title.localeCompare(b.title);
+}
+
+function decisionLabel(value: string): string {
+  if (value === "Yes" || value === "No") return value;
+  return "Not yet";
+}
+
+function phoneLabel(phone: string | null): string {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (ten.length === 10) return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
+  return phone?.trim() || "—";
+}
+
 function sortValue(row: QueueRow, column: SortColumn): string | number {
-  if (column === "opened") return row.openedKey || "9999";
-  if (column === "grade") return row.grade === "A" ? 0 : row.grade === "B" ? 1 : row.grade === "C" ? 2 : 3;
+  if (column === "opened") return row.openedKey || "";
   if (column === "last") return row.lastDays ?? 9999;
   if (column === "consult") return row.consultKey || "9999-99-99";
   return columnValue(row, column).toLowerCase();
@@ -197,40 +258,69 @@ export function WorkQueue({
   admin?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
+  const [shownId, setShownId] = useState(selectedId);
+  const [, startOpening] = useTransition();
   const [referralOpenId, setReferralOpenId] = useState("");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
+  const [gradeFilter, setGradeFilter] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("");
   const [nextDay, setNextDay] = useState("");
-  const [sort, setSort] = useState<{ column: SortColumn; dir: "asc" | "desc" } | null>(null);
+  const [sort, setSort] = useState<{ column: SortColumn; dir: "asc" | "desc" } | null>({ column: "opened", dir: "desc" });
   const canLeave = useRef<() => boolean>(() => true);
   function pick(id: string) {
     if (id !== selectedId && !canLeave.current()) return;
     setSelectedId(id);
+    if (id !== shownId) startOpening(() => setShownId(id));
+  }
+  function closeDrawer() {
+    if (!canLeave.current()) return;
+    setSelectedId("");
+    setShownId("");
+  }
+  function openFromRow(event: MouseEvent<HTMLTableRowElement>, id: string) {
+    const target = event.target;
+    if (target instanceof Element && target.closest("a, button, input, select, textarea, label")) return;
+    pick(id);
   }
   const selected = rows.find((row) => row.id === selectedId) ?? null;
+  const gradeOptions = [...new Set(rows.map(gradeLabel))].sort((left, right) =>
+    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
+  );
+  const priorityOrder = ["Flagged", "Suggested", "Contract out", "None"];
+  const priorityOptions = [...new Set(rows.map(priorityLabel))].sort((left, right) => {
+    const leftPlace = priorityOrder.indexOf(left);
+    const rightPlace = priorityOrder.indexOf(right);
+    return (leftPlace === -1 ? 99 : leftPlace) - (rightPlace === -1 ? 99 : rightPlace) || left.localeCompare(right);
+  });
   const shown = rows
     .filter((row) => !nextDay || row.nextDayKey === nextDay)
+    .filter((row) => !gradeFilter || gradeLabel(row) === gradeFilter)
+    .filter((row) => !priorityFilter || priorityLabel(row) === priorityFilter)
+    .filter((row) => !filters.type || columnValue(row, "type") === filters.type)
     .filter((row) => COLUMNS.every((column) => !filters[column.id] || columnValue(row, column.id) === filters[column.id]))
     .sort((a, b) => {
-      if (!sort) {
-        if (a.nextActionAt && b.nextActionAt && a.nextActionAt !== b.nextActionAt) return a.nextActionAt < b.nextActionAt ? -1 : 1;
-        if (a.nextActionAt && !b.nextActionAt) return -1;
-        if (!a.nextActionAt && b.nextActionAt) return 1;
-        return a.title.localeCompare(b.title);
-      }
+      if (!sort) return compareRecent(a, b);
       const left = sortValue(a, sort.column);
       const right = sortValue(b, sort.column);
       const compared = left < right ? -1 : left > right ? 1 : 0;
       return sort.dir === "asc" ? compared : -compared;
     });
 
+  const opening = Boolean(selected && selected.id !== shownId);
+
   return (
-    <div className={`mt-4 grid items-start gap-4 ${selected ? "xl:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
+    <div className={`mt-4 ${selected ? "xl:pr-[29rem]" : ""}`}>
       <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
+          <QueueFilter label="Case grade" value={gradeFilter} options={gradeOptions} onChange={setGradeFilter} />
+          <QueueFilter label="Priority" value={priorityFilter} options={priorityOptions} onChange={setPriorityFilter} />
+        </div>
         <table className="w-full table-fixed text-left text-xs">
           <colgroup>
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "12%" }} />
             <col style={{ width: "10%" }} />
-            <col style={{ width: "14%" }} />
-            <col style={{ width: "11%" }} />
             {COLUMNS.map((column) => (
               <col key={column.id} style={{ width: column.width }} />
             ))}
@@ -242,22 +332,38 @@ export function WorkQueue({
                 <button
                   type="button"
                   onClick={() =>
-                    setSort((current) => {
-                      if (current?.column !== "opened") return { column: "opened", dir: "desc" };
-                      if (current.dir === "desc") return { column: "opened", dir: "asc" };
-                      return null;
-                    })
+                    setSort((current) =>
+                      current?.column === "opened" && current.dir === "desc"
+                        ? { column: "opened", dir: "asc" }
+                        : { column: "opened", dir: "desc" },
+                    )
                   }
                   className="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 px-1 py-1 text-[11px] uppercase leading-tight tracking-normal text-slate-600 hover:border-slate-300 hover:bg-white"
                 >
                   Date
                   <span aria-hidden="true" className="text-[10px]">
-                    {sort?.column === "opened" ? (sort.dir === "asc" ? "↑" : "↓") : "↕"}
+                    {sort?.column === "opened" ? (sort.dir === "asc" ? "↑" : "↓") : sort ? "↕" : "↓"}
                   </span>
                 </button>
               </th>
               <th className="sticky top-16 z-20 border-b border-slate-200 bg-white px-2 py-2 text-left font-medium uppercase tracking-wide">Lead</th>
               <NextDayHead rows={rows} day={nextDay} onChange={setNextDay} />
+              <HeadSort
+                label="Type"
+                column="type"
+                align="start"
+                rows={rows}
+                filter={filters.type ?? ""}
+                sort={sort}
+                onChange={(value) => {
+                  if (value === "sort:asc" || value === "sort:desc") {
+                    setSort({ column: "type", dir: value === "sort:asc" ? "asc" : "desc" });
+                    return;
+                  }
+                  if (!value) setSort((current) => (current?.column === "type" ? null : current));
+                  setFilters((current) => ({ ...current, type: value }));
+                }}
+              />
               {COLUMNS.map((column, index) => (
                 <HeadSort
                   key={column.id}
@@ -284,7 +390,10 @@ export function WorkQueue({
             {shown.map((row) => (
               <tr
                 key={row.id}
-                className={`border-b border-slate-100 last:border-0 ${
+                onClick={(event) => openFromRow(event, row.id)}
+                aria-selected={row.id === selectedId}
+                aria-busy={opening && row.id === selectedId}
+                className={`cursor-pointer border-b border-slate-100 last:border-0 ${
                   row.id === selectedId ? "bg-brand/10" : "hover:bg-slate-50"
                 } ${row.stageStripe}`}
               >
@@ -298,10 +407,7 @@ export function WorkQueue({
                     {row.title}
                     <IdentityMark status={row.identityStatus} />
                   </button>
-                  <p className="mt-0.5 line-clamp-2 text-slate-500">
-                    {row.accident !== "—" ? row.accident : "Accident not captured"}
-                    {row.when ? ` · ${row.when}` : ""}
-                  </p>
+                  <p className="mt-0.5 text-slate-500">{phoneLabel(row.phone)}</p>
                   {row.samePhone.length > 0 ? (
                     <p className="mt-0.5 text-slate-500">{row.samePhone.length + 1} records, same phone</p>
                   ) : null}
@@ -312,6 +418,9 @@ export function WorkQueue({
                 <td className="px-2 py-2 text-slate-800">
                   <p className="font-medium text-slate-900">{row.actionTitle ?? "—"}</p>
                   <ActionLines lines={row.nextAction} />
+                </td>
+                <td className="px-2 py-2 text-slate-700">
+                  {columnValue(row, "type") === "TBD" ? <TbdValue /> : <p className="line-clamp-2">{columnValue(row, "type")}</p>}
                 </td>
                 <td className="px-2 py-2 text-center">
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
@@ -335,24 +444,12 @@ export function WorkQueue({
                     )
                   ) : null}
                 </td>
-                <td className="px-2 py-2 text-center">
-                  <PriorityCell row={row} />
-                </td>
-                <td className="px-2 py-2 text-center">
-                  <span className={`inline-flex rounded-full px-2 py-0.5 font-medium ${gradeClass(row.grade)}`}>
-                    {row.grade ?? "—"}
-                  </span>
-                </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.consultWhen}</td>
                 <td className="px-1 py-2 text-center">
-                  <YesNoCell row={row} field="qualified" value={row.qualifiedLabel} action={setQualified} fit />
+                  <DecisionValue value={row.qualifiedLabel} />
                 </td>
                 <td className="px-1 py-2 text-center">
-                  {row.desiredLocked ? (
-                    <span className="font-medium text-slate-900">{row.desired}</span>
-                  ) : (
-                    <YesNoCell row={row} field="desired" value={row.desired} action={setDesired} fit />
-                  )}
+                  <DecisionValue value={row.desired} />
                 </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.lastLabel}</td>
                 <td className="px-1 py-2 text-center">
@@ -365,7 +462,7 @@ export function WorkQueue({
             ))}
             {shown.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-slate-500">
+                <td colSpan={11} className="px-4 py-10 text-center text-slate-500">
                   Nothing in this queue.
                 </td>
               </tr>
@@ -374,20 +471,23 @@ export function WorkQueue({
         </table>
       </div>
       {selected ? (
-        <LeadDrawer
-          key={selected.id}
-          row={selected}
-          destinations={destinations}
-          templates={templates}
-          staff={staff}
-          admin={admin}
-          startReferral={referralOpenId === selected.id}
-          canLeave={canLeave}
-          onClose={() => {
-            if (!canLeave.current()) return;
-            setSelectedId("");
-          }}
-        />
+        <div className="fixed top-16 right-4 bottom-4 z-30 flex w-[min(28rem,calc(100vw-2rem))] flex-col">
+          {opening ? (
+            <DrawerSkeleton row={selected} onClose={closeDrawer} />
+          ) : (
+            <LeadDrawer
+              key={selected.id}
+              row={selected}
+              destinations={destinations}
+              templates={templates}
+              staff={staff}
+              admin={admin}
+              startReferral={referralOpenId === selected.id}
+              canLeave={canLeave}
+              onClose={closeDrawer}
+            />
+          )}
+        </div>
       ) : null}
     </div>
   );
@@ -503,6 +603,55 @@ function HeadSort({
   );
 }
 
+function QueueFilter({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const pick = (next: string) => {
+    onChange(next);
+    setOpen(false);
+  };
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-label={`Filter ${label}`}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] uppercase leading-tight tracking-normal ${
+          value ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white"
+        }`}
+      >
+        <span>{value ? `${label}: ${value}` : label}</span>
+        <span aria-hidden="true" className="text-[10px]">↕</span>
+      </button>
+      {open ? (
+        <>
+          <button type="button" aria-label="Close filter" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 z-20 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg">
+            <MenuChoice current={!value} onPick={() => pick("")}>
+              All
+            </MenuChoice>
+            {options.map((option) => (
+              <MenuChoice key={option} current={value === option} onPick={() => pick(option)}>
+                {option}
+              </MenuChoice>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function MenuChoice({ current, onPick, children }: { current: boolean; onPick: () => void; children: string }) {
   return (
     <button type="button" onClick={onPick} className={`block w-full px-3 py-1.5 text-left hover:bg-slate-50 ${current ? "font-medium text-navy" : ""}`}>
@@ -531,11 +680,8 @@ function TextStartButtons({ leadId, compact = false }: { leadId: string; compact
   return (
     <form action={action} className={compact ? "flex flex-col items-center gap-1" : "flex flex-wrap gap-2"}>
       <input type="hidden" name="lead_id" value={leadId} />
-      <button name="sequence" value="new-lead" disabled={pending} className={compact ? button : buttonPrimary}>
-        New lead
-      </button>
-      <button name="sequence" value="more-info" disabled={pending} className={compact ? button : buttonSecondary}>
-        More info
+      <button name="sequence" value="more-info" disabled={pending} className={compact ? button : buttonPrimary}>
+        More Info
       </button>
       {state?.error ? <p className="w-full text-[11px] font-medium text-red-700">{state.error}</p> : null}
     </form>
@@ -552,118 +698,31 @@ function TextAutomation({ row }: { row: QueueRow }) {
   return <TextStartButtons leadId={row.id} compact />;
 }
 
-function YesNoCell({
-  row,
-  field,
-  value,
-  action,
-  align = "center",
-  fit = false,
-}: {
-  row: QueueRow;
-  field: "qualified" | "desired";
-  value: string;
-  action: (formData: FormData) => Promise<void>;
-  align?: "center" | "start";
-  fit?: boolean;
-}) {
-  const label = field === "qualified" ? "Qualified" : "Desired";
-  const notify = useContext(DrawerNoticeContext);
-  const [pending, setPending] = useState<"yes" | "no" | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const unknown = value !== "Yes" && value !== "No";
+function TbdMark() {
+  return <span aria-hidden="true" className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />;
+}
 
-  async function choose(decision: "yes" | "no") {
-    const selected = decision === "yes" ? "Yes" : "No";
-    if (value === selected || pending) return;
-    setPending(decision);
-    setSaved(false);
-    setFailed(false);
-    notify({ tone: "saving", text: "Saving…" });
-    const data = new FormData();
-    data.set("lead_id", row.id);
-    data.set("decision", decision);
-    try {
-      await action(data);
-      setSaved(true);
-      notify({ tone: "saved", text: "Saved" });
-    } catch {
-      setFailed(true);
-      notify({ tone: "error", text: "Could not save." });
-    } finally {
-      setPending(null);
-    }
-  }
-
-  const side = fit
-    ? "flex h-7 min-w-0 flex-1 cursor-pointer items-center justify-center whitespace-nowrap px-1 text-[11px] font-medium leading-none transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent disabled:cursor-default"
-    : "h-9 min-w-0 flex-1 cursor-pointer px-2 text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent disabled:cursor-default";
-
+function TbdValue() {
   return (
-    <div className={`flex flex-col ${align === "start" ? "items-stretch" : "items-center"}`}>
-      <div className={`relative ${fit ? "mx-auto w-full max-w-[6.5rem]" : "w-full"}`}>
-        <div className="flex w-full overflow-hidden rounded-lg border border-slate-300 bg-white" role="group" aria-label={label}>
-          <button
-            type="button"
-            aria-label={`${label} yes`}
-            aria-pressed={value === "Yes"}
-            disabled={pending !== null}
-            onClick={() => void choose("yes")}
-            className={`${side} border-r border-slate-300 ${
-              value === "Yes" ? "bg-emerald-50 text-emerald-900 hover:bg-emerald-100" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-            }`}
-          >
-            {value === "Yes" ? "✓ Yes" : "Yes"}
-          </button>
-          <button
-            type="button"
-            aria-label={`${label} no`}
-            aria-pressed={value === "No"}
-            disabled={pending !== null}
-            onClick={() => void choose("no")}
-            className={`${side} ${value === "No" ? "bg-slate-200 text-slate-900 hover:bg-slate-300" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}
-          >
-            No
-          </button>
-        </div>
-        <span className={`absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ${unknown ? "bg-amber-500" : "bg-transparent"}`} aria-hidden="true" />
-      </div>
-      <span className="mt-0.5 h-4 text-[11px] font-medium" aria-live="polite">
-        {failed ? <span className="text-red-700">Failed</span> : pending ? <span className="text-slate-500">Saving</span> : saved ? <span className="text-emerald-700">Saved</span> : null}
-      </span>
-    </div>
+    <span className="inline-flex items-center gap-1 text-slate-500" title="Not classified yet">
+      <TbdMark />
+      TBD
+    </span>
   );
 }
 
-function PriorityCell({ row }: { row: QueueRow }) {
-  if (row.priority === "Suggested") {
+function DecisionValue({ value }: { value: string }) {
+  const label = decisionLabel(value);
+  if (label === "Not yet") {
     return (
-      <form action={reviewPrioritySuggestion} className="flex flex-col items-center gap-1">
-        <input type="hidden" name="lead_id" value={row.id} />
-        <span className="text-xs font-medium text-slate-700">Suggested</span>
-        <span className="flex gap-1">
-          <button name="decision" value="confirm" className="cursor-pointer rounded-md bg-navy px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-[#16366e]" aria-label="Add to priority">
-            Yes
-          </button>
-          <button name="decision" value="dismiss" className="cursor-pointer rounded-md border border-slate-300 bg-white px-2 py-1 text-xs transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy" aria-label="Not a priority">
-            No
-          </button>
-        </span>
-      </form>
+      <span className="inline-flex items-center justify-center gap-1 font-medium text-slate-500" title="Not filled in yet">
+        <TbdMark />
+        {label}
+      </span>
     );
   }
-  if (!row.priority) {
-    return (
-      <form action={markPriority}>
-        <input type="hidden" name="lead_id" value={row.id} />
-        <button className="mx-auto inline-flex w-full max-w-[5.25rem] items-center justify-center rounded-lg border border-slate-300 bg-white px-1.5 py-1.5 text-center text-[11px] font-medium leading-tight text-navy shadow-sm transition duration-150 hover:border-navy hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2">
-          Flag priority
-        </button>
-      </form>
-    );
-  }
-  return <span className="font-medium text-slate-900">{row.priority}</span>;
+  const tone = label === "Yes" ? "text-emerald-800" : "text-slate-900";
+  return <span className={`font-medium ${tone}`}>{label}</span>;
 }
 
 function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: string | null }) {
@@ -708,11 +767,16 @@ function FieldLabel({ label, children, className = "" }: { label: string; childr
   );
 }
 
+function notLeadReasonFor(row: QueueRow): string {
+  const taggedSpam = row.tags.includes("NQ: Spam / Robo Call") || row.tags.includes("NL: Spam / Robo Call");
+  return EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? (taggedSpam ? "spam" : "");
+}
+
 function detailGap(input: {
+  notALead: boolean;
   consulted: "yes" | "no" | "";
   consultDate: string;
   qualified: "yes" | "no" | "";
-  notQualified: string;
   desired: "yes" | "no" | "";
   size: string;
   decline: string;
@@ -720,13 +784,24 @@ function detailGap(input: {
   signedDate: string;
   admin: boolean;
 }): string | null {
+  if (input.notALead) return null;
   if (input.consulted === "yes" && !input.consultDate) return "Enter the consultation date before saving or closing.";
-  if (input.qualified === "no" && !input.notQualified) return "Choose a Not Qualified reason before saving or closing.";
   if (input.qualified === "no" && input.desired === "yes") return "A lead that is not qualified is not desired.";
   if (input.desired === "yes" && !input.size) return "Choose a size before saving or closing.";
   if (input.desired === "no" && !input.decline) return "Choose a decline reason before saving or closing.";
   if (input.admin && input.signedChoice === "yes" && !input.signedDate) return "Enter the signed date before saving or closing.";
   return null;
+}
+
+function chosenSourceType(value: string): string {
+  return isSourceType(value) && value !== "Unknown" ? value : "";
+}
+
+function chosenLeadSource(value: string, type: string): string {
+  const source = canonicalLeadSource(value).source;
+  if (!source) return "";
+  if (!type) return source;
+  return leadSourcesFor(type).includes(source) ? source : "";
 }
 
 function LeadFacts({
@@ -752,22 +827,33 @@ function LeadFacts({
   const [consulted, setConsulted] = useState<"yes" | "no" | "">(row.consulted);
   const [consultDate, setConsultDate] = useState(row.consultKey.slice(0, 10));
   const [qualified, setQualifiedChoice] = useState<"yes" | "no" | "">(row.qualifiedLabel === "Yes" ? "yes" : row.qualifiedLabel === "No" ? "no" : "");
-  const [notQualified, setNotQualified] = useState(selectedOne(row.tags, NOT_QUALIFIED_TAGS));
+  const [notLeadReason, setNotLeadReason] = useState(() => notLeadReasonFor(row));
   const [desired, setDesiredChoice] = useState<"yes" | "no" | "">(row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "");
   const [size, setSize] = useState(selectedOne(row.tags, SIZE_TAGS));
+  const [sourceType, setSourceType] = useState(() => chosenSourceType(row.sourceType));
+  const [leadSource, setLeadSource] = useState(() => chosenLeadSource(row.leadSource, chosenSourceType(row.sourceType)));
+  const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
+  useEffect(() => {
+    const type = chosenSourceType(row.sourceType);
+    setSourceType(type);
+    setLeadSource(chosenLeadSource(row.leadSource, type));
+    setEmail(standardLeadEmail(row.email) ?? "");
+    setNotLeadReason(notLeadReasonFor(row));
+  }, [row.id]);
   const [decline, setDecline] = useState(selectedDecline(row.tags));
   const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(row.signed ? "yes" : "");
   const [signedDate, setSignedDate] = useState(row.signedDate);
   const contractLocked = row.desiredLocked && row.qualifiedLabel !== "No";
   const { pending: confirming, submit: confirmSubmit } = useNotedSubmit();
 
+  const notALead = Boolean(notLeadReason);
   function gap() {
-    return detailGap({ consulted, consultDate, qualified, notQualified, desired, size, decline, signedChoice, signedDate, admin });
+    return detailGap({ notALead, consulted, consultDate, qualified, desired, size, decline, signedChoice, signedDate, admin });
   }
 
   function exitGap() {
+    if (notALead) return null;
     if (dirty.consult && consulted === "yes" && !consultDate) return "Enter the consultation date before saving or closing.";
-    if (dirty.qualified && qualified === "no" && !notQualified) return "Choose a Not Qualified reason before saving or closing.";
     if ((dirty.qualified || dirty.desired) && qualified === "no" && desired === "yes") return "A lead that is not qualified is not desired.";
     if (dirty.desired && desired === "yes" && !size) return "Choose a size before saving or closing.";
     if (dirty.desired && desired === "no" && !decline) return "Choose a decline reason before saving or closing.";
@@ -800,23 +886,25 @@ function LeadFacts({
     notify({ tone: "saving", text: "Saving…" });
     try {
       await saveLeadDetails(formData);
-      const tagsData = new FormData();
-      tagsData.set("qualified_tag", qualified === "yes" ? QUALIFIED_YES : qualified === "no" ? QUALIFIED_NO : "");
-      tagsData.set("not_qualified_tag", qualified === "yes" ? "" : notQualified);
-      tagsData.set("decline_tag", desired === "yes" ? "" : decline);
-      tagsData.set("size_tag", desired === "no" ? "" : size);
-      await saveLeadTags(row.id, tagsData);
-      if (qualified === "yes" || qualified === "no") {
-        const decision = new FormData();
-        decision.set("lead_id", row.id);
-        decision.set("decision", qualified);
-        await setQualified(decision);
-      }
-      if (!contractLocked && (desired === "yes" || desired === "no")) {
-        const decision = new FormData();
-        decision.set("lead_id", row.id);
-        decision.set("decision", desired);
-        await setDesired(decision);
+      if (!notALead) {
+        const tagsData = new FormData();
+        tagsData.set("qualified_tag", qualified === "yes" ? QUALIFIED_YES : qualified === "no" ? QUALIFIED_NO : "");
+        tagsData.set("not_qualified_tag", "");
+        tagsData.set("decline_tag", desired === "yes" ? "" : decline);
+        tagsData.set("size_tag", desired === "no" ? "" : size);
+        await saveLeadTags(row.id, tagsData);
+        if (qualified === "yes" || qualified === "no") {
+          const decision = new FormData();
+          decision.set("lead_id", row.id);
+          decision.set("decision", qualified);
+          await setQualified(decision);
+        }
+        if (!contractLocked && (desired === "yes" || desired === "no")) {
+          const decision = new FormData();
+          decision.set("lead_id", row.id);
+          decision.set("decision", desired);
+          await setDesired(decision);
+        }
       }
       setSaved(true);
       setDirty({ consult: false, qualified: false, desired: false, signed: false });
@@ -837,6 +925,10 @@ function LeadFacts({
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
         <form id={formId} action={onSubmit} className="space-y-4">
           <input type="hidden" name="lead_id" value={row.id} />
+          {notLeadReason ? <input type="hidden" name="non_lead_reason" value={notLeadReason} /> : null}
+          {row.signed ? null : (
+            <NonLeadChoice row={row} reason={notLeadReason} onReason={setNotLeadReason} />
+          )}
           <PanelSection title="Contact">
             <FieldLabel label="Name" className="col-span-2">
               <input name="lead_name" defaultValue={nameValue} className={fieldClass()} />
@@ -845,15 +937,37 @@ function LeadFacts({
               <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
             </FieldLabel>
             <FieldLabel label="Email">
-              <input name="email" defaultValue={row.email ?? ""} className={fieldClass()} />
+              <input
+                name="email"
+                value={email}
+                autoComplete="off"
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Optional"
+                className={fieldClass()}
+              />
+              {emailIsUnavailable(email) ? null : (
+                <button type="button" onClick={() => setEmail(EMAIL_NOT_AVAILABLE)} className="mt-1 text-[11px] font-medium text-navy underline">
+                  N/A
+                </button>
+              )}
             </FieldLabel>
           </PanelSection>
           <input type="hidden" name="consulted" value={consulted} />
           {admin ? <input type="hidden" name="signed_decision" value={signedChoice} /> : null}
-          {row.signed ? null : <NonLeadChoice row={row} />}
           <PanelSection title="Marketing">
             <FieldLabel label="Source type">
-              <select name="source_type" defaultValue={isSourceType(row.sourceType) && row.sourceType !== "Unknown" ? row.sourceType : ""} className={fieldClass()}>
+              <input type="hidden" name="source_type" value={sourceType} />
+              <select
+                value={sourceType}
+                autoComplete="off"
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSourceType(next);
+                  if (!next) return;
+                  setLeadSource((current) => (leadSourcesFor(next).includes(current) ? current : ""));
+                }}
+                className={fieldClass()}
+              >
                 <option value="">Not set</option>
                 {SOURCE_TYPE_OPTIONS.map((item) => (
                   <option key={item} value={item}>
@@ -863,12 +977,22 @@ function LeadFacts({
               </select>
             </FieldLabel>
             <FieldLabel label="Lead source">
-              <input name="lead_source" list="lead-source-examples" defaultValue={row.leadSource} placeholder="Google, Friend, Attorney" className={fieldClass()} />
-              <datalist id="lead-source-examples">
-                {LEAD_SOURCES.map((item) => (
-                  <option key={item.source} value={item.source} />
+              <input type="hidden" name="lead_source" value={leadSource} />
+              <select
+                key={`${row.id}-${sourceType}`}
+                value={sourceType ? leadSource : ""}
+                autoComplete="off"
+                disabled={!sourceType}
+                onChange={(event) => setLeadSource(event.target.value)}
+                className={fieldClass(!sourceType)}
+              >
+                <option value="">{sourceType ? "Not set" : "Choose source type first"}</option>
+                {leadSourcesFor(sourceType).map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </FieldLabel>
           </PanelSection>
           <PanelSection title="Case type">
@@ -903,7 +1027,7 @@ function LeadFacts({
                 type="date"
                 name="consultation_date"
                 value={consultDate}
-                required={consulted === "yes"}
+                required={!notALead && consulted === "yes"}
                 disabled={consulted !== "yes"}
                 onChange={(event) => {
                   mark("consult");
@@ -923,30 +1047,10 @@ function LeadFacts({
                   onChange={(value) => {
                     mark("qualified");
                     setQualifiedChoice(value);
-                    if (value === "yes") setNotQualified("");
                   }}
                 />
               </div>
             </div>
-            <FieldLabel label="Not qualified">
-              <select
-                value={notQualified}
-                required={qualified === "no"}
-                disabled={qualified !== "no"}
-                onChange={(event) => {
-                  mark("qualified");
-                  setNotQualified(event.target.value);
-                }}
-                className={fieldClass(qualified !== "no")}
-              >
-                <option value="">{qualified === "no" ? "Choose a reason" : "Locked"}</option>
-                {NOT_QUALIFIED_TAGS.map((tag) => (
-                  <option key={tag} value={tag}>
-                    {tag.slice("NQ: ".length)}
-                  </option>
-                ))}
-              </select>
-            </FieldLabel>
           </PanelSection>
           <PanelSection title="Desired">
             <div className="col-span-2">
@@ -968,7 +1072,7 @@ function LeadFacts({
             <FieldLabel label="Size">
               <select
                 value={size}
-                required={desired === "yes"}
+                required={!notALead && desired === "yes"}
                 disabled={desired !== "yes"}
                 onChange={(event) => {
                   mark("desired");
@@ -987,7 +1091,7 @@ function LeadFacts({
             <FieldLabel label="Decline reason">
               <select
                 value={decline}
-                required={desired === "no"}
+                required={!notALead && desired === "no"}
                 disabled={desired !== "no"}
                 onChange={(event) => {
                   mark("desired");
@@ -1235,6 +1339,44 @@ function QueueReferral({
   );
 }
 
+function DrawerSkeleton({ row, onClose }: { row: QueueRow; onClose: () => void }) {
+  return (
+    <aside
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-navy">{row.title}</h2>
+          <p className="mt-1 text-sm text-slate-500">Opening…</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+        >
+          Close
+        </button>
+      </div>
+      <div className="flex gap-1 border-b border-slate-200 px-3">
+        {["Details", "Activity", "Overview"].map((label) => (
+          <span key={label} className="border-b-2 border-transparent px-3 py-2 text-sm font-medium text-slate-300">
+            {label}
+          </span>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 px-4 py-4">
+        <div className="h-8 w-2/5 animate-pulse rounded-md bg-slate-100" />
+        <div className="h-24 animate-pulse rounded-lg bg-slate-100" />
+        <div className="h-16 animate-pulse rounded-lg bg-slate-100" />
+        <div className="h-32 animate-pulse rounded-lg bg-slate-100" />
+      </div>
+    </aside>
+  );
+}
+
 export function LeadDrawer({
   row,
   destinations,
@@ -1254,10 +1396,10 @@ export function LeadDrawer({
   canLeave?: RefObject<() => boolean>;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "details" | "activity">("overview");
+  const [tab, setTab] = useState<"overview" | "details" | "activity">("details");
   useEffect(() => {
-    if (startReferral) setTab("details");
-  }, [startReferral]);
+    setTab("details");
+  }, [row.id, startReferral]);
   const [notice, setNotice] = useState<DrawerNotice | null>(null);
   const [touches, setTouches] = useState<Touch[] | null>(null);
   useEffect(() => {
@@ -1287,7 +1429,7 @@ export function LeadDrawer({
   const contract = contractLabel(row);
 
   return (
-    <aside className="flex max-h-[calc(100vh-5rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-16">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">
@@ -1295,7 +1437,7 @@ export function LeadDrawer({
             <IdentityMark status={row.identityStatus} />
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            {row.accident !== "—" ? row.accident : "Accident not captured"}
+            {typeLabel(row)}
             {row.when ? ` · ${row.when}` : ""}
           </p>
         </div>
@@ -1313,9 +1455,9 @@ export function LeadDrawer({
       <div className="flex gap-1 border-b border-slate-200 px-3">
         {(
           [
-            ["overview", "Overview"],
             ["details", "Details"],
             ["activity", "Activity"],
+            ["overview", "Overview"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -1359,41 +1501,9 @@ export function LeadDrawer({
           startReferral={startReferral}
         />
       </div>
-      {tab === "details" ? null : (
+      {tab === "activity" ? <ActivityThread touches={touches} row={row} staff={staff} /> : null}
+      {tab === "overview" ? (
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
-        {tab === "activity" ? (
-          <section>
-            {touches === null ? (
-              <p className="text-sm text-slate-500">Loading activity…</p>
-            ) : touches.length === 0 ? (
-              <p className="text-sm text-slate-500">No calls, texts, or Slack notes yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {touches.map((touch) => (
-                  <li key={touch.id} className="text-sm">
-                    <p className="font-medium text-slate-800">
-                      {touchLabel(touch)}
-                      <span className="ml-2 font-normal text-slate-400">
-                        {touch.occurred_at ? formatChicago(touch.occurred_at) : ""}
-                      </span>
-                    </p>
-                    {touch.grade ? (
-                      <p className="mt-1 text-sm text-slate-800">
-                        <span className={`mr-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${callGradeClass(touch.grade)}`}>
-                          {touch.grade}
-                        </span>
-                        {touch.gradeHandler ? <span className="font-medium">{touch.gradeHandler}</span> : null}
-                        {touch.gradeReason ? <span className="text-slate-600">{touch.gradeHandler ? " — " : ""}{touch.gradeReason}</span> : null}
-                      </p>
-                    ) : null}
-                    {touch.content ? <p className="mt-0.5 whitespace-pre-wrap text-slate-600">{touch.content}</p> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ) : (
-          <>
         <div className="flex flex-wrap gap-3 text-sm">
           {row.quoUrl ? (
             <a href={row.quoUrl} className={buttonSecondary} target="_blank" rel="noreferrer">
@@ -1430,17 +1540,15 @@ export function LeadDrawer({
           </section>
         ) : null}
         {row.closeSuggestion ? <CloseSuggestion row={row} /> : null}
-        {row.priority === "Suggested" && row.prioritySuggestion ? <PrioritySuggestion row={row} /> : null}
-        {row.signed ? null : <NonLeadChoice row={row} />}
+        <PriorityPanel row={row} />
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next</h3>
-          <p className="mt-2 text-sm font-medium text-slate-900">{row.actionTitle ?? "No next step"}</p>
           <dl className="mt-2 space-y-1 text-sm text-slate-700">
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">Last contacted</dt>
               <dd>{row.lastLabel}</dd>
             </div>
-            <ActionLines lines={row.nextAction} layout="row" />
+            <ActionLines lines={row.nextAction.filter((line) => line.label !== "Call" && line.label !== "Text")} layout="row" />
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">Calls / texts</dt>
               <dd>
@@ -1448,21 +1556,11 @@ export function LeadDrawer({
               </dd>
             </div>
           </dl>
-          <NextActionEdit row={row} staff={staff} />
+          <NextActionEdit row={row} staff={staff} part="reminder" />
         </section>
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>
           <ul className="mt-2 space-y-2 text-sm">
-            <li className="space-y-2">
-              <div className="flex justify-between gap-3">
-                <span className="text-slate-500">Texts</span>
-                <span>
-                  {row.textsLive ? row.automationLabel : "Off"}
-                  {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
-                </span>
-              </div>
-              {row.canStartText ? <TextStartButtons leadId={row.id} /> : null}
-            </li>
             <li className="flex justify-between gap-3">
               <span className="text-slate-500">Contract</span>
               <span className={contract.bad ? "font-medium text-red-700" : ""}>{contract.label}</span>
@@ -1493,20 +1591,99 @@ export function LeadDrawer({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
-          </>
-        )}
       </div>
-      )}
+      ) : null}
       </DrawerNoticeContext.Provider>
     </aside>
   );
 }
 
-function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
+function ActivityThread({ touches, row, staff }: { touches: Touch[] | null; row: QueueRow; staff: string[] }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const ordered = touches === null ? null : [...touches].sort((a, b) => String(a.occurred_at || "").localeCompare(String(b.occurred_at || "")));
+  useLayoutEffect(() => {
+    const node = scroller.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [touches, row.id]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
+        <div className="mt-auto">
+          {ordered === null ? (
+            <p className="text-sm text-slate-500">Loading activity…</p>
+          ) : ordered.length === 0 ? (
+            <p className="text-sm text-slate-500">No calls, texts, or Slack notes yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {ordered.map((touch) => (
+                <li key={touch.id} className="text-sm">
+                  <p className="font-medium text-slate-800">
+                    {touchLabel(touch)}
+                    <span className="ml-2 font-normal text-slate-400">
+                      {touch.occurred_at ? formatChicago(touch.occurred_at) : ""}
+                    </span>
+                  </p>
+                  {touch.grade ? (
+                    <p className="mt-1 text-sm text-slate-800">
+                      <span className={`mr-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${callGradeClass(touch.grade)}`}>
+                        {touch.grade}
+                      </span>
+                      {touch.gradeHandler ? <span className="font-medium">{touch.gradeHandler}</span> : null}
+                      {touch.gradeReason ? <span className="text-slate-600">{touch.gradeHandler ? " — " : ""}{touch.gradeReason}</span> : null}
+                    </p>
+                  ) : null}
+                  {touch.content ? <p className="mt-0.5 whitespace-pre-wrap text-slate-600">{touch.content}</p> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+      <div className="shrink-0 space-y-4 border-t border-slate-200 px-4 py-3">
+        <NextCallDetails row={row} staff={staff} />
+        <TextSequence row={row} />
+      </div>
+    </div>
+  );
+}
+
+function NextCallDetails({ row, staff }: { row: QueueRow; staff: string[] }) {
+  const call = row.nextAction.find((line) => line.label === "Call");
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next call</h3>
+      <p className="mt-1 text-sm font-medium text-slate-900">{row.actionTitle ?? "No next call"}</p>
+      <p className="mt-1 text-sm text-slate-700">
+        <span className="text-slate-500">When </span>
+        {call?.when && call.when !== "None" ? call.when : "Not scheduled"}
+        {row.callTag ? <span className="text-slate-500"> · {row.callTag}</span> : null}
+      </p>
+      <NextActionEdit row={row} staff={staff} part="call" />
+    </section>
+  );
+}
+
+function TextSequence({ row }: { row: QueueRow }) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Texts</h3>
+      <p className="mt-1 text-sm text-slate-700">
+        {row.textsLive ? row.automationLabel : "Off"}
+        {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
+      </p>
+      {row.canStartText ? <div className="mt-2"><TextStartButtons leadId={row.id} /></div> : null}
+    </section>
+  );
+}
+
+function NextActionEdit({ row, staff, part }: { row: QueueRow; staff: string[]; part: "call" | "reminder" }) {
   const call = row.nextAction.find((line) => line.label === "Call" && line.at);
   const reminder = row.nextAction.find((line) => line.label === "Reminder" && line.at);
-  const canEdit = Boolean((row.callJobId && call?.at) || reminder?.at);
-  if (!canEdit) return null;
+  const showCall = part === "call" && Boolean(row.callJobId && call?.at);
+  const showReminder = part === "reminder" && Boolean(reminder?.at);
+  if (!showCall && !showReminder) return null;
   const extra = row.callTag && row.callTag !== "Outbound" && !staff.includes(row.callTag) ? [row.callTag] : [];
   const names = [...extra, ...staff];
   return (
@@ -1517,9 +1694,9 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
       idleLabel="Save next action"
     >
       <input type="hidden" name="lead_id" value={row.id} />
-      {row.callJobId && call?.at ? (
+      {showCall && call?.at ? (
         <>
-          <input type="hidden" name="call_job_id" value={row.callJobId} />
+          <input type="hidden" name="call_job_id" value={row.callJobId ?? ""} />
           <div className="grid grid-cols-2 gap-2">
           <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
             Call time
@@ -1548,7 +1725,7 @@ function NextActionEdit({ row, staff }: { row: QueueRow; staff: string[] }) {
           </div>
         </>
       ) : null}
-      {reminder?.at ? (
+      {showReminder && reminder?.at ? (
         <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
           Reminder time
           <input
@@ -1658,12 +1835,34 @@ function FunnelMark({ label, value }: { label: string; value: string }) {
   );
 }
 
+function PriorityPanel({ row }: { row: QueueRow }) {
+  if (row.priority === "Suggested") return <PrioritySuggestion row={row} />;
+  if (!row.priority) {
+    return (
+      <NotedForm action={markPriority} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+        <input type="hidden" name="lead_id" value={row.id} />
+        <p className="font-medium text-slate-900">Priority</p>
+        <p className="mt-1 text-slate-600">Not flagged.</p>
+        <button type="submit" className="mt-3 cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
+          Flag priority
+        </button>
+      </NotedForm>
+    );
+  }
+  return (
+    <section className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Priority</h3>
+      <p className="mt-1 font-medium text-slate-900">{row.priority}</p>
+    </section>
+  );
+}
+
 function PrioritySuggestion({ row }: { row: QueueRow }) {
   return (
     <NotedForm action={reviewPrioritySuggestion} className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm">
       <input type="hidden" name="lead_id" value={row.id} />
       <p className="font-medium text-sky-950">Suggested priority</p>
-      <p className="mt-1 text-sky-900">{row.prioritySuggestion}</p>
+      {row.prioritySuggestion ? <p className="mt-1 text-sky-900">{row.prioritySuggestion}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <button name="decision" value="confirm" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
           Add to priority
@@ -1712,12 +1911,17 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
   );
 }
 
-function NonLeadChoice({ row }: { row: QueueRow }) {
-  const taggedSpam = row.tags.includes("NQ: Spam / Robo Call") || row.tags.includes("NL: Spam / Robo Call");
-  const current = EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? (taggedSpam ? "spam" : "");
+function NonLeadChoice({
+  row,
+  reason,
+  onReason,
+}: {
+  row: QueueRow;
+  reason: string;
+  onReason: (reason: string) => void;
+}) {
   const gaps = rowCloseGaps(row, "nonlead");
   const { pending, submit } = useNotedSubmit();
-  const [reason, setReason] = useState(current);
   return (
     <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Not a lead</h3>
@@ -1726,7 +1930,7 @@ function NonLeadChoice({ row }: { row: QueueRow }) {
         Reason
         <select
           value={reason}
-          onChange={(event) => setReason(event.target.value)}
+          onChange={(event) => onReason(event.target.value)}
           className={fieldClass()}
         >
           <option value="">Choose a reason</option>
@@ -1791,13 +1995,6 @@ function ChoiceToggle({
       </button>
     </div>
   );
-}
-
-function gradeClass(grade: string | null): string {
-  if (grade === "A") return "bg-emerald-50 text-emerald-800";
-  if (grade === "B") return "bg-sky-50 text-sky-800";
-  if (grade === "C") return "bg-slate-100 text-slate-600";
-  return "bg-slate-50 text-slate-400";
 }
 
 function contractLabel(row: QueueRow): { label: string; bad: boolean } {

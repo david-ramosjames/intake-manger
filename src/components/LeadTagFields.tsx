@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   DECLINE_TAGS,
-  NOT_QUALIFIED_TAGS,
   QUALIFIED_NO,
   QUALIFIED_YES,
   SIZE_TAGS,
@@ -38,7 +37,6 @@ export function LeadTagFields({
     (qualifiedMark === "Yes" ? QUALIFIED_YES : qualifiedMark === "No" ? QUALIFIED_NO : "");
   const [qualified, setQualified] = useState(qualifiedStart);
   const [decline, setDecline] = useState(signed ? "" : selectedDecline(tags));
-  const [notQualified, setNotQualified] = useState(selectedOne(tags, NOT_QUALIFIED_TAGS));
   const [size, setSize] = useState(selectedOne(tags, SIZE_TAGS));
   const reason = declineReasonFromTag(decline) ?? (decline ? declineReason : null);
   const showReasons = qualified === QUALIFIED_NO;
@@ -53,7 +51,7 @@ export function LeadTagFields({
         <>
           <legend className="font-medium text-slate-700">Qualified</legend>
           <p className="text-slate-500">
-            Every lead is Qualified YES or Qualified NO. A non-PI matter, a case outside the service area, and an unresponsive lead are Qualified NO.
+            Every lead is Qualified YES or Qualified NO. A declined lead, and a lead that finishes follow-up with no contact, are Qualified NO.
           </p>
           <div className="flex flex-wrap gap-4">
             <label className="flex items-center gap-2">
@@ -79,7 +77,7 @@ export function LeadTagFields({
           </div>
         </>
       )}
-      {showReasons && !notQualified ? (
+      {showReasons ? (
         <label className="block">
           <span className={quiet ? "text-xs font-semibold uppercase tracking-wide text-slate-500" : "font-medium text-slate-700"}>Declined</span>
           <select
@@ -101,27 +99,6 @@ export function LeadTagFields({
               Decline reason: {reason || "Only filled when a DEC tag is used. DEC means declined."}
             </p>
           )}
-        </label>
-      ) : null}
-      {showReasons && !decline ? (
-        <label className="block">
-          <span className={quiet ? "text-xs font-semibold uppercase tracking-wide text-slate-500" : "font-medium text-slate-700"}>Not qualified</span>
-          <select
-            name="not_qualified_tag"
-            value={notQualified}
-            onChange={(event) => {
-              setNotQualified(event.target.value);
-              if (event.target.value) setQualified(QUALIFIED_NO);
-            }}
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-          >
-            <option value="">None</option>
-            {NOT_QUALIFIED_TAGS.map((tag) => (
-              <option key={tag} value={tag}>
-                {TAG_LABEL[tag]}
-              </option>
-            ))}
-          </select>
         </label>
       ) : null}
       {showSize ? (

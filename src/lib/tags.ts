@@ -9,6 +9,8 @@ export const DECLINE_TAGS = [
   "DEC: Medmal",
   "DEC: No Injury / Property Damage",
   "DEC: No Insurance",
+  "DEC: Non-PI Legal Matter",
+  "DEC: Outside Service Area",
   "DEC: Referred",
   "DEC: Statue Issue",
   "DEC: Workers Comp",
@@ -25,13 +27,12 @@ export const NOT_A_LEAD_TAGS = [
   "NL: Wrong Number / Misdial",
 ] as const;
 
-export const NOT_QUALIFIED_TAGS = [
-  "NQ: Non-PI Legal Matter",
-  "NQ: Outside Service Area",
-  "NQ: Unresponsive",
-] as const;
+/** Staff do not pick this. The 16-day follow-up assigns it when the sequence ends with no connection. */
+export const NOT_QUALIFIED_TAGS = ["NQ: Unresponsive"] as const;
 
-export const SIZE_TAGS = ["S: Large", "S: Medium", "S: Small"] as const;
+const RETIRED_NOT_QUALIFIED_TAGS = ["NQ: Spam / Robo Call", "NQ: Outside Service Area", "NQ: Non-PI Legal Matter"] as const;
+
+export const SIZE_TAGS = ["S: Small", "S: Medium", "S: Large"] as const;
 
 export const TYPE_TAGS = [
   "T: Auto Accident",
@@ -56,7 +57,7 @@ export const LEAD_TAGS = [
 ] as const;
 
 /** Tags this app may replace on a CallRail call. The old spam tag is listed so a push removes it. */
-export const MANAGED_CALLRAIL_TAGS = [...LEAD_TAGS, "NQ: Spam / Robo Call"] as const;
+export const MANAGED_CALLRAIL_TAGS = [...LEAD_TAGS, ...RETIRED_NOT_QUALIFIED_TAGS] as const;
 
 export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
   "QUALIFIED YES": "QUALIFIED YES",
@@ -79,9 +80,9 @@ export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
   "NL: Spam / Robo Call": "NL: Spam / Robo Call",
   "NL: Vendor / Sales": "NL: Vendor / Sales",
   "NL: Wrong Number / Misdial": "NL: Wrong Number / Misdial",
-  "NQ: Non-PI Legal Matter": "NQ: Non-PI Legal Matter",
-  "NQ: Outside Service Area": "NQ: Outside Service Area",
   "NQ: Unresponsive": "NQ: Unresponsive",
+  "DEC: Non-PI Legal Matter": "DEC: Non-PI Legal Matter",
+  "DEC: Outside Service Area": "DEC: Outside Service Area",
   "S: Large": "S: Large",
   "S: Medium": "S: Medium",
   "S: Small": "S: Small",
@@ -105,8 +106,19 @@ export function declineReasonFromTag(tag: string | null | undefined): string | n
   return reason || null;
 }
 
+const LEGACY_DECLINE: Record<string, (typeof DECLINE_TAGS)[number]> = {
+  "NQ: Outside Service Area": "DEC: Outside Service Area",
+  "NQ: Non-PI Legal Matter": "DEC: Non-PI Legal Matter",
+};
+
 export function selectedDecline(tags: string[]): string {
-  return tags.find((tag) => DECLINE_SET.has(tag)) ?? "";
+  const direct = tags.find((tag) => DECLINE_SET.has(tag));
+  if (direct) return direct;
+  for (const tag of tags) {
+    const mapped = LEGACY_DECLINE[tag];
+    if (mapped) return mapped;
+  }
+  return "";
 }
 
 export function qualifiedChoice(tags: string[]): typeof QUALIFIED_YES | typeof QUALIFIED_NO | "" {
@@ -115,7 +127,6 @@ export function qualifiedChoice(tags: string[]): typeof QUALIFIED_YES | typeof Q
   return "";
 }
 
-const NOT_QUALIFIED_SET = new Set<string>(NOT_QUALIFIED_TAGS);
 const SIZE_SET = new Set<string>(SIZE_TAGS);
 const TYPE_SET = new Set<string>(TYPE_TAGS);
 
@@ -152,16 +163,23 @@ export function tagsFromSelection(input: {
   notQualified?: string;
   requireQualified?: boolean;
 }): { tags: string[]; qualified: boolean | null; decline_reason: string | null } {
-  const notQualified = NOT_QUALIFIED_SET.has(input.notQualified || "") ? String(input.notQualified) : "";
-  const nonPi = Boolean(input.nonPi) || notQualified === "NQ: Non-PI Legal Matter";
+  const legacy = input.notQualified || "";
+  const nonPi = Boolean(input.nonPi) || legacy === "NQ: Non-PI Legal Matter";
   const qualified =
-    notQualified || nonPi
+    legacy === "NQ: Unresponsive" || nonPi
       ? QUALIFIED_NO
       : input.qualified === QUALIFIED_YES || input.qualified === QUALIFIED_NO
         ? input.qualified
         : "";
   if (!qualified && input.requireQualified !== false) throw new Error("Choose Qualified YES or Qualified NO.");
-  const decline = DECLINE_SET.has(input.decline) ? input.decline : "";
+  const decline =
+    DECLINE_SET.has(input.decline)
+      ? input.decline
+      : legacy === "NQ: Outside Service Area"
+        ? "DEC: Outside Service Area"
+        : legacy === "NQ: Non-PI Legal Matter"
+          ? "DEC: Non-PI Legal Matter"
+          : "";
   const wanted = qualified === QUALIFIED_NO ? false : Boolean(input.desired || input.signed);
   const coverage = COVERAGE_TAGS.filter((tag) => input.coverage.includes(tag)).filter((tag) => {
     if (tag === "CVR DESIRED") return wanted;
@@ -176,7 +194,7 @@ export function tagsFromSelection(input: {
 
   const tags: string[] = qualified ? [qualified, ...coverage] : [...coverage];
   if (decline) tags.push(decline);
-  if (notQualified) tags.push(notQualified);
+  if (legacy === "NQ: Unresponsive") tags.push("NQ: Unresponsive");
   if (SIZE_SET.has(input.size || "")) tags.push(String(input.size));
   if (!nonPi && TYPE_SET.has(input.injuryType || "")) tags.push(String(input.injuryType));
   return {

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary } from "@/lib/ui";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
-import { caseTypeChoices, isSourceType, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_SOURCES, LEAD_STATUSES, SOURCE_CHANNELS, SOURCE_TYPE_OPTIONS, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_SOURCES, LEAD_STATUSES, SOURCE_CHANNELS, SOURCE_TYPE_OPTIONS, standardLeadEmail, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 
 function isNextRedirect(err: unknown): boolean {
   return (
@@ -35,6 +35,10 @@ export function LeadForm({
   action: (formData: FormData) => Promise<void>;
   staff?: { name: string }[];
 }) {
+  const [email, setEmail] = useState(() => standardLeadEmail(lead?.email) ?? "");
+  useEffect(() => {
+    setEmail(standardLeadEmail(lead?.email) ?? "");
+  }, [lead?.id, lead?.email]);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +65,22 @@ export function LeadForm({
       <Field label="Date" name="lead_date" type="date" defaultValue={dateValue(lead?.lead_date)} />
       <Field label="Lead name" name="lead_name" defaultValue={lead?.lead_name ?? ""} />
       <Field label="Phone" name="phone" defaultValue={lead?.phone ?? ""} />
-      <Field label="Email" name="email" defaultValue={lead?.email ?? ""} />
+      <label className="block text-sm">
+        <span className="font-medium text-slate-700">Email</span>
+        <input
+          name="email"
+          value={email}
+          autoComplete="off"
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="Optional"
+          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+        />
+        {emailIsUnavailable(email) ? null : (
+          <button type="button" onClick={() => setEmail(EMAIL_NOT_AVAILABLE)} className="mt-1 text-xs font-medium text-navy underline">
+            N/A
+          </button>
+        )}
+      </label>
       <ChannelField value={lead?.source_channel ?? ""} />
       <label className="block text-sm">
         <span className="font-medium text-slate-700">Lead source</span>
@@ -124,8 +143,8 @@ export function LeadForm({
         defaultValue={dateValue(lead?.consultation_date)}
       />
       <p className="text-xs leading-5 text-slate-500 sm:col-span-2">
-        A consultation is a real back-and-forth about an injury, not a short question or a call that only scheduled one.
-        It can be a later day than the lead. Quo Router fills the first date. Leave it blank until that conversation happens.
+        A consultation is a meaningful discussion of the potential case: the incident, responsibility, injuries, and treatment. Not every topic has to come up. A short injury question, a call that only scheduled one, or a brief workers' compensation inquiry that is referred out does not count.
+        It can be a later day than the lead. Quo Router fills the first date from the call transcript. Leave it blank until that conversation happens.
       </p>
       <Tri
         label="Conversion desired"

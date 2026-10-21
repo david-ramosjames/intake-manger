@@ -14,7 +14,7 @@ import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
-import { canonicalLeadSource, isPiCaseType, isSourceType } from "./leads";
+import { canonicalLeadSource, isPiCaseType, isSourceType, standardLeadEmail } from "./leads";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage } from "./close-ready";
@@ -95,7 +95,7 @@ export async function startTextSequence(
     const leadId = text(formData, "lead_id");
     const sequence = text(formData, "sequence");
     if (!leadId) return { error: "Missing the lead." };
-    if (sequence !== "new-lead" && sequence !== "more-info") return { error: "Choose New lead or More info." };
+    if (sequence !== "more-info") return { error: "More Info is the only sequence that can be started here." };
     const { data: lead, error } = await supabase
       .from("leads")
       .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email")
@@ -336,19 +336,20 @@ export async function saveLeadDetails(formData: FormData) {
   const sourceType = isSourceType(chosenType) ? chosenType : writtenSource.type || null;
   const leadName = text(formData, "lead_name");
   const phone = text(formData, "phone");
-  const contactEmail = text(formData, "email");
+  const contactEmail = standardLeadEmail(text(formData, "email"));
   const leadDate = text(formData, "lead_date");
   const phoneE164 = phone ? toE164(phone) : null;
   const keepPhone = formData.get("keep_phone") === "1";
   if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
+  const markingNonLead = EXCLUDED_CALLER_CLASSES.includes(text(formData, "non_lead_reason") as ExcludedCallerClass);
   const consulted = text(formData, "consulted");
   const consultationDate = text(formData, "consultation_date");
-  if (consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {
+  if (!markingNonLead && consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {
     throw new Error("Enter the consultation date.");
   }
   const signedDecision = text(formData, "signed_decision");
   const signedDate = text(formData, "date_signed");
-  if (admin && signedDecision === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(signedDate ?? "")) {
+  if (!markingNonLead && admin && signedDecision === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(signedDate ?? "")) {
     throw new Error("Enter the signed date.");
   }
   const { data: before, error: loadError } = await supabase
@@ -724,7 +725,7 @@ export async function classifyNonLead(formData: FormData) {
     throw new Error("A signed or promoted matter stays a lead.");
   }
   assertCloseReady(data, "nonlead");
-  const drop = new Set<string>([...NOT_A_LEAD_TAGS, "NQ: Spam / Robo Call", "QUALIFIED YES", "CVR DESIRED"]);
+  const drop = new Set<string>([...NOT_A_LEAD_TAGS, "NQ: Spam / Robo Call", "NQ: Outside Service Area", "NQ: Non-PI Legal Matter", "QUALIFIED YES", "CVR DESIRED"]);
   const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !drop.has(tag));
   if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
   const reasonTag = NON_LEAD_TAG[reason];
@@ -807,10 +808,10 @@ export async function markReferralOpportunity(leadId: string, formData: FormData
   if (!isPracticeArea(area)) throw new Error("Choose the legal practice area.");
   const outside = area !== "personal_injury";
   const { data: current } = await supabase.from("leads").select("callrail_tags").eq("id", leadId).maybeSingle();
-  const tags = ((current?.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES");
+  const tags = ((current?.callrail_tags as string[] | null) ?? []).filter((tag) => tag !== "QUALIFIED YES" && tag !== "NQ: Non-PI Legal Matter");
   if (outside) {
     if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
-    if (!tags.includes("NQ: Non-PI Legal Matter")) tags.push("NQ: Non-PI Legal Matter");
+    if (!tags.includes("DEC: Non-PI Legal Matter")) tags.push("DEC: Non-PI Legal Matter");
   }
   const patch: { practice_area: string; referral_opportunity: boolean; caller_class: string | null; close_suggestion: null; qualified?: boolean; callrail_tags?: string[] } = {
     practice_area: area,
@@ -1372,8 +1373,11 @@ export async function saveLeadTags(leadId: string, formData: FormData) {
     requireQualified: false,
   });
   const hadSpam = (before.callrail_tags ?? []).some((tag: string) => tag === "NQ: Spam / Robo Call" || tag === "NL: Spam / Robo Call");
-  if (hadSpam && String(formData.get("qualified_tag") ?? "") !== "QUALIFIED YES" && !String(formData.get("not_qualified_tag") ?? "") && !tagged.tags.includes("NL: Spam / Robo Call")) {
+  if (hadSpam && String(formData.get("qualified_tag") ?? "") !== "QUALIFIED YES" && !tagged.tags.includes("NL: Spam / Robo Call")) {
     tagged.tags.push("NL: Spam / Robo Call");
+  }
+  if ((before.callrail_tags ?? []).includes("NQ: Unresponsive") && !tagged.tags.includes("NQ: Unresponsive")) {
+    tagged.tags.push("NQ: Unresponsive");
   }
   const { error: updateError } = await supabase
     .from("leads")

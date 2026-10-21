@@ -4,7 +4,7 @@ import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified, mi
 import { listAccident, slackMessageUrl } from "./leads";
 import { readLeadChannel, type LeadChannelMessage } from "./slack";
 import { leadIsClosed, parseSlackLead, slackPostDisposition } from "./slack-lead";
-import { DECLINE_TAGS, NOT_QUALIFIED_TAGS, SIZE_TAGS, TYPE_TAGS } from "./tags";
+import { NOT_QUALIFIED_TAGS, SIZE_TAGS, TYPE_TAGS, selectedDecline } from "./tags";
 
 const LEAD_COLUMNS =
   "id, lead_name, phone, phone_e164, source_channel, case_type, case_detail, grade, consultation_date, qualified, desired_case, desired_source, signed_case, lead_status, caller_class, callrail_tags, decline_reason, owner_name, agreement_status, agreement_sent_at, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, summary, created_at";
@@ -81,6 +81,14 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
+function declineShown(reason: string | null | undefined, tags: string[]): string {
+  if (reason) return reason;
+  const tag = selectedDecline(tags);
+  if (!tag) return "—";
+  const split = tag.indexOf(":");
+  return split >= 0 ? tag.slice(split + 1).trim() : tag;
+}
+
 function tagAfter(tags: string[] | null | undefined, options: readonly string[]): string {
   const tag = (tags ?? []).find((item) => options.includes(item));
   if (!tag) return "—";
@@ -133,7 +141,7 @@ function rowFromLead(
     desired: lead ? desiredWord(milestoneDesired(lead)) : "—",
     signed: lead && milestoneSigned(lead) ? "Yes" : "—",
     notALead: lead ? notALead(lead) : "—",
-    decline: lead?.decline_reason || tagAfter(tags, DECLINE_TAGS),
+    decline: declineShown(lead?.decline_reason, tags),
     injury: tagAfter(tags, TYPE_TAGS),
     size: tagAfter(tags, SIZE_TAGS),
     notQualified: tagAfter(tags, NOT_QUALIFIED_TAGS),

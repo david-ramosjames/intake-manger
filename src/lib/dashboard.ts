@@ -1,11 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { Pool } from "pg";
 import { isWorkLead } from "@/lib/caller-class";
 import { slackMessageUrl } from "@/lib/leads";
 import { milestoneDesired, milestoneQualified, milestoneSigned } from "@/lib/desired";
 import { averageCallGrade } from "@/lib/call-grade";
 import { priorityPlace } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
-import { ANSWER_RATE_INBOXES, loadInboxAnswerRate } from "@/lib/inbox-calls";
+import { ANSWER_RATE_INBOXES, LEADS_ANSWER_INBOXES, loadInboxAnswerRate } from "@/lib/inbox-calls";
 import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, chicagoLocalToIso } from "@/lib/time";
 
@@ -281,22 +282,91 @@ function statusWord(tone: RateMetric["tone"]): string {
   return "Not enough recorded yet";
 }
 
-async function countInteractions(
-  supabase: SupabaseClient,
-  period: ResolvedPeriod,
-  kind: "human" | "inbound" | "all",
-): Promise<number> {
-  let query = supabase
-    .from("intake_interactions")
-    .select("id", { count: "exact", head: true })
-    .gte("occurred_at", period.fromIso)
-    .lt("occurred_at", period.toIso);
-  if (kind === "human") query = query.eq("type", "call").eq("direction", "inbound");
-  else if (kind === "inbound") query = query.eq("direction", "inbound").in("type", ["call", "missed_call", "sona_call"]);
-  else query = query.in("type", ["call", "missed_call", "sona_call"]);
-  const { count, error } = await query;
-  if (error) throw new Error(error.message);
-  return count ?? 0;
+function declinedLegalLead(lead: CohortLead): boolean {
+  if (milestoneDesired(lead) === true || milestoneSigned(lead)) return false;
+  const tags = lead.callrail_tags ?? [];
+  const caseType = (lead.case_type || "").trim().toLowerCase();
+  const nonPi =
+    lead.caller_class === "non_pi" ||
+    caseType === "non-pi legal matter" ||
+    tags.includes("NQ: Non-PI Legal Matter") ||
+    tags.includes("DEC: Non-PI Legal Matter");
+  const unwanted = tags.some((tag) => tag.startsWith("DEC:")) || milestoneDesired(lead) === false;
+  return nonPi || unwanted;
+}
+
+const VOICEMAIL =
+  /\b(voicemail|voice mail|left (a |your )?(message|voicemail)|after the (tone|beep)|mailbox is full|please leave (a |your )?message|no answer|not answered|didn'?t answer|did not answer|went to voicemail|was not answered|unable to reach|nobody answered|no one answered)\b/i;
+
+function bareOptOut(text: string): boolean {
+  const cleaned = text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ");
+  return ["stop", "stopall", "unsubscribe", "cancel", "end", "quit", "no", "no thanks", "no thank you"].includes(cleaned);
+}
+
+function substantiveReply(text: string | null): boolean {
+  const body = (text || "").trim();
+  if (body.length < 2 || bareOptOut(body)) return false;
+  return true;
+}
+
+function liveCall(direction: string, text: string, duration: number | null): boolean {
+  if (VOICEMAIL.test(text)) return false;
+  const outbound = /out/i.test(direction);
+  const body = text.trim();
+  if (!outbound) return true;
+  if (duration != null && duration < 90) return body.length >= 240;
+  return body.length >= 80;
+}
+
+function meaningfulContact(row: {
+  type: string | null;
+  direction: string | null;
+  content: string | null;
+  transcript: string | null;
+  duration: number | null;
+}): boolean {
+  const type = (row.type || "").toLowerCase();
+  const direction = (row.direction || "").toLowerCase();
+  if (type === "missed_call" || type === "voicemail" || type === "sona_call") return false;
+  if (type === "text") return (direction === "inbound" || direction === "incoming") && substantiveReply(row.content);
+  if (type !== "call") return false;
+  const text = `${row.content || ""}\n${row.transcript || ""}`.slice(0, 4000);
+  return liveCall(direction, text, row.duration);
+}
+
+async function callDurations(ids: string[]): Promise<Map<string, number>> {
+  const connectionString = process.env.REPORTING_DATABASE_URL?.trim();
+  const unique = [...new Set(ids.filter(Boolean))].slice(0, 4000);
+  if (!connectionString || !unique.length) return new Map();
+  const local = /localhost|127\.0\.0\.1/.test(connectionString);
+  const pool = new Pool({
+    connectionString,
+    ssl: local ? false : { rejectUnauthorized: false },
+    max: 1,
+    connectionTimeoutMillis: 4000,
+    query_timeout: 4000,
+  });
+  try {
+    const result = await pool.query<{ call_id: string; duration_sec: number | null }>(
+      "select call_id, max(duration_sec)::int as duration_sec from quo_calls where call_id = any($1::text[]) group by call_id",
+      [unique],
+    );
+    const durations = new Map<string, number>();
+    for (const row of result.rows) {
+      if (row.call_id && row.duration_sec != null && Number.isFinite(Number(row.duration_sec))) {
+        durations.set(row.call_id, Number(row.duration_sec));
+      }
+    }
+    return durations;
+  } catch {
+    return new Map();
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
 }
 
 export async function loadDashboardReport(supabase: SupabaseClient, period: ResolvedPeriod): Promise<DashboardReport> {
@@ -313,13 +383,13 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
   });
   const cohortIds = cohort.map((lead) => lead.id);
   const desiredLeads = cohort.filter((lead) => milestoneDesired(lead) === true || milestoneSigned(lead));
-  const desiredIds = new Set(desiredLeads.map((lead) => lead.id));
   const qualified = cohort.filter((lead) => milestoneQualified(lead) === true).length;
   const signedCohort = cohort.filter((lead) => milestoneSigned(lead)).length;
   const signedDesired = desiredLeads.filter((lead) => milestoneSigned(lead)).length;
+  const declinedIds = new Set(cohort.filter((lead) => declinedLegalLead(lead)).map((lead) => lead.id));
   const referred = new Set<string>();
   for (const lead of cohort) {
-    if (!desiredIds.has(lead.id) && (lead.lead_status === "Referred" || lead.close_reason === "referred")) referred.add(lead.id);
+    if (declinedIds.has(lead.id) && (lead.lead_status === "Referred" || lead.close_reason === "referred")) referred.add(lead.id);
   }
   for (let index = 0; index < cohortIds.length; index += 80) {
     const slice = cohortIds.slice(index, index + 80);
@@ -327,56 +397,84 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
     const { data: sends, error: sendError } = await supabase.from("referral_sends").select("lead_id").in("lead_id", slice);
     if (sendError) throw new Error(sendError.message);
     for (const row of sends ?? []) {
-      if (row.lead_id && !desiredIds.has(row.lead_id)) referred.add(row.lead_id);
+      if (row.lead_id && declinedIds.has(row.lead_id)) referred.add(row.lead_id);
     }
   }
-  const notDesired = cohort.length - desiredLeads.length;
 
-  const oldIds = cohort
-    .filter((lead) => {
-      const day = arrivalDay(lead);
-      return day && daysBetween(day, period.end) >= 16;
-    })
-    .map((lead) => lead.id);
-  const connected = new Set<string>();
+  const oldLeads = cohort.filter((lead) => {
+    const day = arrivalDay(lead);
+    return day && daysBetween(day, period.end) >= 16;
+  });
+  const arrivalAt = new Map<string, number>();
+  for (const lead of oldLeads) {
+    const stamp = lead.created_at ? Date.parse(lead.created_at) : Date.parse(chicagoLocalToIso(`${arrivalDay(lead)}T00:00`));
+    if (Number.isFinite(stamp)) arrivalAt.set(lead.id, stamp);
+  }
+  const sequenceMs = 16 * 24 * 60 * 60 * 1000;
+  const touches: {
+    lead_id: string | null;
+    type: string | null;
+    direction: string | null;
+    content: string | null;
+    transcript: string | null;
+    occurred_at: string | null;
+    source_id: string | null;
+  }[] = [];
+  const oldIds = [...arrivalAt.keys()];
   for (let index = 0; index < oldIds.length; index += 80) {
     const slice = oldIds.slice(index, index + 80);
     if (!slice.length) break;
-    const { data: calls, error: callError } = await supabase
+    const { data: rows, error: touchError } = await supabase
       .from("intake_interactions")
-      .select("lead_id")
-      .eq("type", "call")
+      .select("lead_id, type, direction, content, transcript, occurred_at, source_id")
+      .in("type", ["call", "text", "missed_call", "sona_call", "voicemail"])
       .in("lead_id", slice);
-    if (callError) throw new Error(callError.message);
-    for (const row of calls ?? []) {
-      if (row.lead_id) connected.add(row.lead_id);
+    if (touchError) throw new Error(touchError.message);
+    touches.push(...((rows ?? []) as typeof touches));
+  }
+  const durations = await callDurations(touches.map((row) => row.source_id || "").filter(Boolean));
+  const connected = new Set<string>();
+  for (const row of touches) {
+    if (!row.lead_id || connected.has(row.lead_id)) continue;
+    const start = arrivalAt.get(row.lead_id);
+    const at = row.occurred_at ? Date.parse(row.occurred_at) : Number.NaN;
+    if (start == null || !Number.isFinite(at) || at < start || at > start + sequenceMs) continue;
+    if (
+      meaningfulContact({
+        type: row.type,
+        direction: row.direction,
+        content: row.content,
+        transcript: row.transcript,
+        duration: row.source_id ? durations.get(row.source_id) ?? null : null,
+      })
+    ) {
+      connected.add(row.lead_id);
     }
   }
   const never = oldIds.filter((id) => !connected.has(id)).length;
 
-  const [callCount, inbox] = await Promise.all([
-    countInteractions(supabase, period, "all"),
+  const [inbox, speed, consults, signedInPeriod, callQuality] = await Promise.all([
     loadInboxAnswerRate(supabase, period.fromIso, period.toIso),
-  ]);
-
-  const [speed, consults, signedInPeriod, callQuality] = await Promise.all([
     loadSpeedDetail(supabase, period),
     countConsults(supabase, period),
     countSigned(supabase, period),
     loadCallQuality(supabase, period),
   ]);
 
-  const answer = percent(inbox.answered, inbox.incoming);
-  const inboxPartial = Boolean(inbox.earliest && Date.parse(inbox.earliest) > Date.parse(period.fromIso) + 60 * 60 * 1000);
+  const answer = percent(inbox.total.answered, inbox.total.incoming);
+  const leadsAnswer = percent(inbox.leads.answered, inbox.leads.incoming);
+  const inboxPartial = Boolean(inbox.total.earliest && Date.parse(inbox.total.earliest) > Date.parse(period.fromIso) + 60 * 60 * 1000);
   const inboxLines = ANSWER_RATE_INBOXES.join(", ");
+  const leadLines = LEADS_ANSWER_INBOXES.join(" and ");
   const wanted = percent(signedDesired, desiredLeads.length);
-  const referral = percent(referred.size, notDesired);
+  const referral = percent(referred.size, declinedIds.size);
   const neverRate = percent(never, oldIds.length);
   const qualification = percent(qualified, cohort.length);
   const conversion = percent(signedCohort, cohort.length);
   const speedRate = percent(speed.met, speed.total);
 
   const answerTone = higher(answer, 90);
+  const leadsAnswerTone = higher(leadsAnswer, 90);
   const wantedTone = higher(wanted, 90);
   const referralTone = higher(referral, 95);
   const neverTone = lower(neverRate, 5);
@@ -387,17 +485,30 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
   return {
     rates: [
       {
-        label: "Answer rate",
+        label: "Total answer rate",
         display: showPercent(answer),
         goal: "Goal > 90%",
         detail:
           answer == null
-            ? inbox.earliest
+            ? inbox.total.earliest
               ? statusWord(answerTone)
               : "Inbox calls are still loading"
-            : `${statusWord(answerTone)} · ${inbox.answered} of ${inbox.incoming} incoming calls${inboxPartial ? " · history is still filling for the start of this range" : ""}`,
-        definition: `Answered by a person divided by incoming calls, on the same inboxes as the Call Stats email: ${inboxLines}. Extra Number, SA Law Firm, and Trucking Chicas are left out. Incoming calls on RJL Outbound are left out. A person answer is a completed incoming call that someone picked up. Sona, voicemail, missed calls, and forwards with nobody who picked up stay in the total.`,
+            : `${statusWord(answerTone)} · ${inbox.total.answered} of ${inbox.total.incoming} incoming calls${inboxPartial ? " · history is still filling for the start of this range" : ""}`,
+        definition: `Answered by a person divided by incoming calls, on the same inboxes as the Call Stats email: ${inboxLines}. This is the total answer rate, including the main line. Extra Number, SA Law Firm, and Trucking Chicas are left out. Incoming calls on RJL Outbound are left out. A person answer is a completed incoming call that someone picked up. Sona, voicemail, missed calls, and forwards with nobody who picked up stay in the total.`,
         tone: answerTone,
+      },
+      {
+        label: "Leads answer rate",
+        display: showPercent(leadsAnswer),
+        goal: "Goal > 90%",
+        detail:
+          leadsAnswer == null
+            ? inbox.leads.earliest
+              ? statusWord(leadsAnswerTone)
+              : "Inbox calls are still loading"
+            : `${statusWord(leadsAnswerTone)} · ${inbox.leads.answered} of ${inbox.leads.incoming} incoming calls`,
+        definition: `Answered by a person divided by incoming calls on ${leadLines} only. The Leads line is the RJL lead number. The main line, RGV Number, and RJL Transfers stay in the total answer rate and out of this one. The person-answer rule is the same as the Call Stats email.`,
+        tone: leadsAnswerTone,
       },
       {
         label: "Missed calls and form fills",
@@ -405,7 +516,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         goal: "Goal: contacted within 2 minutes",
         detail: speed.total ? `${statusWord(speedTone)} · ${speed.met} of ${speed.total} contacted in time` : statusWord(speedTone),
         definition:
-          "Share of missed calls, Sona calls, and form fills from intake leads contacted with an outbound call or text within 2 minutes. Insurance companies, existing clients, and other non-leads are left out. The automatic first text counts when it is stored on that lead or that phone number. A form text that lands up to 2 minutes before the lead record is saved still counts, because that text often goes out first. Form fills are Meta form, site form, web chat, and website leads. One with no outbound call or text stored counts as not contacted in time. Open the card to see each one, its call and text log, and the Slack post.",
+          "One first contact per new lead: the earliest missed call, Sona call, or web form that needs a callback. Later calls to that lead are not counted again. Contacted in time means an outbound call, or a text a person wrote, within 2 minutes. Automated sequence texts do not count as contact. A form text that lands up to 2 minutes before the lead record is saved still counts when it is not one of those sequence texts. Insurance companies, existing clients, and other non-leads are left out. Open the card to see each lead, its call and text log, and the Slack post.",
         tone: speedTone,
       },
       {
@@ -413,16 +524,16 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         display: showPercent(wanted),
         goal: "Goal 90%+",
         detail: wanted == null ? statusWord(wantedTone) : `${statusWord(wantedTone)} · ${signedDesired} of ${desiredLeads.length} desired`,
-        definition: "Signed cases divided by desired cases, among leads that arrived in this period. A signed case counts as desired.",
+        definition: "Wanted conversion is signed desired cases divided by desired cases, among leads that arrived in this period. A signed case counts as desired.",
         tone: wantedTone,
       },
       {
         label: "Declined referral rate",
         display: showPercent(referral),
         goal: "Goal 95%+",
-        detail: referral == null ? statusWord(referralTone) : `${statusWord(referralTone)} · ${referred.size} of ${notDesired} not desired`,
+        detail: referral == null ? statusWord(referralTone) : `${statusWord(referralTone)} · ${referred.size} of ${declinedIds.size} declined leads`,
         definition:
-          "Referrals given divided by leads minus desired cases, for leads that arrived in this period. A referral counts when a referral text is logged or the lead is marked referred.",
+          "Referrals given divided by genuine legal leads the firm declined in this period. That includes non-PI legal matters and PI cases marked not wanted or given a decline reason. Spam, vendors, existing clients, and other non-leads stay out. A lead that is still undecided stays out. A referral counts when a referral text is logged or the lead is marked referred.",
         tone: referralTone,
       },
       {
@@ -430,10 +541,10 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         display: showPercent(neverRate),
         goal: "Goal < 5%",
         detail: oldIds.length
-          ? `${neverTone === "short" ? "Above the limit" : statusWord(neverTone)} · ${never} of ${oldIds.length} leads at least 16 days old`
-          : "No leads in this period are 16 days old yet",
+          ? `${neverTone === "short" ? "Above the limit" : statusWord(neverTone)} · ${never} of ${oldIds.length} leads through the 16-day sequence`
+          : "No leads in this period have finished the 16-day sequence",
         definition:
-          "Leads with no connected phone call after 16 days, divided by leads that arrived in this period and are at least 16 days old. A connected call is a human call. Missed calls and Sona calls do not count. Call length is not stored yet.",
+          "Leads that finished the 16-day follow-up with no meaningful two-way contact, divided by leads that arrived in this period and are old enough for that sequence to finish. An outbound attempt, a voicemail, a missed call, or a Sona call is not a connection. A live conversation counts, even a short one. A call counts as live unless the transcript or summary identifies a voicemail or an unanswered attempt. When call length is available, a call under 90 seconds counts only when the transcript still shows a conversation. An inbound text counts when it says something other than STOP or NO.",
         tone: oldIds.length ? neverTone : "empty",
       },
       {
@@ -441,7 +552,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         display: showPercent(qualification),
         goal: "Goal > 25%",
         detail: qualification == null ? statusWord(qualificationTone) : `${statusWord(qualificationTone)} · ${qualified} of ${cohort.length} leads`,
-        definition: "Qualified leads divided by leads that arrived in this period. A lead with no qualification recorded is not counted as qualified.",
+        definition: "Qualification rate is qualified leads divided by all leads that arrived in this period. Spam, vendors, existing clients, and other non-leads are not leads. A lead with no qualification recorded stays in the total and is not counted as qualified.",
         tone: qualificationTone,
       },
       {
@@ -449,7 +560,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         display: showPercent(conversion),
         goal: "Goal > 10%",
         detail: conversion == null ? statusWord(conversionTone) : `${statusWord(conversionTone)} · ${signedCohort} of ${cohort.length} leads`,
-        definition: "Signed cases divided by leads that arrived in this period.",
+        definition: "Conversion rate is signed cases divided by all leads that arrived in this period. Signed means the representation contract is signed.",
         tone: conversionTone,
       },
       {
@@ -460,15 +571,16 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
           ? `${callQuality.score} average · ${callQuality.count} intake ${callQuality.count === 1 ? "call" : "calls"}`
           : "No graded intake calls in this period",
         definition:
-          "Average grade of intake calls in this period, the same average as the Call grades page. This is how the intake was handled. The case grade on the work queue is separate.",
+          "Call quality is the average from the call-quality grades, the same average as the Call grades page. It grades how the intake call was handled. It does not use the case grade.",
         tone: callQuality ? "open" : "empty",
       },
     ],
     counts: [
       {
-        label: "Calls",
-        value: String(callCount),
-        definition: "Calls in this period, including inbound, outbound, missed calls, and Sona calls.",
+        label: "First contacts",
+        value: String(speed.total),
+        definition:
+          "The first missed call, Sona call, or web form for each new lead in this period. Later calls to the same lead are not added again.",
       },
       {
         label: "Leads",
@@ -667,6 +779,38 @@ function earlier(left: SpeedHit | null, right: SpeedHit | null): SpeedHit | null
   return left.at <= right.at ? left : right;
 }
 
+function initialContacts(rows: SpeedDraft[]): SpeedDraft[] {
+  const kept = new Map<string, SpeedDraft>();
+  for (const event of rows) {
+    const key = event.leadId || (event.phone.length >= 10 ? `phone:${event.phone}` : event.id);
+    const current = kept.get(key);
+    if (!current || event.at < current.at) kept.set(key, event);
+  }
+  return [...kept.values()];
+}
+
+function templatePattern(body: string): RegExp | null {
+  const trimmed = body.replace(/\s+/g, " ").trim();
+  if (trimmed.length < 20) return null;
+  const pieces = trimmed.split(/\{\{\s*(?:name|case_type)\s*\}\}/i);
+  const pattern = pieces
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+"))
+    .join("[\\s\\S]{0,80}");
+  return new RegExp(pattern, "i");
+}
+
+async function automatedPatterns(supabase: SupabaseClient): Promise<RegExp[]> {
+  const { data, error } = await supabase.from("sequence_steps").select("body").eq("queue", "text");
+  if (error || !data) return [];
+  return data.map((row) => templatePattern(String(row.body || ""))).filter((pattern): pattern is RegExp => Boolean(pattern));
+}
+
+function isAutomatedText(content: string | null, patterns: RegExp[]): boolean {
+  const text = (content || "").replace(/\s+/g, " ").trim();
+  if (!text || !patterns.length) return false;
+  return patterns.some((pattern) => pattern.test(text));
+}
+
 export async function loadSpeedDetail(
   supabase: SupabaseClient,
   period: ResolvedPeriod,
@@ -791,8 +935,9 @@ export async function loadSpeedDetail(
     });
   }
 
+  const contacts = initialContacts(drafts);
   const missingNames = withLog
-    ? [...new Set(drafts.map((event) => event.leadId).filter((id): id is string => Boolean(id && !names.has(id))))]
+    ? [...new Set(contacts.map((event) => event.leadId).filter((id): id is string => Boolean(id && !names.has(id))))]
     : [];
   for (let index = 0; index < missingNames.length; index += 80) {
     const { data } = await supabase.from("leads").select("id, lead_name").in("id", missingNames.slice(index, index + 80));
@@ -819,6 +964,7 @@ export async function loadSpeedDetail(
     if (batch.length < 1000) break;
   }
 
+  const templates = await automatedPatterns(supabase);
   const hitsByLead = new Map<string, SpeedHit[]>();
   const hitsByPhone = new Map<string, SpeedHit[]>();
   const logByLead = new Map<string, LogRow[]>();
@@ -839,6 +985,7 @@ export async function loadSpeedDetail(
       }
     }
     if (!Number.isFinite(at) || row.direction !== "outbound" || (row.type !== "call" && row.type !== "text")) continue;
+    if (row.type === "text" && isAutomatedText(row.content, templates)) continue;
     const hit = { at, kind: row.type as "text" | "call" };
     if (row.lead_id) {
       const list = hitsByLead.get(row.lead_id) ?? [];
@@ -852,7 +999,7 @@ export async function loadSpeedDetail(
     }
   }
 
-  const events = drafts
+  const events = contacts
     .map((event) => {
       const lookback = event.kind === "Missed call" || event.kind === "Sona call" ? 0 : 2 * 60 * 1000;
       const contact = earlier(

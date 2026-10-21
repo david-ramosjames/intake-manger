@@ -1,5 +1,5 @@
 import { callerClassLabel, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
-import { isSourceType, slackMessageUrl } from "@/lib/leads";
+import { isSourceType, slackMessageUrl, standardLeadEmail } from "@/lib/leads";
 import { contractSent, milestoneDesired, milestoneQualified, milestoneSigned } from "@/lib/desired";
 import { toE164 } from "@/lib/phone";
 import { NOT_QUALIFIED_TAGS, selectedDecline, selectedOne, SIZE_TAGS, TYPE_TAGS } from "@/lib/tags";
@@ -10,14 +10,12 @@ const EXCLUDED = new Set<string>(EXCLUDED_CALLER_CLASSES);
 export const REVIEW_GAPS = [
   "name",
   "phone",
-  "email",
   "lead_source",
   "source_type",
   "case_type",
   "qualified",
   "consultation",
   "desired",
-  "not_qualified",
 ] as const;
 
 export type ReviewGap = (typeof REVIEW_GAPS)[number];
@@ -25,23 +23,13 @@ export type ReviewGap = (typeof REVIEW_GAPS)[number];
 export const REVIEW_GAP_LABEL: Record<ReviewGap, string> = {
   name: "Name",
   phone: "Phone",
-  email: "Email",
   lead_source: "Lead source",
   source_type: "Source type",
   case_type: "Type",
   qualified: "Qualified",
   consultation: "Consultation",
   desired: "Desired",
-  not_qualified: "Not qualified",
 };
-
-export const EMAIL_NOT_AVAILABLE = "Not Available";
-
-export function emailIsFilled(value: string): boolean {
-  const text = value.trim();
-  if (text.toLowerCase() === EMAIL_NOT_AVAILABLE.toLowerCase()) return true;
-  return text.includes("@");
-}
 
 export type ReviewLead = {
   id: string;
@@ -113,12 +101,11 @@ function yesNo(value: boolean | null): "" | "yes" | "no" {
 
 export function reviewGaps(lead: Pick<
   ReviewLead,
-  "name" | "phone" | "email" | "leadSource" | "sourceType" | "caseType" |   "qualified" | "consulted" | "consultation" | "desired" | "notQualified"
+  "name" | "phone" | "email" | "leadSource" | "sourceType" | "caseType" | "qualified" | "consulted" | "consultation" | "desired"
 >): ReviewGap[] {
   const gaps: ReviewGap[] = [];
   if (!lead.name.trim()) gaps.push("name");
   if (!toE164(lead.phone)) gaps.push("phone");
-  if (!emailIsFilled(lead.email)) gaps.push("email");
   if (!lead.leadSource.trim()) gaps.push("lead_source");
   if (!isSourceType(lead.sourceType)) gaps.push("source_type");
   if (!lead.caseType.trim()) gaps.push("case_type");
@@ -126,7 +113,6 @@ export function reviewGaps(lead: Pick<
   const consultationAnswered = lead.consulted === "no" || (lead.consulted === "yes" && /^\d{4}-\d{2}-\d{2}$/.test(lead.consultation));
   if (!consultationAnswered) gaps.push("consultation");
   if (!lead.desired) gaps.push("desired");
-  if (lead.qualified === "no" && !lead.notQualified) gaps.push("not_qualified");
   return gaps;
 }
 
@@ -151,7 +137,7 @@ export function toReviewLead(lead: ReviewSource): ReviewLead {
     id: lead.id,
     name: clean(lead.lead_name),
     phone: clean(lead.phone),
-    email: clean(lead.email),
+    email: standardLeadEmail(lead.email) ?? "",
     leadSource: clean(lead.lead_source),
     sourceType: isSourceType(clean(lead.source_type)) ? clean(lead.source_type) : "",
     caseType: clean(lead.case_type),
@@ -202,7 +188,6 @@ export function reviewCsv(rows: ReviewLead[]): string {
     "Desired",
     "Signed",
     "Declined",
-    "Not qualified",
     "Status",
     "Open or closed",
     "Missing",
@@ -230,7 +215,6 @@ export function reviewCsv(rows: ReviewLead[]): string {
         desired,
         row.signed ? "Yes" : "No",
         row.decline,
-        row.notQualified,
         row.status,
         row.closed ? "Closed" : "Open",
         reviewGaps(row).map((gap) => REVIEW_GAP_LABEL[gap]).join("; "),

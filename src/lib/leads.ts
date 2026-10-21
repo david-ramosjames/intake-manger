@@ -51,6 +51,7 @@ export const LEAD_SOURCES: { source: string; type: SourceType }[] = [
   { source: "Friend", type: "Referral" },
   { source: "Google", type: "Marketing" },
   { source: "Google Maps", type: "Marketing" },
+  { source: "Google My Business", type: "Marketing" },
   { source: "Instagram", type: "Marketing" },
   { source: "Internet", type: "Marketing" },
   { source: "Law firm", type: "Referral" },
@@ -78,8 +79,8 @@ const LEAD_SOURCE_ALIASES: Record<string, string> = {
   "google ads": "Google",
   "google lsa": "Google",
   "google organic": "Google",
-  "google my business": "Google Maps",
-  gmb: "Google Maps",
+  "google my business": "Google My Business",
+  gmb: "Google My Business",
   maps: "Google Maps",
   "apple maps": "Google Maps",
   "local services": "Google",
@@ -148,6 +149,12 @@ export function isSourceType(value: string | null | undefined): value is SourceT
   return SOURCE_TYPES.includes(value as SourceType);
 }
 
+/** Lead sources for one source type. Marketing, Referral, and Repeat each have their own list. */
+export function leadSourcesFor(type: string | null | undefined): string[] {
+  if (!isSourceType(type) || type === "Unknown") return [];
+  return LEAD_SOURCES.filter((item) => item.type === type).map((item) => item.source);
+}
+
 function canonicalizeLeadSource(trimmed: string): { source: string; type: SourceType | "" } {
   const key = trimmed.toLowerCase();
   const aliased = LEAD_SOURCE_ALIASES[key];
@@ -182,7 +189,8 @@ const SOURCE_SNIPPETS = [
 ];
 
 const SOURCE_PHRASES: { pattern: RegExp; source: string }[] = [
-  { pattern: /google\s+my\s+business|\bgmb\b|google\s+maps/i, source: "Google Maps" },
+  { pattern: /google\s+my\s+business|\bgmb\b/i, source: "Google My Business" },
+  { pattern: /google\s+maps|\bapple\s+maps\b/i, source: "Google Maps" },
   { pattern: /google/i, source: "Google" },
   { pattern: /facebook/i, source: "Facebook" },
   { pattern: /instagram/i, source: "Instagram" },
@@ -668,10 +676,23 @@ export function isLeadView(value: string | undefined): value is LeadView {
   );
 }
 
-const JUNK_CONTACT = /^(null|undefined|none|n\/a|na|-)$/i;
+export const EMAIL_NOT_AVAILABLE = "N/A";
+
+const EMAIL_UNAVAILABLE =
+  /^(n\/a|n\.a\.?|na|none|not available|not avail\.?|no email|no e-?mail|unavailable|not provided|unknown|no)$/i;
+
+/** Blank stays blank. Typed stand-ins for a missing email become N/A. */
+export function standardLeadEmail(value: string | null | undefined): string | null {
+  const text = (value ?? "").trim().replace(/\s+/g, " ");
+  if (!text || /^(null|undefined|-)$/i.test(text)) return null;
+  if (EMAIL_UNAVAILABLE.test(text)) return EMAIL_NOT_AVAILABLE;
+  return text;
+}
+
+export function emailIsUnavailable(value: string | null | undefined): boolean {
+  return standardLeadEmail(value) === EMAIL_NOT_AVAILABLE;
+}
 
 export function displayContact(value: string | null | undefined): string | null {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed || JUNK_CONTACT.test(trimmed)) return null;
-  return trimmed;
+  return standardLeadEmail(value);
 }

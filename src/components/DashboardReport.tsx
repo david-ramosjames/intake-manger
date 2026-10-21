@@ -83,6 +83,18 @@ export function DashboardReport({
         </form>
       </div>
 
+      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 sm:grid-cols-3 lg:grid-cols-6">
+        {counts.map((count) => (
+          <div key={count.label} className="bg-white px-4 py-4">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{count.label}</p>
+              <Tip text={count.definition} />
+            </div>
+            <p className="mt-2 text-2xl font-semibold tabular-nums text-navy">{count.value}</p>
+          </div>
+        ))}
+      </div>
+
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {tilesView.map((tile) => (
           <Link
@@ -100,7 +112,7 @@ export function DashboardReport({
       <section className="mt-8">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Performance</h2>
-          <p className="text-sm text-slate-500">Rates follow leads that arrived in this period, except calls and speed to lead.</p>
+          <p className="text-sm text-slate-500">Rates follow leads that arrived in this period. Answer rate uses the call lines. Speed to lead uses each lead's first contact.</p>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {rates.map((rate) => {
@@ -122,18 +134,6 @@ export function DashboardReport({
               </article>
             );
           })}
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 sm:grid-cols-3 lg:grid-cols-6">
-          {counts.map((count) => (
-            <div key={count.label} className="bg-white px-4 py-4">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{count.label}</p>
-                <Tip text={count.definition} />
-              </div>
-              <p className="mt-2 text-2xl font-semibold tabular-nums text-navy">{count.value}</p>
-            </div>
-          ))}
         </div>
       </section>
     </main>

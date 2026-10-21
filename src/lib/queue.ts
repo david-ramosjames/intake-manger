@@ -85,10 +85,15 @@ export function stageStripe(label: string): string {
 }
 
 const TEXT_SEQUENCE_LABEL: Record<string, string> = {
-  "new-lead": "New lead",
-  "more-info": "More info",
-  "qualified-lead": "Qualified lead",
-  "qualified-lead-copy": "Referral",
+  "new-lead": "Missed Call",
+  "more-info": "More Info",
+  "more_info": "More Info",
+  "qualified-lead": "Web Qualified",
+  "qualified-lead-copy": "Web Referral",
+  referral: "Web Referral",
+  "contract-follow-up": "Contract",
+  "contract-followup": "Contract",
+  contract: "Contract",
 };
 
 export function textSequenceLabel(slug: string | null | undefined): string | null {

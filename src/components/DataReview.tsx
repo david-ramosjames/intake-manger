@@ -5,8 +5,9 @@ import Link from "next/link";
 import { canonicalLeadSource, caseTypeChoices, isSourceType, LEAD_SOURCES, SOURCE_TYPE_OPTIONS } from "@/lib/leads";
 import { saveLeadDetails, saveLeadTags, setConsultation, setDesired, setQualified } from "@/lib/ops-actions";
 import { toE164 } from "@/lib/phone";
-import { EMAIL_NOT_AVAILABLE, REVIEW_GAP_LABEL, REVIEW_GAPS, reviewCsv, reviewGaps, type ReviewGap, type ReviewLead } from "@/lib/review";
-import { DECLINE_TAGS, NOT_QUALIFIED_TAGS, QUALIFIED_NO, QUALIFIED_YES, TAG_LABEL } from "@/lib/tags";
+import { emailIsUnavailable, EMAIL_NOT_AVAILABLE, standardLeadEmail } from "@/lib/leads";
+import { REVIEW_GAP_LABEL, REVIEW_GAPS, reviewCsv, reviewGaps, type ReviewGap, type ReviewLead } from "@/lib/review";
+import { DECLINE_TAGS, QUALIFIED_NO, QUALIFIED_YES, TAG_LABEL } from "@/lib/tags";
 
 const PAGE_SIZE = 40;
 
@@ -206,7 +207,6 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
               <th className="px-2 py-2">Desired</th>
               <th className="px-2 py-2">Signed</th>
               <th className="px-2 py-2">Declined</th>
-              <th className="px-2 py-2">Not qualified</th>
               <th className="px-2 py-2">Updated by</th>
             </tr>
           </thead>
@@ -216,7 +216,7 @@ export function DataReview({ rows }: { rows: ReviewLead[] }) {
             ))}
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={15} className="px-3 py-8 text-sm text-slate-500">
+                <td colSpan={14} className="px-3 py-8 text-sm text-slate-500">
                   No leads match this filter.
                 </td>
               </tr>
@@ -411,12 +411,13 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             }}
             onChange={(event) => setDraft({ ...draft, email: event.target.value })}
             onBlur={() => {
-              if (detailsChanged(draft)) void persistDetails(draft, draft.phone !== row.phone);
+              const next = { ...draft, email: standardLeadEmail(draft.email) ?? "" };
+              if (detailsChanged(next)) void persistDetails(next, next.phone !== row.phone);
               else editing.current = false;
             }}
-            className={box(gaps.has("email"), true)}
+            className={box(false, true)}
           />
-          {draft.email.trim().toLowerCase() === EMAIL_NOT_AVAILABLE.toLowerCase() ? null : (
+          {emailIsUnavailable(draft.email) ? null : (
             <button
               type="button"
               onClick={() => {
@@ -425,7 +426,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
               }}
               className="mt-1 block text-[11px] font-medium text-navy underline"
             >
-              Not available
+              N/A
             </button>
           )}
         </td>
@@ -619,36 +620,11 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             ))}
           </select>
         </td>
-        <td className="px-2 py-1.5">
-          <select
-            aria-label="Not qualified"
-            value={draft.notQualified}
-            disabled={row.signed || !draft.qualified}
-            onChange={(event) => {
-              const value = event.target.value;
-              const next: ReviewLead = value
-                ? { ...draft, notQualified: value, qualified: "no", desired: "no", desiredLocked: true }
-                : { ...draft, notQualified: "" };
-              void persistTags(next);
-            }}
-            className={box(gaps.has("not_qualified"), true)}
-          >
-            <option value="">None</option>
-            {withCurrent(
-              NOT_QUALIFIED_TAGS,
-              draft.notQualified,
-            ).map((item) => (
-              <option key={item} value={item}>
-                {TAG_LABEL[item as keyof typeof TAG_LABEL] ?? item}
-              </option>
-            ))}
-          </select>
-        </td>
         <td className="px-2 py-1.5 text-xs text-slate-600">{row.updatedBy || "—"}</td>
       </tr>
       {error ? (
         <tr>
-          <td colSpan={15} className="px-2 pb-2 text-xs text-red-700">
+          <td colSpan={14} className="px-2 pb-2 text-xs text-red-700">
             {error}
           </td>
         </tr>

@@ -43,7 +43,7 @@ const ROWS: { capability: string; owner: string; here: string }[] = [
   },
   {
     capability: "Intake funnel",
-    owner: "Quo Router records the first consultation when a call is a real back-and-forth about an injury. Sign Flow records that a contract was sent.",
+    owner: "Quo Router records the first consultation when the call transcript shows a meaningful discussion of the potential case, covering enough of the incident, responsibility, injuries, and treatment. A short injury mention or an immediate referral does not count. Sign Flow records that a contract was sent.",
     here: "Lead, consultation, qualified, conversion desired, and signed are separate milestones. A lead can leave at any step. Qualified means the firm could handle it. Desired means the firm wants to sign it. Signed waits for a person.",
   },
   {

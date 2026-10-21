@@ -85,11 +85,17 @@ function incoming(direction: string) {
   return value === "incoming" || value === "inbound";
 }
 
-export function tallyAnswerRate(rows: Array<Pick<InboxCall, "line_name" | "direction" | "status" | "answered_by" | "ai_handled">>): {
+export const LEADS_ANSWER_INBOXES = ["Leads", "Intake"] as const;
+
+export function tallyAnswerRate(
+  rows: Array<Pick<InboxCall, "line_name" | "direction" | "status" | "answered_by" | "ai_handled">>,
+  onlyLines?: readonly string[],
+): {
   answered: number;
   incoming: number;
   lines: string[];
 } {
+  const allow = onlyLines ? new Set(onlyLines.map((line) => line.toLowerCase())) : null;
   let answered = 0;
   let total = 0;
   const lines = new Set<string>();
@@ -98,6 +104,7 @@ export function tallyAnswerRate(rows: Array<Pick<InboxCall, "line_name" | "direc
     const line = row.line_name.trim();
     const key = line.toLowerCase();
     if (!line || EXCLUDE.has(key) || IGNORE_INCOMING.has(key)) continue;
+    if (allow && !allow.has(key)) continue;
     lines.add(line);
     total += 1;
     const status = row.status.toLowerCase();
@@ -392,7 +399,7 @@ export async function loadInboxAnswerRate(
   supabase: SupabaseClient,
   fromIso: string,
   toIso: string,
-): Promise<AnswerRate> {
+): Promise<{ total: AnswerRate; leads: AnswerRate }> {
   const rows: InboxCall[] = [];
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
@@ -408,14 +415,17 @@ export async function loadInboxAnswerRate(
     rows.push(...batch);
     if (batch.length < pageSize) break;
   }
-  const tally = tallyAnswerRate(rows);
   const { data: earliestRow } = await supabase
     .from("quo_inbox_calls")
     .select("created_at")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  return { ...tally, earliest: earliestRow?.created_at ?? null };
+  const earliest = earliestRow?.created_at ?? null;
+  return {
+    total: { ...tallyAnswerRate(rows), earliest },
+    leads: { ...tallyAnswerRate(rows, LEADS_ANSWER_INBOXES), earliest },
+  };
 }
 
 type LedgerCall = {

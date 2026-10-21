@@ -639,7 +639,7 @@ export function QueueFilter({
         aria-label={`Filter ${label}`}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm ${
+        className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-sm whitespace-nowrap ${
           value ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
         }`}
       >

@@ -908,43 +908,42 @@ export default async function LeadListPage({
 
       {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Arrived</span>
+      <div className="mt-3 flex flex-nowrap items-center gap-x-1.5 overflow-x-auto pb-0.5 text-sm">
+        <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400">Arrived</span>
         {RANGES.map((item) => (
           <Link
             key={item.id}
             href={href({ queue, view, q, range: item.id, funnel, focus })}
-            className={`rounded-full px-3 py-1 text-sm ${
+            className={`shrink-0 rounded-full px-2.5 py-0.5 ${
               range === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
           >
             {item.label}
           </Link>
         ))}
-        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</span>
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-slate-200" aria-hidden="true" />
+        <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400">Status</span>
         <Link
           href={href({ queue: queue === "signed" || queue === "closed" ? "all" : queue, view, q, range, funnel: "open", focus })}
-          className={`rounded-full px-3 py-1 text-sm ${funnel === "open" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
+          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
         >
           Open
         </Link>
         <Link
           href={href({ queue, view, q, range, funnel: "closed", focus })}
-          className={`rounded-full px-3 py-1 text-sm ${funnel === "closed" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
+          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "closed" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
         >
           Closed
         </Link>
-        <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         <Link
           href={href({ queue: "nonleads", view, q, range, funnel, focus })}
-          className={`rounded-full px-3 py-1 text-sm ${
+          className={`shrink-0 rounded-full px-2.5 py-0.5 ${
             queue === "nonleads" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
           }`}
         >
           Non-leads{reviewCount.count ? ` (${reviewCount.count})` : ""}
         </Link>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1.5 pl-2">
           <Suspense fallback={null}>
             <WorkListFilters
               gradeOptions={gradeOptions}
@@ -953,7 +952,7 @@ export default async function LeadListPage({
               intakeOptions={intakeOptions}
             />
           </Suspense>
-          <form action="/work" className="flex items-center gap-2">
+          <form action="/work" className="flex items-center">
             {focus !== "open" ? <input type="hidden" name="focus" value={focus} /> : null}
             {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
             {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
@@ -966,15 +965,15 @@ export default async function LeadListPage({
             <input
               name="q"
               defaultValue={q}
-              placeholder="Name, phone, or part of a phone"
-              className="w-56 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm"
+              placeholder="Name, phone…"
+              className="w-36 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm xl:w-44"
             />
           </form>
           <Link
             href={href({ queue, view, range, funnel, focus, grade: "", priority: "", screen: "", intake: "", q: "" })}
-            className="shrink-0 rounded-md border border-navy/25 bg-navy px-3 py-1 text-sm font-medium text-white hover:bg-[#0c2a56]"
+            className="shrink-0 rounded-md bg-navy px-2.5 py-0.5 text-sm font-medium text-white hover:bg-[#0c2a56]"
           >
-            Clear filters
+            Clear
           </Link>
         </div>
       </div>

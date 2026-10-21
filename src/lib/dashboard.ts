@@ -68,9 +68,14 @@ async function mapSlices<T>(ids: string[], size: number, run: (slice: string[]) 
   return batches.flat();
 }
 
+async function parallelRanges<T>(load: (from: number, to: number) => Promise<T[]>, pages: number): Promise<T[]> {
+  const batches = await Promise.all(Array.from({ length: pages }, (_, index) => load(index * 1000, index * 1000 + 999)));
+  return batches.flat();
+}
+
 export async function loadNavTiles(supabase: SupabaseClient): Promise<NavTiles> {
-  const openLeads = (
-    await collectPages(async (from, to) => {
+  const [openRows, signedResult, jobRows, calledRows] = await Promise.all([
+    parallelRanges(async (from, to) => {
       const { data, error } = await supabase
         .from("leads")
         .select(OPEN_COLUMNS)
@@ -78,52 +83,43 @@ export async function loadNavTiles(supabase: SupabaseClient): Promise<NavTiles> 
         .not("lead_status", "in", "(Signed,Promoted,Lost,Referred)")
         .eq("signed_case", false)
         .is("case_id", null)
+        .order("id", { ascending: true })
         .range(from, to);
       if (error) throw new Error(error.message);
       return (data ?? []) as OpenLead[];
-    })
-  ).filter((lead) => isWorkLead(lead));
+    }, 2),
+    supabase.from("leads").select("phone, phone_e164").eq("signed_case", true).limit(1000),
+    parallelRanges(async (from, to) => {
+      const { data, error } = await supabase.from("lead_jobs").select("lead_id").eq("queue", "call").eq("status", "pending").order("id", { ascending: true }).range(from, to);
+      if (error) throw new Error(error.message);
+      return (data ?? []) as { lead_id: string | null }[];
+    }, 3),
+    parallelRanges(async (from, to) => {
+      const { data, error } = await supabase
+        .from("intake_interactions")
+        .select("lead_id")
+        .eq("type", "call")
+        .eq("direction", "outbound")
+        .order("id", { ascending: true })
+        .range(from, to);
+      if (error) throw new Error(error.message);
+      return (data ?? []) as { lead_id: string | null }[];
+    }, 3),
+  ]);
+  if (signedResult.error) throw new Error(signedResult.error.message);
+  const openLeads = openRows.filter((lead) => isWorkLead(lead));
 
   const placed = openLeads.filter((lead) => priorityPlace(lead));
-  const phones = [...new Set(placed.map((lead) => lead.phone).filter((phone): phone is string => Boolean(phone)))];
   const signedPhones = new Set<string>();
-  const signedRows = await mapSlices(phones, 80, async (slice) => {
-    const { data, error } = await supabase.from("leads").select("phone, phone_e164").eq("signed_case", true).in("phone", slice);
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  });
-  for (const row of signedRows) {
+  for (const row of signedResult.data ?? []) {
     const key = phoneTail(row.phone) || phoneTail(row.phone_e164);
     if (key.length >= 10) signedPhones.add(key);
   }
   const priority = placed.filter((lead) => phoneTail(lead.phone).length < 10 || !signedPhones.has(phoneTail(lead.phone)));
   const desired = openLeads.filter((lead) => milestoneDesired(lead) === true);
 
-  const openIds = openLeads.map((lead) => lead.id);
-  const jobRows = await mapSlices(openIds, 80, (slice) =>
-    collectPages(async (from, to) => {
-      const { data, error } = await supabase
-        .from("lead_jobs")
-        .select("lead_id")
-        .eq("queue", "call")
-        .eq("status", "pending")
-        .in("lead_id", slice)
-        .range(from, to);
-      if (error) throw new Error(error.message);
-      return (data ?? []) as { lead_id: string | null }[];
-    }),
-  );
-  const waitingIds = [...new Set(jobRows.map((row) => row.lead_id).filter((id): id is string => Boolean(id)))];
-  const calledRows = await mapSlices(waitingIds, 80, async (slice) => {
-    const { data, error } = await supabase
-      .from("intake_interactions")
-      .select("lead_id")
-      .eq("type", "call")
-      .eq("direction", "outbound")
-      .in("lead_id", slice);
-    if (error) throw new Error(error.message);
-    return (data ?? []) as { lead_id: string | null }[];
-  });
+  const openIds = new Set(openLeads.map((lead) => lead.id));
+  const waitingIds = [...new Set(jobRows.map((row) => row.lead_id).filter((id): id is string => Boolean(id && openIds.has(id))))];
   const called = new Set(calledRows.map((row) => row.lead_id).filter((id): id is string => Boolean(id)));
   const contact = waitingIds.filter((id) => !called.has(id));
 
@@ -434,6 +430,12 @@ async function neverConnected(supabase: SupabaseClient, leads: CohortLead[]): Pr
 }
 
 export async function loadDashboardReport(supabase: SupabaseClient, period: ResolvedPeriod): Promise<DashboardReport> {
+  const inboxPromise = loadInboxAnswerRate(supabase, period.fromIso, period.toIso);
+  const speedPromise = loadSpeedDetail(supabase, period);
+  const consultsPromise = countConsults(supabase, period);
+  const signedPromise = countSigned(supabase, period);
+  const qualityPromise = loadCallQuality(supabase, period);
+  const sendsPromise = supabase.from("referral_sends").select("lead_id").limit(1000);
   const { data, error } = await supabase
     .from("leads")
     .select(COHORT_COLUMNS)
@@ -445,7 +447,6 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
     const day = arrivalDay(lead);
     return day >= period.start && day <= period.end;
   });
-  const cohortIds = cohort.map((lead) => lead.id);
   const desiredLeads = cohort.filter((lead) => milestoneDesired(lead) === true || milestoneSigned(lead));
   const qualified = cohort.filter((lead) => milestoneQualified(lead) === true).length;
   const signedCohort = cohort.filter((lead) => milestoneSigned(lead)).length;
@@ -460,21 +461,18 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
     return day && daysBetween(day, period.end) >= 16;
   });
 
-  const [sendIds, neverResult, inbox, speed, consults, signedInPeriod, callQuality] = await Promise.all([
-    mapSlices(cohortIds, 80, async (slice) => {
-      const { data, error: sendError } = await supabase.from("referral_sends").select("lead_id").in("lead_id", slice);
-      if (sendError) throw new Error(sendError.message);
-      return (data ?? []).map((row) => row.lead_id).filter((id): id is string => Boolean(id));
-    }),
+  const [sendResult, neverResult, inbox, speed, consults, signedInPeriod, callQuality] = await Promise.all([
+    sendsPromise,
     neverConnected(supabase, oldLeads),
-    loadInboxAnswerRate(supabase, period.fromIso, period.toIso),
-    loadSpeedDetail(supabase, period),
-    countConsults(supabase, period),
-    countSigned(supabase, period),
-    loadCallQuality(supabase, period),
+    inboxPromise,
+    speedPromise,
+    consultsPromise,
+    signedPromise,
+    qualityPromise,
   ]);
-  for (const id of sendIds) {
-    if (declinedIds.has(id)) referred.add(id);
+  if (sendResult.error) throw new Error(sendResult.error.message);
+  for (const row of sendResult.data ?? []) {
+    if (row.lead_id && declinedIds.has(row.lead_id)) referred.add(row.lead_id);
   }
   const never = neverResult.never;
   const oldIds = neverResult.ids;
@@ -839,7 +837,8 @@ export async function loadSpeedDetail(
   const coveredCalls = new Set<string>();
   const names = new Map<string, string>();
   const slackByLead = new Map<string, string>();
-  const [inbound, leadRows] = await Promise.all([
+  const later = chicagoLocalToIso(`${addDays(period.end, 1)}T00:00`);
+  const [inbound, leadRows, logRows, templates] = await Promise.all([
     collectPages(async (from, to) => {
       const { data, error } = await supabase
         .from("intake_interactions")
@@ -861,6 +860,33 @@ export async function loadSpeedDetail(
       if (error) throw new Error(error.message);
       return data ?? [];
     }, 1000, 20000),
+    withLog
+      ? collectPages(async (from, to) => {
+          const { data, error } = await supabase
+            .from("intake_interactions")
+            .select("lead_id, phone_e164, type, direction, occurred_at, content, slack_permalink")
+            .in("type", ["call", "text", "missed_call", "sona_call"])
+            .gte("occurred_at", period.fromIso)
+            .lt("occurred_at", later)
+            .order("occurred_at", { ascending: true })
+            .range(from, to);
+          if (error) throw new Error(error.message);
+          return (data ?? []) as LogRow[];
+        }, 1000, 80000)
+      : collectPages(async (from, to) => {
+          const { data, error } = await supabase
+            .from("intake_interactions")
+            .select("lead_id, phone_e164, type, direction, occurred_at, content, slack_permalink")
+            .eq("direction", "outbound")
+            .in("type", ["call", "text"])
+            .gte("occurred_at", period.fromIso)
+            .lt("occurred_at", later)
+            .order("occurred_at", { ascending: true })
+            .range(from, to);
+          if (error) throw new Error(error.message);
+          return (data ?? []) as LogRow[];
+        }, 1000, 8000),
+    automatedPatterns(supabase),
   ]);
   const stamps = new Map<string, LeadStamp>();
   const stampsByPhone = new Map<string, LeadStamp[]>();
@@ -948,48 +974,6 @@ export async function loadSpeedDetail(
     }
   }
 
-  const later = chicagoLocalToIso(`${addDays(period.end, 1)}T00:00`);
-  const contactLeadIds = [...new Set(contacts.map((event) => event.leadId).filter((id): id is string => Boolean(id)))];
-  const contactPhones = [
-    ...new Set(
-      contacts.flatMap((event) => (event.phone.length >= 10 ? [event.phone, `1${event.phone}`, `+1${event.phone}`] : [])),
-    ),
-  ];
-  const loadOutbound = (column: "lead_id" | "phone_e164", slice: string[]) =>
-    collectPages(async (from, to) => {
-      const { data, error } = await supabase
-        .from("intake_interactions")
-        .select("lead_id, phone_e164, type, direction, occurred_at, content, slack_permalink")
-        .eq("direction", "outbound")
-        .in("type", ["call", "text"])
-        .in(column, slice)
-        .gte("occurred_at", period.fromIso)
-        .lt("occurred_at", later)
-        .order("occurred_at", { ascending: true })
-        .range(from, to);
-      if (error) throw new Error(error.message);
-      return (data ?? []) as LogRow[];
-    }, 1000, 20000);
-  const [logRows, templates] = await Promise.all([
-    withLog
-      ? collectPages(async (from, to) => {
-          const { data, error } = await supabase
-            .from("intake_interactions")
-            .select("lead_id, phone_e164, type, direction, occurred_at, content, slack_permalink")
-            .in("type", ["call", "text", "missed_call", "sona_call"])
-            .gte("occurred_at", period.fromIso)
-            .lt("occurred_at", later)
-            .order("occurred_at", { ascending: true })
-            .range(from, to);
-          if (error) throw new Error(error.message);
-          return (data ?? []) as LogRow[];
-        }, 1000, 80000)
-      : Promise.all([
-          mapSlices(contactLeadIds, 80, (slice) => loadOutbound("lead_id", slice)),
-          mapSlices(contactPhones, 60, (slice) => loadOutbound("phone_e164", slice)),
-        ]).then(([byLead, byPhone]) => [...byLead, ...byPhone]),
-    automatedPatterns(supabase),
-  ]);
   const hitsByLead = new Map<string, SpeedHit[]>();
   const hitsByPhone = new Map<string, SpeedHit[]>();
   const logByLead = new Map<string, LogRow[]>();

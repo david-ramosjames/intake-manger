@@ -30,6 +30,29 @@ type HistoryTouch = {
   slack_permalink: string | null;
 };
 
+type QueueActivity = {
+  lead_id: string;
+  calls: number | string | null;
+  texts: number | string | null;
+  talked: boolean | null;
+  called_out: boolean | null;
+  last_at: string | null;
+  quo_link: string | null;
+  slack_permalink: string | null;
+  phone_last_at: string | null;
+  phone_quo_link: string | null;
+  phone_slack_permalink: string | null;
+};
+
+type PendingJob = {
+  id: string | null;
+  lead_id: string | null;
+  due_at: string | null;
+  queue: string | null;
+  assigned_name: string | null;
+  position: number | null;
+};
+
 function recentCutoff(): string {
   const [year, month, day] = chicagoDay(new Date()).split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day - 30)).toISOString().slice(0, 10);
@@ -131,6 +154,23 @@ async function loadTouchesByPhone(
     }
     return rows;
   });
+}
+
+async function loadPendingJobs(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  ids: Set<string>,
+): Promise<PendingJob[]> {
+  const pages = await Promise.all(
+    [0, 1000, 2000].map(async (from) => {
+      const { data } = await supabase
+        .from("lead_jobs")
+        .select("id, lead_id, due_at, queue, assigned_name, position")
+        .eq("status", "pending")
+        .range(from, from + 999);
+      return (data ?? []) as PendingJob[];
+    }),
+  );
+  return pages.flat().filter((job) => job.lead_id && ids.has(job.lead_id));
 }
 
 function displayPhone(phone: string | null): string | null {
@@ -425,15 +465,7 @@ export default async function LeadListPage({
   const sentFirm = new Map<string, string>();
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
   const leadIds = leads.map((lead) => lead.id);
-  const [staff, sendRows] = await Promise.all([
-    loadStaff(supabase),
-    eachSlice(leadIds, 80, async (slice) => {
-      const { data } = await supabase.from("referral_sends").select("lead_id, destination_id, created_at").in("lead_id", slice);
-      return (data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
-    }),
-  ]);
-  sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
-  for (const send of sendRows) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+  const idSet = new Set(leadIds);
 
   const talked = new Set<string>();
   const calledOut = new Set<string>();
@@ -449,8 +481,6 @@ export default async function LeadListPage({
     if (!current.slack && touch.slack_permalink) current.slack = touch.slack_permalink;
     outsideLinks.set(leadId, current);
   };
-  const ids = leads.map((lead) => lead.id);
-  const idSet = new Set(ids);
   const idsByPhone = new Map<string, string[]>();
   for (const lead of leads) {
     const key = phoneKey(lead.phone);
@@ -459,25 +489,49 @@ export default async function LeadListPage({
     list.push(lead.id);
     idsByPhone.set(key, list);
   }
-  if (ids.length) {
-    const [calls, touches] = await Promise.all([
-    eachSlice(ids, 80, async (slice) => {
-      const rows: { id: string | null; lead_id: string | null; due_at: string | null; queue: string | null; assigned_name: string | null; position: number | null }[] = [];
-      for (let from = 0; from < 20000; from += 1000) {
-        const { data } = await supabase
-          .from("lead_jobs")
-          .select("id, lead_id, due_at, queue, assigned_name, position")
-          .in("lead_id", slice)
-          .eq("status", "pending")
-          .range(from, from + 999);
-        const batch = (data ?? []) as typeof rows;
-        rows.push(...batch);
-        if (batch.length < 1000) break;
+  const [staff, sendResult, activity, calls] = await Promise.all([
+    loadStaff(supabase),
+    supabase.from("referral_sends").select("lead_id, destination_id, created_at").limit(1000),
+    leadIds.length ? supabase.rpc("work_queue_activity", { lead_ids: leadIds }) : Promise.resolve({ data: [] as QueueActivity[], error: null }),
+    loadPendingJobs(supabase, idSet),
+  ]);
+  const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
+  sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  for (const send of sendRows) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+
+  if (leadIds.length && !activity.error) {
+    const activityRows = (activity.data ?? []) as QueueActivity[];
+    for (const row of activityRows) {
+      const callCount = Number(row.calls) || 0;
+      const textCount = Number(row.texts) || 0;
+      if (callCount || textCount) contact.set(row.lead_id, { calls: callCount, texts: textCount });
+      if (row.talked) talked.add(row.lead_id);
+      if (row.called_out) calledOut.add(row.lead_id);
+      if (row.last_at) lastOutreach.set(row.lead_id, row.last_at);
+      if (row.quo_link || row.slack_permalink) outsideLinks.set(row.lead_id, { quo: row.quo_link, slack: row.slack_permalink });
+    }
+    for (const lead of leads) {
+      if (lastOutreach.has(lead.id)) continue;
+      if (lead.arrival !== "human_call" && lead.arrival !== "qualified_call" && lead.arrival !== "sona") continue;
+      if (!lead.created_at) continue;
+      lastOutreach.set(lead.id, lead.created_at);
+      const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
+      if (tally.calls === 0) tally.calls = 1;
+      contact.set(lead.id, tally);
+    }
+    for (const row of activityRows) {
+      if (row.phone_last_at) {
+        const current = lastOutreach.get(row.lead_id);
+        if (!current || row.phone_last_at > current) lastOutreach.set(row.lead_id, row.phone_last_at);
       }
-      return rows;
-    }),
-    loadTouches(supabase, ids),
-    ]);
+      if (!row.phone_quo_link && !row.phone_slack_permalink) continue;
+      const current = outsideLinks.get(row.lead_id) ?? { quo: null, slack: null };
+      if (!current.quo && row.phone_quo_link) current.quo = row.phone_quo_link;
+      if (!current.slack && row.phone_slack_permalink) current.slack = row.phone_slack_permalink;
+      outsideLinks.set(row.lead_id, current);
+    }
+  } else if (leadIds.length) {
+    const touches = await loadTouches(supabase, leadIds);
     for (const touch of touches) {
       const type = String(touch.type || "").toLowerCase();
       const direction = String(touch.direction || "").toLowerCase();
@@ -521,7 +575,8 @@ export default async function LeadListPage({
         rememberLinks(leadId, touch);
       }
     }
-    for (const job of calls ?? []) {
+  }
+  for (const job of calls) {
       if (!job.lead_id || !job.due_at || !job.id) continue;
       if (job.queue === "text") {
         const current = nextText.get(job.lead_id);
@@ -536,8 +591,9 @@ export default async function LeadListPage({
       if (!current || position < current.position) {
         nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name, position });
       }
-    }
   }
+
+
 
   const rows = leads.map((lead) => {
     const cycle = leadCycle(lead, talked.has(lead.id) ? [{ type: "call", direction: "inbound" }] : []);

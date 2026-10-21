@@ -969,13 +969,13 @@ export default async function LeadListPage({
               placeholder="Name, phone, or part of a phone"
               className="w-56 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm"
             />
-            <Link
-              href={href({ queue, view, range, funnel, focus, grade: "", priority: "", screen: "", intake: "", q: "" })}
-              className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700"
-            >
-              Clear
-            </Link>
           </form>
+          <Link
+            href={href({ queue, view, range, funnel, focus, grade: "", priority: "", screen: "", intake: "", q: "" })}
+            className="shrink-0 rounded-md border border-navy/25 bg-navy px-3 py-1 text-sm font-medium text-white hover:bg-[#0c2a56]"
+          >
+            Clear filters
+          </Link>
         </div>
       </div>
 

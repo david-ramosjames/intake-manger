@@ -633,7 +633,7 @@ export function QueueFilter({
     setOpen(false);
   };
   return (
-    <div className="relative">
+    <div className={`relative ${open ? "z-40" : ""}`}>
       <button
         type="button"
         aria-label={`Filter ${label}`}
@@ -650,8 +650,8 @@ export function QueueFilter({
       </button>
       {open ? (
         <>
-          <button type="button" aria-label="Close filter" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 z-20 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg">
+          <button type="button" aria-label="Close filter" className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 z-50 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg">
             <MenuChoice current={!value} onPick={() => pick("")}>
               All
             </MenuChoice>
@@ -1540,15 +1540,21 @@ export function LeadDrawer({
             {row.title}
             <IdentityMark status={row.identityStatus} />
           </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            {typeLabel(row)}
-            {row.when ? ` · ${row.when}` : ""}
-          </p>
-          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm">
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-slate-500">
+            <span>
+              {typeLabel(row)}
+              {row.when ? ` · ${row.when}` : ""}
+            </span>
+            <span className="text-slate-300" aria-hidden="true">
+              ·
+            </span>
             <span>
               <span className="text-emerald-700">Screening</span>
               <span className="text-slate-500"> · </span>
               <span className="text-slate-700">{row.screenBy?.trim() || "—"}</span>
+            </span>
+            <span className="text-slate-300" aria-hidden="true">
+              ·
             </span>
             <span>
               <span className="text-sky-700">Intake</span>
@@ -1952,9 +1958,11 @@ function NotedForm({
     >
       {children}
       {idleLabel ? (
-        <button type="submit" disabled={pending} className="mt-3 cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60">
-          <ButtonLabel value={pending ? "Saving…" : idleLabel} reserve={["Saving…", idleLabel]} />
-        </button>
+        <div className="mt-3 flex justify-end">
+          <button type="submit" disabled={pending} className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60">
+            <ButtonLabel value={pending ? "Saving…" : idleLabel} reserve={["Saving…", idleLabel]} />
+          </button>
+        </div>
       ) : null}
     </form>
   );

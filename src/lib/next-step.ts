@@ -30,6 +30,7 @@ export function leadStatusLabel(
   if (signatureNeedsConfirm(lead)) return "Confirm signature";
   if (lead.close_reason === "declined") return "Declined";
   if (lead.close_reason === "referred" || lead.close_reason === "outside_practice") return "Referred";
+  if (lead.close_reason === "signed_elsewhere") return "Signed elsewhere";
   if (lead.close_reason === "not_interested") return "Not interested";
   if (lead.close_reason === "no_response") return "No response";
   if (lead.close_reason === "not_a_lead") return "Not a lead";

@@ -1,3 +1,5 @@
+import { canonicalLeadSource } from "@/lib/leads";
+
 export function callrailConfigured(): boolean {
   return Boolean(process.env.CALLRAIL_API_KEY && process.env.CALLRAIL_ACCOUNT_ID);
 }
@@ -62,10 +64,18 @@ export async function attachCallrailSources<T extends {
   lead_date: string | null;
   created_at: string;
   case_detail: string | null;
-}>(leads: T[], save: (id: string, source: string) => Promise<void>): Promise<void> {
-  if (!callrailConfigured()) return;
-  const missing = leads.filter((lead) => !lead.lead_source?.trim() && /callrail\.com/i.test(lead.case_detail ?? ""));
-  if (!missing.length) return;
+  callrail_call_id?: string | null;
+}>(
+  leads: T[],
+  save: (id: string, source: string, type: string | null) => Promise<void>,
+): Promise<number> {
+  if (!callrailConfigured()) return 0;
+  const missing = leads.filter(
+    (lead) =>
+      !lead.lead_source?.trim() &&
+      (Boolean(lead.callrail_call_id?.trim()) || /callrail\.com/i.test(lead.case_detail ?? "")),
+  );
+  if (!missing.length) return 0;
   const dates = missing.map((lead) => (lead.lead_date ?? lead.created_at).slice(0, 10)).sort();
   const end = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
   end.setUTCDate(end.getUTCDate() + 1);
@@ -73,17 +83,26 @@ export async function attachCallrailSources<T extends {
   try {
     sources = await fetchCallrailSources(dates[0], end.toISOString().slice(0, 10));
   } catch {
-    return;
+    return 0;
   }
+  let filled = 0;
   await Promise.all(
     missing.map(async (lead) => {
-      const callId = callrailCallId(lead.case_detail)?.toUpperCase();
-      const source = callId ? sources.get(callId) : null;
-      if (!source) return;
-      lead.lead_source = source;
-      await save(lead.id, source).catch(() => undefined);
+      const callId = (lead.callrail_call_id?.trim() || callrailCallId(lead.case_detail) || "").toUpperCase();
+      const raw = callId ? sources.get(callId) : null;
+      if (!raw) return;
+      const canonical = canonicalLeadSource(raw);
+      if (!canonical.source) return;
+      try {
+        await save(lead.id, canonical.source, canonical.type || null);
+        lead.lead_source = canonical.source;
+        filled += 1;
+      } catch {
+        // Keep going. A later pass can retry this CallRail source.
+      }
     }),
   );
+  return filled;
 }
 
 function tagNames(value: unknown): string[] {

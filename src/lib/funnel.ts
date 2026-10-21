@@ -12,6 +12,19 @@ export const CLOSE_SUGGESTION_LABEL: Record<CloseSuggestion, string> = {
   not_a_lead: "Not a lead",
 };
 
+/** Staff-marked lost lead (details panel) — the other way to close besides signed. */
+export const LOST_LEAD_REASONS = {
+  signed_elsewhere: "Signed elsewhere",
+  not_interested: "No longer interested",
+  no_response: "Unresponsive",
+} as const;
+
+export type LostLeadReason = keyof typeof LOST_LEAD_REASONS;
+
+export function isLostLeadReason(value: string | null | undefined): value is LostLeadReason {
+  return Boolean(value && value in LOST_LEAD_REASONS);
+}
+
 export function isCloseSuggestion(value: string | null | undefined): value is CloseSuggestion {
   return value === "decline" || value === "not_interested" || value === "not_a_lead";
 }

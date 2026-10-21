@@ -4,6 +4,7 @@ import { callerClassLabel } from "@/lib/caller-class";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
+import { isLostLeadReason } from "@/lib/funnel";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { daysSince, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
@@ -238,6 +239,7 @@ function toQueueRow(
     desired: desiredWord(milestoneDesired(lead)),
     desiredLocked: contractSent(lead) || milestoneSigned(lead) || milestoneQualified(lead) === false,
     signed: milestoneSigned(lead),
+    lostReason: lead.lead_status === "Lost" && isLostLeadReason(lead.close_reason) ? lead.close_reason : null,
     nonPi: lead.case_type === "Non-PI Legal Matter",
     practiceArea: lead.practice_area,
     referralSent: Boolean(input.sentFirm) || lead.lead_status === "Referred" || lead.close_reason === "referred",

@@ -510,7 +510,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
               ? statusWord(answerTone)
               : "Inbox calls are still loading"
             : `${statusWord(answerTone)} · ${inbox.total.answered} of ${inbox.total.incoming} incoming calls${inboxPartial ? " · history is still filling for the start of this range" : ""}`,
-        definition: `Answered by a person divided by incoming calls, on the same inboxes as the Call Stats email: ${inboxLines}. This is the total answer rate, including the main line. Extra Number, SA Law Firm, and Trucking Chicas are left out. Incoming calls on RJL Outbound are left out. A person answer is a completed incoming call that someone picked up. Sona, voicemail, missed calls, and forwards with nobody who picked up stay in the total.`,
+        definition: `Answered by a person divided by incoming calls, on the same inboxes as the Call Stats email: ${inboxLines}. This is the total answer rate, including the main line. A person answer is a completed incoming call that someone picked up. Sona, voicemail, missed calls, and forwards with nobody who picked up stay in the total.`,
         tone: answerTone,
       },
       {

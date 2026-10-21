@@ -18,6 +18,7 @@ import { canonicalLeadSource, isPiCaseType, isSourceType, standardLeadEmail } fr
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage } from "./close-ready";
+import { isLostLeadReason } from "./funnel";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -1282,6 +1283,62 @@ async function closeLead(
     actor: email,
     payload: { close_reason: change.close_reason },
   });
+}
+
+/** Mark a pursued lead lost (signed elsewhere / no longer interested / unresponsive), or reopen that close. */
+export async function setLostLead(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  const decision = text(formData, "decision");
+  const reason = text(formData, "reason");
+  if (!leadId) throw new Error("Missing the lead.");
+  if (decision !== "yes" && decision !== "no") throw new Error("Choose yes or no for lost lead.");
+
+  const { data: before, error: loadError } = await supabase
+    .from("leads")
+    .select(`id, case_id, lead_status, close_reason, ${CLOSE_READY_COLUMNS}`)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
+  if (before.signed_case || before.lead_status === "Signed" || before.case_id) {
+    throw new Error("A signed or promoted case cannot be marked lost.");
+  }
+
+  if (decision === "yes") {
+    if (!isLostLeadReason(reason)) throw new Error("Choose why the lead was lost.");
+    const same = before.lead_status === "Lost" && before.close_reason === reason;
+    if (!same) {
+      await closeLead(supabase, leadId, email, {
+        lead_status: "Lost",
+        close_reason: reason,
+        event: "lost_lead",
+      });
+    }
+  } else if (before.lead_status === "Lost" && isLostLeadReason(before.close_reason)) {
+    const { error } = await supabase
+      .from("leads")
+      .update({
+        lead_status: "Working",
+        close_reason: null,
+        close_suggestion: null,
+        follow_up: true,
+        sequence: null,
+      })
+      .eq("id", leadId);
+    if (error) throw new Error(error.message);
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "lost_lead_reopened",
+      actor: email,
+      payload: { from: before.close_reason },
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath("/review");
+  revalidatePath("/open-calls");
+  revalidatePath(`/leads/${leadId}`);
 }
 
 export async function confirmSigned(formData: FormData) {

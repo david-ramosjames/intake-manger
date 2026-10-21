@@ -7,6 +7,7 @@ import { consultationWhen, consultedChoice, contractSent, desiredWord, milestone
 import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
 import { CYCLE_LABEL, leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
+import { isLostLeadReason } from "@/lib/funnel";
 import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
 import { sequenceDayOne } from "@/lib/followup";
@@ -750,6 +751,7 @@ export default async function LeadListPage({
       desired: desiredWord(milestoneDesired(row.lead)),
       desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead) || milestoneQualified(row.lead) === false,
       signed: milestoneSigned(row.lead),
+      lostReason: row.lead.lead_status === "Lost" && isLostLeadReason(row.lead.close_reason) ? row.lead.close_reason : null,
       nonPi: row.lead.case_type === "Non-PI Legal Matter",
       practiceArea: row.lead.practice_area,
       referralSent: sentFirm.has(row.lead.id) || row.lead.lead_status === "Referred" || row.lead.close_reason === "referred",

@@ -77,18 +77,25 @@ export const LEAD_SOURCES: { source: string; type: SourceType }[] = [
 
 const LEAD_SOURCE_ALIASES: Record<string, string> = {
   "google ads": "Google",
+  "google adwords": "Google",
+  "google paid": "Google",
   "google lsa": "Google",
   "google organic": "Google",
+  "google search": "Google",
   "google my business": "Google My Business",
   gmb: "Google My Business",
   maps: "Google Maps",
   "apple maps": "Google Maps",
   "local services": "Google",
   "local service ads": "Google",
+  "callrail": "Direct",
+  "keyword": "Google",
   "meta form": "Meta",
   "meta lead": "Meta",
   "meta ads": "Meta",
   "facebook ads": "Facebook",
+  "fb ads": "Facebook",
+  yelp: "Internet",
   instagram: "Instagram",
   tiktok: "TikTok",
   "google/tiktok": "TikTok",
@@ -362,7 +369,16 @@ export type Lead = {
   needs_verification: boolean;
   identity_status: "ok" | "needs_review" | "confirmed";
   identity_evidence: string | null;
-  close_reason: "signed" | "declined" | "referred" | "not_interested" | "no_response" | "not_a_lead" | "outside_practice" | null;
+  close_reason:
+    | "signed"
+    | "signed_elsewhere"
+    | "declined"
+    | "referred"
+    | "not_interested"
+    | "no_response"
+    | "not_a_lead"
+    | "outside_practice"
+    | null;
   close_suggestion: "decline" | "not_interested" | "not_a_lead" | null;
   caller_class: string | null;
   practice_area: string | null;

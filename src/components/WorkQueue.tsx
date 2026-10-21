@@ -7,9 +7,10 @@ import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
-import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
+import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, LEAD_SOURCES, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setNextAction, setQualified, startTextSequence } from "@/lib/ops-actions";
+import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setLostLead, setNextAction, setQualified, startTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -69,6 +70,7 @@ export type QueueRow = {
   desired: string;
   desiredLocked: boolean;
   signed: boolean;
+  lostReason: LostLeadReason | null;
   nonPi: boolean;
   practiceArea: string | null;
   referralSent: boolean;
@@ -782,6 +784,8 @@ function detailGap(input: {
   decline: string;
   signedChoice: "yes" | "no" | "";
   signedDate: string;
+  lostChoice: "yes" | "no" | "";
+  lostReason: string;
   admin: boolean;
 }): string | null {
   if (input.notALead) return null;
@@ -790,6 +794,8 @@ function detailGap(input: {
   if (input.desired === "yes" && !input.size) return "Choose a size before saving or closing.";
   if (input.desired === "no" && !input.decline) return "Choose a decline reason before saving or closing.";
   if (input.admin && input.signedChoice === "yes" && !input.signedDate) return "Enter the signed date before saving or closing.";
+  if (input.signedChoice === "yes" && input.lostChoice === "yes") return "A lead cannot be both signed and lost.";
+  if (input.lostChoice === "yes" && !isLostLeadReason(input.lostReason)) return "Choose why the lead was lost before saving.";
   return null;
 }
 
@@ -802,6 +808,12 @@ function chosenLeadSource(value: string, type: string): string {
   if (!source) return "";
   if (!type) return source;
   return leadSourcesFor(type).includes(source) ? source : "";
+}
+
+function marketingFromRow(row: { sourceType: string; leadSource: string }): { type: string; source: string } {
+  const fromSource = canonicalLeadSource(row.leadSource);
+  const type = chosenSourceType(row.sourceType) || chosenSourceType(fromSource.type);
+  return { type, source: chosenLeadSource(fromSource.source || row.leadSource, type) };
 }
 
 function LeadFacts({
@@ -823,32 +835,50 @@ function LeadFacts({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [dirty, setDirty] = useState({ consult: false, qualified: false, desired: false, signed: false });
+  const [dirty, setDirty] = useState({ consult: false, qualified: false, desired: false, signed: false, lost: false });
   const [consulted, setConsulted] = useState<"yes" | "no" | "">(row.consulted);
   const [consultDate, setConsultDate] = useState(row.consultKey.slice(0, 10));
   const [qualified, setQualifiedChoice] = useState<"yes" | "no" | "">(row.qualifiedLabel === "Yes" ? "yes" : row.qualifiedLabel === "No" ? "no" : "");
   const [notLeadReason, setNotLeadReason] = useState(() => notLeadReasonFor(row));
   const [desired, setDesiredChoice] = useState<"yes" | "no" | "">(row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "");
   const [size, setSize] = useState(selectedOne(row.tags, SIZE_TAGS));
-  const [sourceType, setSourceType] = useState(() => chosenSourceType(row.sourceType));
-  const [leadSource, setLeadSource] = useState(() => chosenLeadSource(row.leadSource, chosenSourceType(row.sourceType)));
+  const [sourceType, setSourceType] = useState(() => marketingFromRow(row).type);
+  const [leadSource, setLeadSource] = useState(() => marketingFromRow(row).source);
   const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
-  useEffect(() => {
-    const type = chosenSourceType(row.sourceType);
-    setSourceType(type);
-    setLeadSource(chosenLeadSource(row.leadSource, type));
-    setEmail(standardLeadEmail(row.email) ?? "");
-    setNotLeadReason(notLeadReasonFor(row));
-  }, [row.id]);
   const [decline, setDecline] = useState(selectedDecline(row.tags));
   const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(row.signed ? "yes" : "");
   const [signedDate, setSignedDate] = useState(row.signedDate);
+  const [lostChoice, setLostChoice] = useState<"yes" | "no" | "">(row.lostReason ? "yes" : "");
+  const [lostReason, setLostReason] = useState<string>(row.lostReason ?? "");
+  useEffect(() => {
+    const marketing = marketingFromRow(row);
+    setSourceType(marketing.type);
+    setLeadSource(marketing.source);
+    setEmail(standardLeadEmail(row.email) ?? "");
+    setNotLeadReason(notLeadReasonFor(row));
+    setLostChoice(row.lostReason ? "yes" : "");
+    setLostReason(row.lostReason ?? "");
+  }, [row.id]);
   const contractLocked = row.desiredLocked && row.qualifiedLabel !== "No";
+  const lostLocked = row.signed || signedChoice === "yes";
   const { pending: confirming, submit: confirmSubmit } = useNotedSubmit();
 
   const notALead = Boolean(notLeadReason);
   function gap() {
-    return detailGap({ notALead, consulted, consultDate, qualified, desired, size, decline, signedChoice, signedDate, admin });
+    return detailGap({
+      notALead,
+      consulted,
+      consultDate,
+      qualified,
+      desired,
+      size,
+      decline,
+      signedChoice,
+      signedDate,
+      lostChoice,
+      lostReason,
+      admin,
+    });
   }
 
   function exitGap() {
@@ -858,6 +888,8 @@ function LeadFacts({
     if (dirty.desired && desired === "yes" && !size) return "Choose a size before saving or closing.";
     if (dirty.desired && desired === "no" && !decline) return "Choose a decline reason before saving or closing.";
     if (dirty.signed && admin && signedChoice === "yes" && !signedDate) return "Enter the signed date before saving or closing.";
+    if (dirty.lost && lostChoice === "yes" && !isLostLeadReason(lostReason)) return "Choose why the lead was lost before saving or closing.";
+    if (dirty.lost && signedChoice === "yes" && lostChoice === "yes") return "A lead cannot be both signed and lost.";
     return null;
   }
 
@@ -868,7 +900,7 @@ function LeadFacts({
     return false;
   };
 
-  function mark(key: "consult" | "qualified" | "desired" | "signed") {
+  function mark(key: "consult" | "qualified" | "desired" | "signed" | "lost") {
     setDirty((current) => ({ ...current, [key]: true }));
     setSaved(false);
   }
@@ -905,9 +937,16 @@ function LeadFacts({
           decision.set("decision", desired);
           await setDesired(decision);
         }
+        if (dirty.lost && (lostChoice === "yes" || lostChoice === "no")) {
+          const lostData = new FormData();
+          lostData.set("lead_id", row.id);
+          lostData.set("decision", lostChoice);
+          if (lostChoice === "yes") lostData.set("reason", lostReason);
+          await setLostLead(lostData);
+        }
       }
       setSaved(true);
-      setDirty({ consult: false, qualified: false, desired: false, signed: false });
+      setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
       notify({ tone: "saved", text: "Saved" });
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
@@ -955,6 +994,27 @@ function LeadFacts({
           <input type="hidden" name="consulted" value={consulted} />
           {admin ? <input type="hidden" name="signed_decision" value={signedChoice} /> : null}
           <PanelSection title="Marketing">
+            <FieldLabel label="Lead source">
+              <input type="hidden" name="lead_source" value={leadSource} />
+              <select
+                value={leadSource}
+                autoComplete="off"
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setLeadSource(next);
+                  const inferred = canonicalLeadSource(next).type;
+                  if (inferred && inferred !== "Unknown") setSourceType(inferred);
+                }}
+                className={fieldClass()}
+              >
+                <option value="">Not set</option>
+                {(sourceType ? leadSourcesFor(sourceType) : LEAD_SOURCES.map((item) => item.source)).map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </FieldLabel>
             <FieldLabel label="Source type">
               <input type="hidden" name="source_type" value={sourceType} />
               <select
@@ -970,24 +1030,6 @@ function LeadFacts({
               >
                 <option value="">Not set</option>
                 {SOURCE_TYPE_OPTIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </FieldLabel>
-            <FieldLabel label="Lead source">
-              <input type="hidden" name="lead_source" value={leadSource} />
-              <select
-                key={`${row.id}-${sourceType}`}
-                value={sourceType ? leadSource : ""}
-                autoComplete="off"
-                disabled={!sourceType}
-                onChange={(event) => setLeadSource(event.target.value)}
-                className={fieldClass(!sourceType)}
-              >
-                <option value="">{sourceType ? "Not set" : "Choose source type first"}</option>
-                {leadSourcesFor(sourceType).map((item) => (
                   <option key={item} value={item}>
                     {item}
                   </option>
@@ -1125,6 +1167,11 @@ function LeadFacts({
                     mark("signed");
                     setSignedChoice(value);
                     if (value === "no") setSignedDate("");
+                    if (value === "yes") {
+                      setLostChoice("no");
+                      setLostReason("");
+                      mark("lost");
+                    }
                   }}
                 />
               </div>
@@ -1158,6 +1205,52 @@ function LeadFacts({
                 {confirming ? "Saving…" : "Confirm signed"}
               </button>
             ) : null}
+          </PanelSection>
+          <PanelSection title="Lost lead">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Lost lead</p>
+              <div className="mt-1">
+                <ChoiceToggle
+                  label="Lost lead"
+                  value={lostChoice}
+                  disabled={lostLocked}
+                  onChange={(value) => {
+                    mark("lost");
+                    setLostChoice(value);
+                    if (value === "no") setLostReason("");
+                    if (value === "yes" && signedChoice === "yes") {
+                      setSignedChoice("no");
+                      setSignedDate("");
+                      mark("signed");
+                    }
+                  }}
+                />
+              </div>
+              {lostLocked ? (
+                <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">Unavailable once the lead is signed.</p>
+              ) : (
+                <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">Closes the lead when they are no longer interested.</p>
+              )}
+            </div>
+            <FieldLabel label="Lost reason">
+              <select
+                value={lostReason}
+                required={lostChoice === "yes"}
+                disabled={lostLocked || lostChoice !== "yes"}
+                onChange={(event) => {
+                  mark("lost");
+                  setLostReason(event.target.value);
+                }}
+                className={fieldClass(lostLocked || lostChoice !== "yes")}
+              >
+                <option value="">{lostChoice === "yes" ? "Choose a reason" : "Locked"}</option>
+                {(Object.entries(LOST_LEAD_REASONS) as [LostLeadReason, string][]).map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </FieldLabel>
           </PanelSection>
         </form>
       </div>

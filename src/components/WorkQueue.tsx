@@ -1557,7 +1557,7 @@ export function LeadDrawer({
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
-        <div>
+        <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">
             {row.title}
             <IdentityMark status={row.identityStatus} />
@@ -1565,6 +1565,18 @@ export function LeadDrawer({
           <p className="mt-1 text-sm text-slate-500">
             {typeLabel(row)}
             {row.when ? ` · ${row.when}` : ""}
+          </p>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-sm">
+            <span>
+              <span className="text-emerald-700">Screening</span>
+              <span className="text-slate-500"> · </span>
+              <span className="text-slate-700">{row.screenBy?.trim() || "—"}</span>
+            </span>
+            <span>
+              <span className="text-sky-700">Intake</span>
+              <span className="text-slate-500"> · </span>
+              <span className="text-slate-700">{row.intakeBy?.trim() || "—"}</span>
+            </span>
           </p>
         </div>
         <button
@@ -1727,7 +1739,6 @@ export function LeadDrawer({
 function ActivityThread({ touches, row, staff }: { touches: Touch[] | null; row: QueueRow; staff: string[] }) {
   const scroller = useRef<HTMLDivElement>(null);
   const ordered = touches === null ? null : [...touches].sort((a, b) => String(a.occurred_at || "").localeCompare(String(b.occurred_at || "")));
-  const roles = callJobStaff(ordered);
   useLayoutEffect(() => {
     const node = scroller.current;
     if (!node) return;
@@ -1782,43 +1793,11 @@ function ActivityThread({ touches, row, staff }: { touches: Touch[] | null; row:
           )}
         </div>
       </div>
-      <div className="shrink-0 space-y-4 border-t border-slate-200 px-4 py-3">
-        <CallJobStaff roles={roles} />
+      <div className="shrink-0 space-y-3 border-t border-slate-200 px-4 py-3">
         <NextCallDetails row={row} staff={staff} />
         <TextSequence row={row} />
       </div>
     </div>
-  );
-}
-
-function callJobStaff(touches: Touch[] | null): { screening: string[]; intake: string[] } {
-  const screening = new Set<string>();
-  const intake = new Set<string>();
-  for (const touch of touches ?? []) {
-    if (touch.screenHandler) screening.add(touch.screenHandler);
-    if (touch.intakeHandler) intake.add(touch.intakeHandler);
-  }
-  return {
-    screening: [...screening].sort((a, b) => a.localeCompare(b)),
-    intake: [...intake].sort((a, b) => a.localeCompare(b)),
-  };
-}
-
-function CallJobStaff({ roles }: { roles: { screening: string[]; intake: string[] } }) {
-  return (
-    <section>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Call roles</h3>
-      <p className="mt-1 text-sm text-slate-700">
-        <span className="text-emerald-700">Screening</span>
-        <span className="text-slate-500"> · </span>
-        {roles.screening.length ? roles.screening.join(", ") : "—"}
-      </p>
-      <p className="mt-0.5 text-sm text-slate-700">
-        <span className="text-sky-700">Intake</span>
-        <span className="text-slate-500"> · </span>
-        {roles.intake.length ? roles.intake.join(", ") : "—"}
-      </p>
-    </section>
   );
 }
 
@@ -1840,13 +1819,17 @@ function NextCallDetails({ row, staff }: { row: QueueRow; staff: string[] }) {
 
 function TextSequence({ row }: { row: QueueRow }) {
   return (
-    <section>
+    <section className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Texts</h3>
-      <p className="mt-1 text-sm text-slate-700">
+      <p className="min-w-0 text-sm text-slate-700">
         {row.textsLive ? row.automationLabel : "Off"}
         {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
       </p>
-      {row.canStartText ? <div className="mt-2"><TextStartButtons leadId={row.id} /></div> : null}
+      {row.canStartText ? (
+        <div className="ml-auto shrink-0">
+          <TextStartButtons leadId={row.id} />
+        </div>
+      ) : null}
     </section>
   );
 }

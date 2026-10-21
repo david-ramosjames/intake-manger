@@ -60,17 +60,20 @@ export async function loadLeadCallJobs(
     intake_handler_name: string | null;
     occurred_at: string | null;
   };
-  const rows: GradeRow[] = [];
-  for (let index = 0; index < leadIds.length; index += 80) {
-    const chunk = leadIds.slice(index, index + 80);
-    const { data, error } = await supabase
-      .from("call_grades")
-      .select("lead_id, screen_handler_name, intake_handler_name, occurred_at")
-      .in("lead_id", chunk)
-      .order("occurred_at", { ascending: true });
-    if (error) throw new Error(error.message);
-    rows.push(...((data ?? []) as GradeRow[]));
-  }
+  const chunks: string[][] = [];
+  for (let index = 0; index < leadIds.length; index += 100) chunks.push(leadIds.slice(index, index + 100));
+  const pages = await Promise.all(
+    chunks.map(async (chunk) => {
+      const { data, error } = await supabase
+        .from("call_grades")
+        .select("lead_id, screen_handler_name, intake_handler_name, occurred_at")
+        .in("lead_id", chunk)
+        .order("occurred_at", { ascending: true });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as GradeRow[];
+    }),
+  );
+  const rows = pages.flat();
   rows.sort((a, b) => String(a.occurred_at || "").localeCompare(String(b.occurred_at || "")));
   for (const row of rows) {
     if (!row.lead_id) continue;

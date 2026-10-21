@@ -164,17 +164,16 @@ async function loadPendingJobs(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
   ids: Set<string>,
 ): Promise<PendingJob[]> {
-  const pages = await Promise.all(
-    [0, 1000, 2000].map(async (from) => {
-      const { data } = await supabase
-        .from("lead_jobs")
-        .select("id, lead_id, due_at, queue, assigned_name, position")
-        .eq("status", "pending")
-        .range(from, from + 999);
-      return (data ?? []) as PendingJob[];
-    }),
-  );
-  return pages.flat().filter((job) => job.lead_id && ids.has(job.lead_id));
+  if (!ids.size) return [];
+  const leadIds = [...ids];
+  return eachSlice(leadIds, 100, async (slice) => {
+    const { data } = await supabase
+      .from("lead_jobs")
+      .select("id, lead_id, due_at, queue, assigned_name, position")
+      .eq("status", "pending")
+      .in("lead_id", slice);
+    return (data ?? []) as PendingJob[];
+  });
 }
 
 function displayPhone(phone: string | null): string | null {
@@ -408,17 +407,13 @@ export default async function LeadListPage({
   const docket = docketBaseUrl();
 
   const focusIds = focus === "open" ? null : (await loadNavTiles(supabase)).ids[focus];
-  const focusedLeads: ListLead[] = [];
-  if (focusIds) {
-    for (let index = 0; index < focusIds.length; index += 80) {
-      const { data: focusedRows, error: focusedError } = await supabase
-        .from("leads")
-        .select(LIST_COLUMNS)
-        .in("id", focusIds.slice(index, index + 80));
-      if (focusedError) throw new Error(focusedError.message);
-      focusedLeads.push(...((focusedRows ?? []) as ListLead[]));
-    }
-  }
+  const focusedLeads: ListLead[] = focusIds
+    ? await eachSlice(focusIds, 100, async (slice) => {
+        const { data: focusedRows, error: focusedError } = await supabase.from("leads").select(LIST_COLUMNS).in("id", slice);
+        if (focusedError) throw new Error(focusedError.message);
+        return (focusedRows ?? []) as ListLead[];
+      })
+    : [];
   const closedQuery = supabase
     .from("leads")
     .select(LIST_COLUMNS)
@@ -469,22 +464,25 @@ export default async function LeadListPage({
     supabase.from("referral_templates").select("language, body"),
   ]);
   let workLeads = focusIds ? focusedLeads : ((data ?? []) as ListLead[]);
-  if (funnel !== "closed" && !workLeads.some((lead) => isPracticeTestPhone(lead.phone_e164 || lead.phone))) {
-    const { data: practiceRows } = await supabase.from("leads").select(LIST_COLUMNS).eq("phone_e164", "+17654183805").limit(1);
-    const practice = practiceRows?.[0] as ListLead | undefined;
-    if (practice) workLeads = [...workLeads, practice];
-  }
   const reviewLeads = (reviewResult.data ?? []) as ListLead[];
-  const searched = await searchLeads(supabase, q);
+  const needsPractice = funnel !== "closed" && !workLeads.some((lead) => isPracticeTestPhone(lead.phone_e164 || lead.phone));
+  const [practiceRows, searched, selectedRows] = await Promise.all([
+    needsPractice
+      ? supabase.from("leads").select(LIST_COLUMNS).eq("phone_e164", "+17654183805").limit(1)
+      : Promise.resolve({ data: [] as ListLead[] }),
+    searchLeads(supabase, q),
+    selectedId
+      ? supabase.from("leads").select(LIST_COLUMNS).eq("id", selectedId).limit(1)
+      : Promise.resolve({ data: [] as ListLead[] }),
+  ]);
+  const practice = (practiceRows.data?.[0] ?? undefined) as ListLead | undefined;
+  if (practice) workLeads = [...workLeads, practice];
   const merged = new Map<string, ListLead>();
   for (const lead of [...searched, ...workLeads, ...(queue === "nonleads" ? reviewLeads : [])]) {
     merged.set(lead.id, lead);
   }
-  if (selectedId && !merged.has(selectedId)) {
-    const { data: selectedRows } = await supabase.from("leads").select(LIST_COLUMNS).eq("id", selectedId).limit(1);
-    const selected = selectedRows?.[0] as ListLead | undefined;
-    if (selected) merged.set(selected.id, selected);
-  }
+  const selected = (selectedRows.data?.[0] ?? undefined) as ListLead | undefined;
+  if (selected) merged.set(selected.id, selected);
   const leads = [...merged.values()];
   const destinations = ((destinationResult.data ?? []) as ReferralDestination[]).map((destination) => ({
     ...destination,
@@ -527,7 +525,15 @@ export default async function LeadListPage({
   }
   const [staff, sendResult, activity, calls, callJobs] = await Promise.all([
     loadStaff(supabase),
-    supabase.from("referral_sends").select("lead_id, destination_id, created_at").limit(1000),
+    leadIds.length
+      ? eachSlice(leadIds, 100, async (slice) => {
+          const { data } = await supabase
+            .from("referral_sends")
+            .select("lead_id, destination_id, created_at")
+            .in("lead_id", slice);
+          return (data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
+        }).then((rows) => ({ data: rows, error: null }))
+      : Promise.resolve({ data: [] as { lead_id: string; destination_id: string; created_at: string }[], error: null }),
     leadIds.length ? supabase.rpc("work_queue_activity", { lead_ids: leadIds }) : Promise.resolve({ data: [] as QueueActivity[], error: null }),
     loadPendingJobs(supabase, idSet),
     loadLeadCallJobs(supabase, leadIds),

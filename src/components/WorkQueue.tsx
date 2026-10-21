@@ -9,6 +9,7 @@ import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, LEAD_SOURCES, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
+import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setLostLead, setNextAction, setQualified, startTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
@@ -125,6 +126,11 @@ type Touch = {
   grade?: string | null;
   gradeReason?: string | null;
   gradeHandler?: string | null;
+  jobs?: string | null;
+  screenHandler?: string | null;
+  intakeHandler?: string | null;
+  screenGrade?: string | null;
+  intakeGrade?: string | null;
 };
 
 type Column = "type" | "stage" | "consult" | "qualified" | "desired" | "last" | "automation";
@@ -1228,9 +1234,7 @@ function LeadFacts({
               </div>
               {lostLocked ? (
                 <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">Unavailable once the lead is signed.</p>
-              ) : (
-                <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">Closes the lead when they are no longer interested.</p>
-              )}
+              ) : null}
             </div>
             <FieldLabel label="Lost reason">
               <select
@@ -1694,6 +1698,7 @@ export function LeadDrawer({
 function ActivityThread({ touches, row, staff }: { touches: Touch[] | null; row: QueueRow; staff: string[] }) {
   const scroller = useRef<HTMLDivElement>(null);
   const ordered = touches === null ? null : [...touches].sort((a, b) => String(a.occurred_at || "").localeCompare(String(b.occurred_at || "")));
+  const roles = callJobStaff(ordered);
   useLayoutEffect(() => {
     const node = scroller.current;
     if (!node) return;
@@ -1710,35 +1715,81 @@ function ActivityThread({ touches, row, staff }: { touches: Touch[] | null; row:
             <p className="text-sm text-slate-500">No calls, texts, or Slack notes yet.</p>
           ) : (
             <ul className="space-y-3">
-              {ordered.map((touch) => (
-                <li key={touch.id} className="text-sm">
-                  <p className="font-medium text-slate-800">
-                    {touchLabel(touch)}
-                    <span className="ml-2 font-normal text-slate-400">
-                      {touch.occurred_at ? formatChicago(touch.occurred_at) : ""}
-                    </span>
-                  </p>
-                  {touch.grade ? (
-                    <p className="mt-1 text-sm text-slate-800">
-                      <span className={`mr-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${callGradeClass(touch.grade)}`}>
-                        {touch.grade}
+              {ordered.map((touch) => {
+                const jobLabel = callJobLabel(touch.jobs);
+                const headerClass = (touch.type || "").toLowerCase() === "call" || touch.jobs
+                  ? callJobHeaderClass(touch.jobs)
+                  : "text-slate-800";
+                const timeClass = touch.jobs === "screen"
+                  ? "text-emerald-600/80"
+                  : touch.jobs === "intake"
+                    ? "text-sky-600/80"
+                    : touch.jobs === "both"
+                      ? "text-pink-600/80"
+                      : "text-slate-400";
+                return (
+                  <li key={touch.id} className="text-sm">
+                    <p className={`font-medium ${headerClass}`}>
+                      {touchLabel(touch)}
+                      <span className={`ml-2 font-normal ${timeClass}`}>
+                        {touch.occurred_at ? formatChicago(touch.occurred_at) : ""}
                       </span>
-                      {touch.gradeHandler ? <span className="font-medium">{touch.gradeHandler}</span> : null}
-                      {touch.gradeReason ? <span className="text-slate-600">{touch.gradeHandler ? " — " : ""}{touch.gradeReason}</span> : null}
+                      {jobLabel ? <span className="ml-2 text-xs font-semibold uppercase tracking-wide opacity-80">{jobLabel}</span> : null}
                     </p>
-                  ) : null}
-                  {touch.content ? <p className="mt-0.5 whitespace-pre-wrap text-slate-600">{touch.content}</p> : null}
-                </li>
-              ))}
+                    {touch.grade ? (
+                      <p className="mt-1 text-sm text-slate-800">
+                        <span className={`mr-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${callGradeClass(touch.grade)}`}>
+                          {touch.grade}
+                        </span>
+                        {touch.gradeHandler ? <span className="font-medium">{touch.gradeHandler}</span> : null}
+                        {touch.gradeReason ? <span className="text-slate-600">{touch.gradeHandler ? " — " : ""}{touch.gradeReason}</span> : null}
+                      </p>
+                    ) : null}
+                    {touch.content ? <p className="mt-0.5 whitespace-pre-wrap text-slate-600">{touch.content}</p> : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
       </div>
       <div className="shrink-0 space-y-4 border-t border-slate-200 px-4 py-3">
+        <CallJobStaff roles={roles} />
         <NextCallDetails row={row} staff={staff} />
         <TextSequence row={row} />
       </div>
     </div>
+  );
+}
+
+function callJobStaff(touches: Touch[] | null): { screening: string[]; intake: string[] } {
+  const screening = new Set<string>();
+  const intake = new Set<string>();
+  for (const touch of touches ?? []) {
+    if (touch.screenHandler) screening.add(touch.screenHandler);
+    if (touch.intakeHandler) intake.add(touch.intakeHandler);
+  }
+  return {
+    screening: [...screening].sort((a, b) => a.localeCompare(b)),
+    intake: [...intake].sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+function CallJobStaff({ roles }: { roles: { screening: string[]; intake: string[] } }) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Call roles</h3>
+      <p className="mt-1 text-sm text-slate-700">
+        <span className="text-emerald-700">Screening</span>
+        <span className="text-slate-500"> · </span>
+        {roles.screening.length ? roles.screening.join(", ") : "—"}
+      </p>
+      <p className="mt-0.5 text-sm text-slate-700">
+        <span className="text-sky-700">Intake</span>
+        <span className="text-slate-500"> · </span>
+        {roles.intake.length ? roles.intake.join(", ") : "—"}
+      </p>
+    </section>
   );
 }
 

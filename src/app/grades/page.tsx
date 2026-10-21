@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { isWorkLead } from "@/lib/caller-class";
-import { averageCallGrade, callGradeClass } from "@/lib/call-grade";
+import { averageCallGrade, callGradeClass, callJobLabel } from "@/lib/call-grade";
 import { requireStaff } from "@/lib/session";
 import { chicagoDay, formatChicago } from "@/lib/time";
 
@@ -15,6 +15,9 @@ type GradeRow = {
   score: number | null;
   reason: string | null;
   track: string | null;
+  jobs: string | null;
+  screen_handler_name: string | null;
+  intake_handler_name: string | null;
   direction: string | null;
   quo_link: string | null;
   occurred_at: string;
@@ -43,7 +46,7 @@ export default async function CallGradesPage({
   const since = new Date(Date.now() - 28 * 86_400_000).toISOString();
   const { data, error } = await supabase
     .from("call_grades")
-    .select("id, call_id, lead_id, handler_name, grade, score, reason, track, direction, quo_link, occurred_at, leads(caller_class)")
+    .select("id, call_id, lead_id, handler_name, grade, score, reason, track, jobs, screen_handler_name, intake_handler_name, direction, quo_link, occurred_at, leads(caller_class)")
     .gte("occurred_at", since)
     .order("occurred_at", { ascending: false })
     .limit(500);
@@ -64,7 +67,7 @@ export default async function CallGradesPage({
     <main className="mx-auto w-full max-w-5xl px-4 py-6">
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Call grades</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Each intake call is graded from the transcript after it ends. The day average is the mean score for that person, the same way the daily intake report averages a day.
+        Each lead call is graded for screening (is it injury-related?) and, when injury-related, full intake. One person can do both, or different people across calls. Day average uses the headline score per call.
       </p>
       {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
 
@@ -128,7 +131,17 @@ export default async function CallGradesPage({
                   <span className="font-medium text-slate-900">{row.handler_name || "Unknown"}</span>
                   <span className="text-slate-400">{formatChicago(row.occurred_at)}</span>
                   {row.score != null ? <span className="tabular-nums text-slate-500">{row.score}</span> : null}
-                  {row.track === "other" ? <span className="text-xs text-slate-400">Other</span> : null}
+                  {callJobLabel(row.jobs) ? (
+                    <span
+                      className={`text-xs font-semibold uppercase tracking-wide ${
+                        row.jobs === "screen" ? "text-emerald-700" : row.jobs === "intake" ? "text-sky-700" : "text-pink-700"
+                      }`}
+                    >
+                      {callJobLabel(row.jobs)}
+                    </span>
+                  ) : row.track === "other" ? (
+                    <span className="text-xs text-slate-400">Other</span>
+                  ) : null}
                   {row.lead_id ? (
                     <Link href={`/leads/${row.lead_id}`} className="text-navy underline">
                       Lead
@@ -140,6 +153,14 @@ export default async function CallGradesPage({
                     </a>
                   ) : null}
                 </div>
+                {(row.screen_handler_name || row.intake_handler_name) &&
+                (row.screen_handler_name !== row.handler_name || row.intake_handler_name !== row.handler_name) ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {row.screen_handler_name ? <>Screen · {row.screen_handler_name}</> : null}
+                    {row.screen_handler_name && row.intake_handler_name ? " · " : null}
+                    {row.intake_handler_name ? <>Intake · {row.intake_handler_name}</> : null}
+                  </p>
+                ) : null}
                 {row.reason ? <p className="mt-1 text-slate-700">{row.reason}</p> : null}
               </li>
             ))}

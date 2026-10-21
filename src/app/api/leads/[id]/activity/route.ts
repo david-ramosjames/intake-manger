@@ -1,9 +1,22 @@
 import { isWorkLead } from "@/lib/caller-class";
+import { isCallJob } from "@/lib/call-grade";
 import { requireStaff } from "@/lib/session";
 import { slackThreadNotes } from "@/lib/slack";
 import { loadSlackSettings } from "@/lib/slack-settings";
 
 const CALL_ARRIVAL = new Set(["human_call", "qualified_call", "sona"]);
+
+type GradeRow = {
+  call_id: string | null;
+  grade: string;
+  reason: string | null;
+  handler_name: string | null;
+  jobs: string | null;
+  screen_handler_name: string | null;
+  intake_handler_name: string | null;
+  screen_grade: string | null;
+  intake_grade: string | null;
+};
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -27,13 +40,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (error) return Response.json({ error: error.message }, { status: 500 });
   const rows = data ?? [];
   const callIds = [...new Set(rows.map((touch) => touch.source_id).filter((value): value is string => Boolean(value)))];
-  const grades = new Map<string, { grade: string; reason: string | null; handler_name: string | null }>();
+  const grades = new Map<string, GradeRow>();
   if (callIds.length && isWorkLead(lead ?? {})) {
     const { data: gradeRows } = await supabase
       .from("call_grades")
-      .select("call_id, grade, reason, handler_name")
+      .select("call_id, grade, reason, handler_name, jobs, screen_handler_name, intake_handler_name, screen_grade, intake_grade")
       .in("call_id", callIds.slice(0, 80));
-    for (const grade of gradeRows ?? []) {
+    for (const grade of (gradeRows ?? []) as GradeRow[]) {
       if (grade.call_id) grades.set(grade.call_id, grade);
     }
   }
@@ -48,6 +61,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     grade?: string | null;
     gradeReason?: string | null;
     gradeHandler?: string | null;
+    jobs?: string | null;
+    screenHandler?: string | null;
+    intakeHandler?: string | null;
+    screenGrade?: string | null;
+    intakeGrade?: string | null;
   }[] = rows.map((touch) => {
     const grade = touch.source_id ? grades.get(touch.source_id) : undefined;
     return {
@@ -60,6 +78,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       grade: grade?.grade || null,
       gradeReason: grade?.reason || null,
       gradeHandler: grade?.handler_name || null,
+      jobs: isCallJob(grade?.jobs) ? grade.jobs : null,
+      screenHandler: grade?.screen_handler_name || null,
+      intakeHandler: grade?.intake_handler_name || null,
+      screenGrade: grade?.screen_grade || null,
+      intakeGrade: grade?.intake_grade || null,
     };
   });
   if (

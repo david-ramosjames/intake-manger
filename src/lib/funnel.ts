@@ -179,16 +179,32 @@ async function foldLead(supabase: SupabaseClient, phone: string, keeper: MergeLe
   if (!blank(keeper.slack_permalink) && blank(duplicate.slack_permalink)) patch.slack_permalink = blank(duplicate.slack_permalink);
   if (!blank(keeper.slack_thread_ts) && blank(duplicate.slack_thread_ts)) patch.slack_thread_ts = blank(duplicate.slack_thread_ts);
   if (!keeper.slack_message_ts && duplicate.slack_channel_id && duplicate.slack_message_ts) {
+    const channelId = duplicate.slack_channel_id;
+    const messageTs = duplicate.slack_message_ts;
+    const threadTs = duplicate.slack_thread_ts;
     const { count, error } = await supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
-      .eq("slack_channel_id", duplicate.slack_channel_id)
-      .eq("slack_message_ts", duplicate.slack_message_ts)
+      .eq("slack_channel_id", channelId)
+      .eq("slack_message_ts", messageTs)
       .neq("id", duplicate.id);
     if (error) throw new Error(error.message);
     if (!count) {
-      patch.slack_channel_id = duplicate.slack_channel_id;
-      patch.slack_message_ts = duplicate.slack_message_ts;
+      // Clear the duplicate first. The unique index is on channel + message ts, so
+      // copying while the duplicate still holds that pair fails the update.
+      const { error: clearError } = await supabase
+        .from("leads")
+        .update({ slack_channel_id: null, slack_message_ts: null, slack_thread_ts: null })
+        .eq("id", duplicate.id);
+      if (clearError) throw new Error(clearError.message);
+      duplicate.slack_channel_id = null;
+      duplicate.slack_message_ts = null;
+      duplicate.slack_thread_ts = null;
+      patch.slack_channel_id = channelId;
+      patch.slack_message_ts = messageTs;
+      if (!blank(keeper.slack_thread_ts) && blank(threadTs)) {
+        patch.slack_thread_ts = blank(threadTs);
+      }
     }
   }
   if (Object.keys(patch).length) {

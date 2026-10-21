@@ -152,19 +152,27 @@ async function loadKey(supabase: SupabaseClient): Promise<string | null> {
   return stored || process.env.QUO_API_KEY?.trim() || null;
 }
 
+function isAiHandled(value: unknown, status?: string | null): boolean {
+  if (value === true || value === "ai-agent") return true;
+  if (typeof value === "string" && value.toLowerCase().includes("ai")) return true;
+  const statusText = String(status || "").toLowerCase();
+  return statusText === "ai-handled" || statusText.includes("ai-agent");
+}
+
 function callRow(call: Record<string, unknown>, lineName: string): InboxCall | null {
   const callId = typeof call.id === "string" ? call.id : "";
   const phoneNumberId = typeof call.phoneNumberId === "string" ? call.phoneNumberId : "";
   const createdAt = typeof call.createdAt === "string" ? call.createdAt : typeof call.answeredAt === "string" ? call.answeredAt : "";
   if (!callId || !createdAt) return null;
+  const status = typeof call.status === "string" ? call.status : "";
   return {
     id: `${callId}::${phoneNumberId}`,
     call_id: callId,
     line_name: lineName,
     direction: typeof call.direction === "string" ? call.direction : "",
-    status: typeof call.status === "string" ? call.status : "",
+    status,
     answered_by: actorId(call.answeredBy),
-    ai_handled: Boolean(call.aiHandled),
+    ai_handled: isAiHandled(call.aiHandled, status),
     created_at: createdAt,
   };
 }
@@ -506,7 +514,7 @@ export async function syncCallLedger(supabase: SupabaseClient): Promise<{ stored
         direction: row.direction || "",
         status: (row.status || "").toLowerCase(),
         answered_by: row.answered_by,
-        ai_handled: Boolean(row.ai_handled) || (row.status || "").toLowerCase().includes("ai"),
+        ai_handled: isAiHandled(row.ai_handled, row.status),
         created_at: createdAt,
       });
     }
@@ -528,6 +536,56 @@ export async function syncCallLedger(supabase: SupabaseClient): Promise<{ stored
   } finally {
     await pool.end();
   }
+}
+
+/**
+ * The webhook ledger often leaves ai_handled false. Quo's call detail marks
+ * Sona answers as ai-agent. Fill that in so the dashboard matches the email.
+ */
+export async function backfillCallAiFlags(
+  supabase: SupabaseClient,
+  options?: { limit?: number },
+): Promise<{ checked: number; marked: number }> {
+  const apiKey = await loadKey(supabase);
+  if (!apiKey) return { checked: 0, marked: 0 };
+  const limit = options?.limit ?? 40;
+  const { data, error } = await supabase
+    .from("quo_inbox_calls")
+    .select("id, call_id, status, answered_by, ai_handled")
+    .eq("ai_handled", false)
+    .in("status", ["completed", "answered"])
+    .not("answered_by", "is", null)
+    .ilike("answered_by", "SY%")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  const rows = data ?? [];
+  let marked = 0;
+  for (const row of rows) {
+    let last = "Quo call lookup failed";
+    let ai = false;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await fetch(`${QUO_BASE}/calls/${row.call_id}`, {
+        headers: { Authorization: apiKey },
+        cache: "no-store",
+      });
+      const text = await response.text();
+      const body = text ? (JSON.parse(text) as { data?: Record<string, unknown>; message?: string }) : {};
+      if (response.ok) {
+        ai = isAiHandled(body.data?.aiHandled, typeof body.data?.status === "string" ? body.data.status : row.status);
+        last = "";
+        break;
+      }
+      last = body.message || `Quo returned ${response.status}`;
+      if (response.status !== 429 && response.status < 500) break;
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+    if (last || !ai) continue;
+    const { error: updateError } = await supabase.from("quo_inbox_calls").update({ ai_handled: true }).eq("id", row.id);
+    if (updateError) throw new Error(updateError.message);
+    marked += 1;
+  }
+  return { checked: rows.length, marked };
 }
 
 async function readStateRow(supabase: SupabaseClient, id: string): Promise<SyncState | null> {

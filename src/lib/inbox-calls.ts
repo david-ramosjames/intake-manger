@@ -400,9 +400,8 @@ export async function loadInboxAnswerRate(
   fromIso: string,
   toIso: string,
 ): Promise<{ total: AnswerRate; leads: AnswerRate }> {
-  const rows: InboxCall[] = [];
   const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
+  const loadPage = async (from: number) => {
     const { data, error } = await supabase
       .from("quo_inbox_calls")
       .select("line_name, direction, status, answered_by, ai_handled, created_at")
@@ -411,9 +410,23 @@ export async function loadInboxAnswerRate(
       .order("created_at", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) throw new Error(error.message);
-    const batch = (data ?? []) as InboxCall[];
-    rows.push(...batch);
-    if (batch.length < pageSize) break;
+    return (data ?? []) as InboxCall[];
+  };
+  const rows = await loadPage(0);
+  if (rows.length === pageSize) {
+    for (let from = pageSize; ; ) {
+      const wave = await Promise.all([0, 1, 2, 3].map((step) => loadPage(from + step * pageSize)));
+      let done = false;
+      for (const batch of wave) {
+        rows.push(...batch);
+        if (batch.length < pageSize) {
+          done = true;
+          break;
+        }
+      }
+      if (done) break;
+      from += 4 * pageSize;
+    }
   }
   const { data: earliestRow } = await supabase
     .from("quo_inbox_calls")

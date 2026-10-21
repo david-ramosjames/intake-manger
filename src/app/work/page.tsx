@@ -1,10 +1,8 @@
 import Link from "next/link";
 import { QueueHelp } from "@/components/QueueHelp";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
-import { attachCallrailSources } from "@/lib/callrail";
-import { fillLeadSources } from "@/lib/lead-source-fill";
 import { loadStaff, suggestClientName } from "@/lib/identity";
-import { fillTalkedWith, isPlaceholderOwner } from "@/lib/talked-with";
+import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
 import { CYCLE_LABEL, leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
@@ -82,14 +80,20 @@ function countsAsContact(type: string): boolean {
   return type === "call" || type === "sona_call" || type === "text" || type === "voicemail";
 }
 
+async function eachSlice<T>(ids: string[], size: number, run: (slice: string[]) => Promise<T[]>): Promise<T[]> {
+  const slices: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) slices.push(ids.slice(index, index + size));
+  const batches = await Promise.all(slices.map(run));
+  return batches.flat();
+}
+
 async function loadTouches(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
   ids: string[],
 ): Promise<HistoryTouch[]> {
-  const rows: HistoryTouch[] = [];
   const page = 1000;
-  for (let index = 0; index < ids.length; index += 80) {
-    const slice = ids.slice(index, index + 80);
+  return eachSlice(ids, 80, async (slice) => {
+    const rows: HistoryTouch[] = [];
     for (let from = 0; from < 20000; from += page) {
       const { data } = await supabase
         .from("intake_interactions")
@@ -101,8 +105,8 @@ async function loadTouches(
       rows.push(...batch);
       if (batch.length < page) break;
     }
-  }
-  return rows;
+    return rows;
+  });
 }
 
 async function loadTouchesByPhone(
@@ -110,10 +114,10 @@ async function loadTouchesByPhone(
   phones: string[],
 ): Promise<HistoryTouch[]> {
   if (!phones.length) return [];
-  const rows: HistoryTouch[] = [];
   const page = 1000;
-  for (let index = 0; index < phones.length; index += 80) {
-    const slice = phones.slice(index, index + 80).map((phone) => `+1${phone}`);
+  return eachSlice(phones, 80, async (group) => {
+    const slice = group.map((phone) => `+1${phone}`);
+    const rows: HistoryTouch[] = [];
     for (let from = 0; from < 20000; from += page) {
       const { data } = await supabase
         .from("intake_interactions")
@@ -125,8 +129,8 @@ async function loadTouchesByPhone(
       rows.push(...batch);
       if (batch.length < page) break;
     }
-  }
-  return rows;
+    return rows;
+  });
 }
 
 function displayPhone(phone: string | null): string | null {
@@ -419,31 +423,17 @@ export default async function LeadListPage({
   };
   const firmName = new Map(destinations.map((destination) => [destination.id, destination.name]));
   const sentFirm = new Map<string, string>();
-  if (leads.length) {
-    const leadIds = leads.map((lead) => lead.id);
-    const sends: { lead_id: string; destination_id: string; created_at: string }[] = [];
-    for (let index = 0; index < leadIds.length; index += 80) {
-      const { data: sendRows } = await supabase
-        .from("referral_sends")
-        .select("lead_id, destination_id, created_at")
-        .in("lead_id", leadIds.slice(index, index + 80));
-      sends.push(...((sendRows ?? []) as { lead_id: string; destination_id: string; created_at: string }[]));
-    }
-    sends.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    for (const send of sends) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
-  }
   const callSteps = (stepRows ?? []) as (CallStep & { sequence: string })[];
-
-  await attachCallrailSources(leads, async (id, source) => {
-    await supabase.from("leads").update({ lead_source: source }).eq("id", id).is("lead_source", null);
-  });
-  await fillLeadSources(supabase, leads);
-  const staff = await loadStaff(supabase);
-  await fillTalkedWith(
-    supabase,
-    leads.filter((lead) => lead.consultation_date),
-    staff,
-  );
+  const leadIds = leads.map((lead) => lead.id);
+  const [staff, sendRows] = await Promise.all([
+    loadStaff(supabase),
+    eachSlice(leadIds, 80, async (slice) => {
+      const { data } = await supabase.from("referral_sends").select("lead_id, destination_id, created_at").in("lead_id", slice);
+      return (data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
+    }),
+  ]);
+  sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  for (const send of sendRows) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
 
   const talked = new Set<string>();
   const calledOut = new Set<string>();
@@ -470,21 +460,24 @@ export default async function LeadListPage({
     idsByPhone.set(key, list);
   }
   if (ids.length) {
-    const calls: { id: string | null; lead_id: string | null; due_at: string | null; queue: string | null; assigned_name: string | null; position: number | null }[] = [];
-    for (let index = 0; index < ids.length; index += 80) {
-      for (let from = 0; ; from += 1000) {
+    const [calls, touches] = await Promise.all([
+    eachSlice(ids, 80, async (slice) => {
+      const rows: { id: string | null; lead_id: string | null; due_at: string | null; queue: string | null; assigned_name: string | null; position: number | null }[] = [];
+      for (let from = 0; from < 20000; from += 1000) {
         const { data } = await supabase
           .from("lead_jobs")
           .select("id, lead_id, due_at, queue, assigned_name, position")
-          .in("lead_id", ids.slice(index, index + 80))
+          .in("lead_id", slice)
           .eq("status", "pending")
           .range(from, from + 999);
-        const batch = (data ?? []) as typeof calls;
-        calls.push(...batch);
+        const batch = (data ?? []) as typeof rows;
+        rows.push(...batch);
         if (batch.length < 1000) break;
       }
-    }
-    const touches = await loadTouches(supabase, ids);
+      return rows;
+    }),
+    loadTouches(supabase, ids),
+    ]);
     for (const touch of touches) {
       const type = String(touch.type || "").toLowerCase();
       const direction = String(touch.direction || "").toLowerCase();

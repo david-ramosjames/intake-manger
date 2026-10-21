@@ -93,6 +93,8 @@ export type QueueRow = {
   summary: string | null;
   owner: string | null;
   grade: string | null;
+  screenBy: string | null;
+  intakeBy: string | null;
   textsLive: boolean;
   textNext: string | null;
   sequenceLabel: string;
@@ -214,6 +216,14 @@ function priorityLabel(row: QueueRow): string {
   return row.priority ?? "None";
 }
 
+function screenByLabel(row: QueueRow): string {
+  return row.screenBy?.trim() || "Not set";
+}
+
+function intakeByLabel(row: QueueRow): string {
+  return row.intakeBy?.trim() || "Not set";
+}
+
 function columnValue(row: QueueRow, column: Column): string {
   if (column === "type") return typeLabel(row);
   if (column === "stage") return row.label;
@@ -250,6 +260,28 @@ function sortValue(row: QueueRow, column: SortColumn): string | number {
   return columnValue(row, column).toLowerCase();
 }
 
+export function workGradeOptions(rows: QueueRow[]): string[] {
+  return [...new Set(rows.map(gradeLabel))].sort((left, right) =>
+    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
+  );
+}
+
+export function workPriorityOptions(rows: QueueRow[]): string[] {
+  const priorityOrder = ["Flagged", "Suggested", "Contract out", "None"];
+  return [...new Set(rows.map(priorityLabel))].sort((left, right) => {
+    const leftPlace = priorityOrder.indexOf(left);
+    const rightPlace = priorityOrder.indexOf(right);
+    return (leftPlace === -1 ? 99 : leftPlace) - (rightPlace === -1 ? 99 : rightPlace) || left.localeCompare(right);
+  });
+}
+
+export function workHandlerOptions(rows: QueueRow[], kind: "screen" | "intake"): string[] {
+  const labels = rows.map((row) => (kind === "screen" ? screenByLabel(row) : intakeByLabel(row)));
+  return [...new Set(labels)].sort((left, right) =>
+    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
+  );
+}
+
 export function WorkQueue({
   rows,
   initialId,
@@ -257,6 +289,10 @@ export function WorkQueue({
   templates,
   staff,
   admin = false,
+  gradeFilter = "",
+  priorityFilter = "",
+  screenFilter = "",
+  intakeFilter = "",
 }: {
   rows: QueueRow[];
   initialId?: string;
@@ -264,14 +300,16 @@ export function WorkQueue({
   templates: { en: string; es: string };
   staff: string[];
   admin?: boolean;
+  gradeFilter?: string;
+  priorityFilter?: string;
+  screenFilter?: string;
+  intakeFilter?: string;
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [shownId, setShownId] = useState(selectedId);
   const [, startOpening] = useTransition();
   const [referralOpenId, setReferralOpenId] = useState("");
   const [filters, setFilters] = useState<Partial<Record<Column, string>>>({});
-  const [gradeFilter, setGradeFilter] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
   const [nextDay, setNextDay] = useState("");
   const [sort, setSort] = useState<{ column: SortColumn; dir: "asc" | "desc" } | null>({ column: "opened", dir: "desc" });
   const canLeave = useRef<() => boolean>(() => true);
@@ -291,19 +329,12 @@ export function WorkQueue({
     pick(id);
   }
   const selected = rows.find((row) => row.id === selectedId) ?? null;
-  const gradeOptions = [...new Set(rows.map(gradeLabel))].sort((left, right) =>
-    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
-  );
-  const priorityOrder = ["Flagged", "Suggested", "Contract out", "None"];
-  const priorityOptions = [...new Set(rows.map(priorityLabel))].sort((left, right) => {
-    const leftPlace = priorityOrder.indexOf(left);
-    const rightPlace = priorityOrder.indexOf(right);
-    return (leftPlace === -1 ? 99 : leftPlace) - (rightPlace === -1 ? 99 : rightPlace) || left.localeCompare(right);
-  });
   const shown = rows
     .filter((row) => !nextDay || row.nextDayKey === nextDay)
     .filter((row) => !gradeFilter || gradeLabel(row) === gradeFilter)
     .filter((row) => !priorityFilter || priorityLabel(row) === priorityFilter)
+    .filter((row) => !screenFilter || screenByLabel(row) === screenFilter)
+    .filter((row) => !intakeFilter || intakeByLabel(row) === intakeFilter)
     .filter((row) => !filters.type || columnValue(row, "type") === filters.type)
     .filter((row) => COLUMNS.every((column) => !filters[column.id] || columnValue(row, column.id) === filters[column.id]))
     .sort((a, b) => {
@@ -319,10 +350,6 @@ export function WorkQueue({
   return (
     <div className={`mt-4 ${selected ? "xl:pr-[29rem]" : ""}`}>
       <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
-          <QueueFilter label="Case grade" value={gradeFilter} options={gradeOptions} onChange={setGradeFilter} />
-          <QueueFilter label="Priority" value={priorityFilter} options={priorityOptions} onChange={setPriorityFilter} />
-        </div>
         <table className="w-full table-fixed text-left text-xs">
           <colgroup>
             <col style={{ width: "9%" }} />
@@ -611,7 +638,7 @@ function HeadSort({
   );
 }
 
-function QueueFilter({
+export function QueueFilter({
   label,
   value,
   options,
@@ -634,12 +661,14 @@ function QueueFilter({
         aria-label={`Filter ${label}`}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] uppercase leading-tight tracking-normal ${
-          value ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white"
+        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm ${
+          value ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
         }`}
       >
         <span>{value ? `${label}: ${value}` : label}</span>
-        <span aria-hidden="true" className="text-[10px]">↕</span>
+        <span aria-hidden="true" className="text-[10px] text-slate-400">
+          ▾
+        </span>
       </button>
       {open ? (
         <>

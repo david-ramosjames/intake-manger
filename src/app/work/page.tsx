@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { QueueHelp } from "@/components/QueueHelp";
-import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
+import { WorkListFilters } from "@/components/WorkListFilters";
+import { WorkQueue, workGradeOptions, workHandlerOptions, workPriorityOptions, type QueueRow } from "@/components/WorkQueue";
+import { loadLeadCallJobs } from "@/lib/call-grade";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
@@ -284,7 +287,19 @@ type ListLead = Pick<
 
 type Funnel = "open" | "closed";
 
-function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: string; range?: LeadRange; funnel?: Funnel; focus?: QueueFocus }): string {
+function listHref(input: {
+  queue?: QueueId;
+  view?: LeadView;
+  q?: string;
+  lead?: string;
+  range?: LeadRange;
+  funnel?: Funnel;
+  focus?: QueueFocus;
+  grade?: string;
+  priority?: string;
+  screen?: string;
+  intake?: string;
+}): string {
   const params = new URLSearchParams();
   if (input.funnel === "closed") params.set("funnel", "closed");
   if (input.focus && input.focus !== "open") params.set("focus", input.focus);
@@ -293,6 +308,10 @@ function listHref(input: { queue?: QueueId; view?: LeadView; q?: string; lead?: 
   if (input.range && input.range !== "all") params.set("range", input.range);
   if (input.q) params.set("q", input.q);
   if (input.lead) params.set("lead", input.lead);
+  if (input.grade) params.set("grade", input.grade);
+  if (input.priority) params.set("priority", input.priority);
+  if (input.screen) params.set("screen", input.screen);
+  if (input.intake) params.set("intake", input.intake);
   const query = params.toString();
   return query ? `/work?${query}` : "/work";
 }
@@ -355,7 +374,19 @@ const FOCUS_LABEL: Record<QueueFocus, string> = {
 export default async function LeadListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; view?: string; queue?: string; lead?: string; range?: string; funnel?: string; focus?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    view?: string;
+    queue?: string;
+    lead?: string;
+    range?: string;
+    funnel?: string;
+    focus?: string;
+    grade?: string;
+    priority?: string;
+    screen?: string;
+    intake?: string;
+  }>;
 }) {
   const params = await searchParams;
   const focus: QueueFocus =
@@ -368,6 +399,10 @@ export default async function LeadListPage({
   const queue: QueueId = isQueue(requested) ? requested : "all";
   const range: LeadRange = isLeadRange(params.range) ? params.range : "all";
   const q = (params.q ?? "").trim();
+  const grade = (params.grade ?? "").trim();
+  const priority = (params.priority ?? "").trim();
+  const screen = (params.screen ?? "").trim();
+  const intake = (params.intake ?? "").trim();
   const selectedId = params.lead?.trim() || "";
   const { supabase, admin } = await requireStaff();
   const docket = docketBaseUrl();
@@ -490,11 +525,12 @@ export default async function LeadListPage({
     list.push(lead.id);
     idsByPhone.set(key, list);
   }
-  const [staff, sendResult, activity, calls] = await Promise.all([
+  const [staff, sendResult, activity, calls, callJobs] = await Promise.all([
     loadStaff(supabase),
     supabase.from("referral_sends").select("lead_id, destination_id, created_at").limit(1000),
     leadIds.length ? supabase.rpc("work_queue_activity", { lead_ids: leadIds }) : Promise.resolve({ data: [] as QueueActivity[], error: null }),
     loadPendingJobs(supabase, idSet),
+    loadLeadCallJobs(supabase, leadIds),
   ]);
   const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
   sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -783,6 +819,8 @@ export default async function LeadListPage({
       summary: row.lead.summary,
       owner: row.lead.owner_name,
       grade: row.lead.grade,
+      screenBy: callJobs.get(row.lead.id)?.screenBy ?? null,
+      intakeBy: callJobs.get(row.lead.id)?.intakeBy ?? null,
       textsLive: (row.lead.text_sequence_status || "").toLowerCase() === "active",
       textNext: row.lead.text_next_at,
       sequenceLabel: outreachSequence(row.lead).label,
@@ -811,6 +849,12 @@ export default async function LeadListPage({
     return a.title.localeCompare(b.title);
   });
 
+  const href = (input: Parameters<typeof listHref>[0]) => listHref({ grade, priority, screen, intake, ...input });
+  const gradeOptions = workGradeOptions(queueRows);
+  const priorityOptions = workPriorityOptions(queueRows);
+  const screenOptions = workHandlerOptions(queueRows, "screen");
+  const intakeOptions = workHandlerOptions(queueRows, "intake");
+
   return (
     <main className="w-full px-4 py-4 xl:px-6">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -822,10 +866,10 @@ export default async function LeadListPage({
           <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400" title="Where leads from the last 30 days are now. Filtering the list below leaves these numbers in place.">
             Last 30 days
           </span>
-          <Metric href={listHref({ queue: "contact", q, range, funnel, focus })} active={queue === "contact"} label={CYCLE_LABEL.contact} value={String(metrics.contact)} tone="text-amber-700" />
-          <Metric href={listHref({ queue: "information", q, range, funnel, focus })} active={queue === "information"} label={CYCLE_LABEL.information} value={String(metrics.information)} tone="text-sky-700" />
-          <Metric href={listHref({ queue: "signing", q, range, funnel, focus })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
-          <Metric href={listHref({ queue: "signed", q, range, funnel: "closed", focus })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
+          <Metric href={href({ queue: "contact", q, range, funnel, focus })} active={queue === "contact"} label={CYCLE_LABEL.contact} value={String(metrics.contact)} tone="text-amber-700" />
+          <Metric href={href({ queue: "information", q, range, funnel, focus })} active={queue === "information"} label={CYCLE_LABEL.information} value={String(metrics.information)} tone="text-sky-700" />
+          <Metric href={href({ queue: "signing", q, range, funnel, focus })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
+          <Metric href={href({ queue: "signed", q, range, funnel: "closed", focus })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
           <span className="flex items-baseline gap-1.5 px-1" title="Signed leads among desired cases from the last 30 days.">
             <span className="text-lg font-semibold tabular-nums leading-none text-navy">{conversion}%</span>
             <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Of desired</span>
@@ -835,7 +879,7 @@ export default async function LeadListPage({
               part.count ? (
                 <Link
                   key={part.id}
-                  href={listHref({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel, focus })}
+                  href={href({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel, focus })}
                   title={`${part.label}: ${part.count}`}
                   className={part.className}
                   style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
@@ -862,7 +906,7 @@ export default async function LeadListPage({
         {RANGES.map((item) => (
           <Link
             key={item.id}
-            href={listHref({ queue, view, q, range: item.id, funnel, focus })}
+            href={href({ queue, view, q, range: item.id, funnel, focus })}
             className={`rounded-full px-3 py-1 text-sm ${
               range === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
@@ -873,42 +917,59 @@ export default async function LeadListPage({
         <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</span>
         <Link
-          href={listHref({ queue: queue === "signed" || queue === "closed" ? "all" : queue, view, q, range, funnel: "open", focus })}
+          href={href({ queue: queue === "signed" || queue === "closed" ? "all" : queue, view, q, range, funnel: "open", focus })}
           className={`rounded-full px-3 py-1 text-sm ${funnel === "open" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
         >
           Open
         </Link>
         <Link
-          href={listHref({ queue, view, q, range, funnel: "closed", focus })}
+          href={href({ queue, view, q, range, funnel: "closed", focus })}
           className={`rounded-full px-3 py-1 text-sm ${funnel === "closed" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
         >
           Closed
         </Link>
         <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:inline-block" aria-hidden="true" />
         <Link
-          href={listHref({ queue: "nonleads", view, q, range, funnel, focus })}
+          href={href({ queue: "nonleads", view, q, range, funnel, focus })}
           className={`rounded-full px-3 py-1 text-sm ${
             queue === "nonleads" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
           }`}
         >
           Non-leads{reviewCount.count ? ` (${reviewCount.count})` : ""}
         </Link>
-        <form action="/work" className="ml-auto flex items-center gap-2">
-          {focus !== "open" ? <input type="hidden" name="focus" value={focus} /> : null}
-          {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
-          {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
-          {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
-          {range !== "all" ? <input type="hidden" name="range" value={range} /> : null}
-          <input
-            name="q"
-            defaultValue={q}
-            placeholder="Name, phone, or part of a phone"
-            className="w-56 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm"
-          />
-          <Link href={listHref({ queue, view, range, funnel, focus })} className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700">
-            Clear
-          </Link>
-        </form>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Suspense fallback={null}>
+            <WorkListFilters
+              gradeOptions={gradeOptions}
+              priorityOptions={priorityOptions}
+              screenOptions={screenOptions}
+              intakeOptions={intakeOptions}
+            />
+          </Suspense>
+          <form action="/work" className="flex items-center gap-2">
+            {focus !== "open" ? <input type="hidden" name="focus" value={focus} /> : null}
+            {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
+            {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
+            {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
+            {range !== "all" ? <input type="hidden" name="range" value={range} /> : null}
+            {grade ? <input type="hidden" name="grade" value={grade} /> : null}
+            {priority ? <input type="hidden" name="priority" value={priority} /> : null}
+            {screen ? <input type="hidden" name="screen" value={screen} /> : null}
+            {intake ? <input type="hidden" name="intake" value={intake} /> : null}
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="Name, phone, or part of a phone"
+              className="w-56 rounded-md border border-slate-300 bg-white px-3 py-1 text-sm"
+            />
+            <Link
+              href={href({ queue, view, range, funnel, focus, grade: "", priority: "", screen: "", intake: "", q: "" })}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700"
+            >
+              Clear
+            </Link>
+          </form>
+        </div>
       </div>
 
       <WorkQueue
@@ -918,17 +979,21 @@ export default async function LeadListPage({
         admin={admin}
         templates={referralTemplates}
         staff={staff.map((person) => person.name)}
+        gradeFilter={grade}
+        priorityFilter={priority}
+        screenFilter={screen}
+        intakeFilter={intake}
       />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>
         {LEGACY.map((item) => (
-          <Link key={item.id} href={listHref({ view: item.id, q, range, funnel, focus })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
+          <Link key={item.id} href={href({ view: item.id, q, range, funnel, focus })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
             {item.label}
           </Link>
         ))}
         {view !== "all" ? (
-          <Link href={listHref({ queue, q, range, funnel, focus })} className="hover:text-slate-900">
+          <Link href={href({ queue, q, range, funnel, focus })} className="hover:text-slate-900">
             Clear that filter
           </Link>
         ) : null}

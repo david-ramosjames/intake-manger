@@ -246,6 +246,8 @@ function fallbackRow(job: OpenCallCard): QueueRow {
     summary: null,
     owner: job.consultName || job.assignedName || null,
     grade: null,
+    screenBy: null,
+    intakeBy: null,
     textsLive: false,
     textNext: null,
     sequenceLabel: job.sequenceLabel,

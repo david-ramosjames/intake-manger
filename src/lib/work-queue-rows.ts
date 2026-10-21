@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
+import { loadLeadCallJobs } from "@/lib/call-grade";
 import { callerClassLabel } from "@/lib/caller-class";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
@@ -172,6 +173,8 @@ function toQueueRow(
     callSteps: (CallStep & { sequence: string })[];
     docket: string;
     staff: StaffPerson[];
+    screenBy: string | null;
+    intakeBy: string | null;
   },
 ): QueueRow {
   const cycle = leadCycle(lead, input.talked ? [{ type: "call", direction: "inbound" }] : []);
@@ -271,6 +274,8 @@ function toQueueRow(
     summary: lead.summary,
     owner: lead.owner_name,
     grade: lead.grade,
+    screenBy: input.screenBy,
+    intakeBy: input.intakeBy,
     textsLive: (lead.text_sequence_status || "").toLowerCase() === "active",
     textNext: lead.text_next_at,
     sequenceLabel: outreachSequence(lead).label,
@@ -338,7 +343,7 @@ export async function loadWorkQueueRows(
     return { rows: [], destinations: [], templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es }, staffNames: [] };
   }
 
-  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }] =
+  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }, callJobs] =
     await Promise.all([
       supabase.from("leads").select(LIST_COLUMNS).in("id", ids),
       supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
@@ -357,6 +362,7 @@ export async function loadWorkQueueRows(
         .in("lead_id", ids)
         .order("occurred_at", { ascending: false })
         .limit(2000),
+      loadLeadCallJobs(supabase, ids),
     ]);
 
   const leads = (leadRows ?? []) as ListLead[];
@@ -456,6 +462,8 @@ export async function loadWorkQueueRows(
       callSteps,
       docket,
       staff,
+      screenBy: callJobs.get(lead.id)?.screenBy ?? null,
+      intakeBy: callJobs.get(lead.id)?.intakeBy ?? null,
     }),
   );
 

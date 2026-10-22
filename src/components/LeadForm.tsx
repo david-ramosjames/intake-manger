@@ -5,7 +5,8 @@ import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary } from "@/lib/ui";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
-import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_SOURCES, LEAD_STATUSES, SOURCE_CHANNELS, SOURCE_TYPE_OPTIONS, standardLeadEmail, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, standardLeadEmail, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { getCategoriesForType, getSourcesForCategory, isSourceCategory, isSourceType, SOURCE_TYPES, type SourceCategory, type SourceType } from "@/lib/source-options";
 
 function isNextRedirect(err: unknown): boolean {
   return (
@@ -39,6 +40,21 @@ export function LeadForm({
   useEffect(() => {
     setEmail(standardLeadEmail(lead?.email) ?? "");
   }, [lead?.id, lead?.email]);
+  
+  const [sourceType, setSourceType] = useState<SourceType | "">(
+    () => (isSourceType(lead?.source_type) ? lead.source_type : "")
+  );
+  const [sourceCategory, setSourceCategory] = useState<SourceCategory | "">(
+    () => (isSourceCategory(lead?.source_category) ? lead.source_category : "")
+  );
+  const [leadSource, setLeadSource] = useState(() => lead?.lead_source ?? "");
+  
+  useEffect(() => {
+    setSourceType(isSourceType(lead?.source_type) ? lead.source_type : "");
+    setSourceCategory(isSourceCategory(lead?.source_category) ? lead.source_category : "");
+    setLeadSource(lead?.lead_source ?? "");
+  }, [lead?.id, lead?.source_type, lead?.source_category, lead?.lead_source]);
+  
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,42 +98,81 @@ export function LeadForm({
         )}
       </label>
       <ChannelField value={lead?.source_channel ?? ""} />
-      <label className="block text-sm">
-        <span className="font-medium text-slate-700">Lead source</span>
-        <input
-          name="lead_source"
-          list="lead-source-examples"
-          defaultValue={lead?.lead_source ?? ""}
-          placeholder="Google, Friend, Attorney"
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-        />
-        <datalist id="lead-source-examples">
-          {LEAD_SOURCES.map((item) => (
-            <option key={item.source} value={item.source} />
-          ))}
-        </datalist>
-      </label>
-      <Field
-        label="Source note"
-        name="source_note"
-        defaultValue={lead?.source_note ?? ""}
-        placeholder="My friend gave me this number"
-      />
+      
       <label className="block text-sm">
         <span className="font-medium text-slate-700">Source type</span>
         <select
           name="source_type"
-          defaultValue={isSourceType(lead?.source_type) && lead.source_type !== "Unknown" ? lead.source_type : ""}
+          value={sourceType}
+          onChange={(e) => {
+            const newType = e.target.value as SourceType | "";
+            setSourceType(newType);
+            setSourceCategory("");
+            setLeadSource("");
+          }}
           className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
         >
           <option value="">Not set</option>
-          {SOURCE_TYPE_OPTIONS.map((item) => (
+          {SOURCE_TYPES.map((item) => (
             <option key={item} value={item}>
               {item}
             </option>
           ))}
         </select>
       </label>
+
+      <label className="block text-sm">
+        <span className="font-medium text-slate-700">Source category</span>
+        <select
+          name="source_category"
+          value={sourceCategory}
+          onChange={(e) => {
+            const newCategory = e.target.value as SourceCategory | "";
+            setSourceCategory(newCategory);
+            setLeadSource("");
+          }}
+          disabled={!sourceType}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500"
+        >
+          <option value="">Select category</option>
+          {sourceType && getCategoriesForType(sourceType).map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </select>
+        {!sourceType && (
+          <span className="mt-1 block text-xs text-slate-500">Select source type first</span>
+        )}
+      </label>
+
+      <label className="block text-sm">
+        <span className="font-medium text-slate-700">Lead source</span>
+        <select
+          name="lead_source"
+          value={leadSource}
+          onChange={(e) => setLeadSource(e.target.value)}
+          disabled={!sourceCategory}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100 disabled:text-slate-500"
+        >
+          <option value="">Select source</option>
+          {sourceType && sourceCategory && getSourcesForCategory(sourceType, sourceCategory).map((source) => (
+            <option key={source} value={source}>
+              {source}
+            </option>
+          ))}
+        </select>
+        {!sourceCategory && (
+          <span className="mt-1 block text-xs text-slate-500">Select source category first</span>
+        )}
+      </label>
+      
+      <Field
+        label="Source note"
+        name="source_note"
+        defaultValue={lead?.source_note ?? ""}
+        placeholder="My friend gave me this number"
+      />
       <CaseTypeField value={lead?.case_type ?? ""} />
       <label className="block text-sm">
         <span className="font-medium text-slate-700">Lead status</span>

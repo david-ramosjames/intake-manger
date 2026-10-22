@@ -269,50 +269,63 @@ export function leadSourceFromText(text: string | null | undefined): { source: s
 }
 
 export const PI_CASE_TYPES = [
-  "Non-PI Legal Matter",
-  "Auto Accident",
-  "Commercial / 18 Wheeler",
-  "Dog Bite",
-  "MedMal",
-  "No Injuries / Property Damage",
-  "Other Injury",
-  "Pedestrian / Bicycle / Scooter",
-  "Premises Liability",
-  "Sexual Assault / Child Abuse",
-  "Work Injury",
-  "Workers Comp",
-  "Wrongful Death",
+  "T: Commercial / 18 Wheeler",
+  "T: Dog Bite",
+  "T: Non-PI Legal Matter",
+  "T: Other Injury",
+  "T: Pedestrian / Bicycle / Scooter",
+  "T: Premises Liability",
+  "T: Sexual Assault / Child Abuse",
+  "T: TBD",
+  "T: Work Injury",
+  "T: Wrongful Death",
 ] as const;
 
 const CASE_TYPE_ALIASES: Record<string, (typeof PI_CASE_TYPES)[number]> = {
-  "dog bite": "Dog Bite",
-  "car accident": "Auto Accident",
-  "auto accident": "Auto Accident",
-  motorcycle: "Auto Accident",
-  "truck accident": "Commercial / 18 Wheeler",
-  "18 wheeler": "Commercial / 18 Wheeler",
-  "18-wheeler": "Commercial / 18 Wheeler",
-  pedestrian: "Pedestrian / Bicycle / Scooter",
-  "slip and fall": "Premises Liability",
-  premises: "Premises Liability",
-  assault: "Other Injury",
-  "work accident": "Work Injury",
-  "work injury": "Work Injury",
-  "workers comp": "Workers Comp",
-  "workers compensation": "Workers Comp",
-  "wrongful death": "Wrongful Death",
-  "medical malpractice": "MedMal",
-  medmal: "MedMal",
-  other: "Other Injury",
-  "other injury": "Other Injury",
-  "non-pi legal matter": "Non-PI Legal Matter",
-  "non pi legal matter": "Non-PI Legal Matter",
-  "child abuse": "Sexual Assault / Child Abuse",
-  "sexual assault": "Sexual Assault / Child Abuse",
-  "sexualassault / child abuse": "Sexual Assault / Child Abuse",
+  // Legacy mappings (old format without T: prefix)
+  "dog bite": "T: Dog Bite",
+  "auto accident": "T: TBD",
+  "car accident": "T: TBD",
+  motorcycle: "T: TBD",
+  "truck accident": "T: Commercial / 18 Wheeler",
+  "18 wheeler": "T: Commercial / 18 Wheeler",
+  "18-wheeler": "T: Commercial / 18 Wheeler",
+  pedestrian: "T: Pedestrian / Bicycle / Scooter",
+  "slip and fall": "T: Premises Liability",
+  premises: "T: Premises Liability",
+  assault: "T: Other Injury",
+  "work accident": "T: Work Injury",
+  "work injury": "T: Work Injury",
+  "workers comp": "T: TBD",
+  "workers compensation": "T: TBD",
+  "wrongful death": "T: Wrongful Death",
+  "medical malpractice": "T: TBD",
+  medmal: "T: TBD",
+  other: "T: Other Injury",
+  "other injury": "T: Other Injury",
+  "non-pi legal matter": "T: Non-PI Legal Matter",
+  "non pi legal matter": "T: Non-PI Legal Matter",
+  "child abuse": "T: Sexual Assault / Child Abuse",
+  "sexual assault": "T: Sexual Assault / Child Abuse",
+  "sexualassault / child abuse": "T: Sexual Assault / Child Abuse",
+  "no injuries / property damage": "T: TBD",
+  // Map old format to new format
+  "Non-PI Legal Matter": "T: Non-PI Legal Matter",
+  "Auto Accident": "T: TBD",
+  "Commercial / 18 Wheeler": "T: Commercial / 18 Wheeler",
+  "Dog Bite": "T: Dog Bite",
+  "MedMal": "T: TBD",
+  "No Injuries / Property Damage": "T: TBD",
+  "Other Injury": "T: Other Injury",
+  "Pedestrian / Bicycle / Scooter": "T: Pedestrian / Bicycle / Scooter",
+  "Premises Liability": "T: Premises Liability",
+  "Sexual Assault / Child Abuse": "T: Sexual Assault / Child Abuse",
+  "Work Injury": "T: Work Injury",
+  "Workers Comp": "T: TBD",
+  "Wrongful Death": "T: Wrongful Death",
 };
 
-const OUTSIDE_CASE_TYPES = new Set<string>(["Non-PI Legal Matter", "Unknown / No Response"]);
+const OUTSIDE_CASE_TYPES = new Set<string>(["T: Non-PI Legal Matter", "Unknown / No Response"]);
 
 export const LEAD_ARRIVAL_LABEL: Record<LeadArrival, string> = {
   form: "Form",
@@ -332,6 +345,7 @@ export type Lead = {
   email: string | null;
   lead_source: string | null;
   source_type: string | null;
+  source_category: string | null;
   source_channel: string | null;
   source_note: string | null;
   case_type: string | null;
@@ -587,19 +601,19 @@ function usableAccident(value: string | null | undefined): string | null {
 
 function narrativeCaseType(text: string | null | undefined): string | null {
   const body = text ?? "";
-  if (/\b(?:child abuse|sexual assault|molest)\b/i.test(body)) return "Sexual Assault / Child Abuse";
-  if (/\bdog bite|bitten by (?:a |the )?(?:\w+ )?dog|attacked by (?:a |the )?(?:\w+ )?dogs?\b/i.test(body)) return "Dog Bite";
-  if (/\bwrongful death\b/i.test(body)) return "Wrongful Death";
-  if (/\b(?:medical malpractice|med\s*mal|surgical error)\b/i.test(body)) return "MedMal";
-  if (/\bworkers?'?\s*comp(?:ensation)?\b/i.test(body)) return "Workers Comp";
-  if (/\b(?:work(?:place)? (?:accident|injury)|injured at work)\b/i.test(body)) return "Work Injury";
-  if (/\b(?:18-?\s*wheeler|tractor-?trailer|commercial truck|truck accident)\b/i.test(body)) return "Commercial / 18 Wheeler";
-  if (/\b(?:pedestrian|bicycle|scooter)\b/i.test(body)) return "Pedestrian / Bicycle / Scooter";
-  if (/\b(?:no injuries|property damage only)\b/i.test(body)) return "No Injuries / Property Damage";
-  if (/\b(?:car accident|auto accident|rear-?ended|motorcycle|other driver|hit and run)\b/i.test(body)) return "Auto Accident";
-  if (/\b(?:slip(?:ped)? and fall|premises liability|wet floor)\b/i.test(body)) return "Premises Liability";
-  if (/\b(?:immigration|divorce|child support|criminal defense|family law)\b/i.test(body)) return "Non-PI Legal Matter";
-  if (/\b(?:injur(?:y|ed|ies)|hurt)\b/i.test(body)) return "Other Injury";
+  if (/\b(?:child abuse|sexual assault|molest)\b/i.test(body)) return "T: Sexual Assault / Child Abuse";
+  if (/\bdog bite|bitten by (?:a |the )?(?:\w+ )?dog|attacked by (?:a |the )?(?:\w+ )?dogs?\b/i.test(body)) return "T: Dog Bite";
+  if (/\bwrongful death\b/i.test(body)) return "T: Wrongful Death";
+  if (/\b(?:medical malpractice|med\s*mal|surgical error)\b/i.test(body)) return "T: TBD";
+  if (/\bworkers?'?\s*comp(?:ensation)?\b/i.test(body)) return "T: TBD";
+  if (/\b(?:work(?:place)? (?:accident|injury)|injured at work)\b/i.test(body)) return "T: Work Injury";
+  if (/\b(?:18-?\s*wheeler|tractor-?trailer|commercial truck|truck accident)\b/i.test(body)) return "T: Commercial / 18 Wheeler";
+  if (/\b(?:pedestrian|bicycle|scooter)\b/i.test(body)) return "T: Pedestrian / Bicycle / Scooter";
+  if (/\b(?:no injuries|property damage only)\b/i.test(body)) return "T: TBD";
+  if (/\b(?:car accident|auto accident|rear-?ended|motorcycle|other driver|hit and run)\b/i.test(body)) return "T: TBD";
+  if (/\b(?:slip(?:ped)? and fall|premises liability|wet floor)\b/i.test(body)) return "T: Premises Liability";
+  if (/\b(?:immigration|divorce|child support|criminal defense|family law)\b/i.test(body)) return "T: Non-PI Legal Matter";
+  if (/\b(?:injur(?:y|ed|ies)|hurt)\b/i.test(body)) return "T: Other Injury";
   return null;
 }
 

@@ -35,13 +35,15 @@ const RETIRED_NOT_QUALIFIED_TAGS = ["NQ: Spam / Robo Call", "NQ: Outside Service
 export const SIZE_TAGS = ["S: Small", "S: Medium", "S: Large"] as const;
 
 export const TYPE_TAGS = [
-  "T: Auto Accident",
   "T: Commercial / 18 Wheeler",
   "T: Dog Bite",
+  "T: Non-PI Legal Matter",
   "T: Other Injury",
   "T: Pedestrian / Bicycle / Scooter",
   "T: Premises Liability",
   "T: Sexual Assault / Child Abuse",
+  "T: TBD",
+  "T: Work Injury",
   "T: Wrongful Death",
 ] as const;
 
@@ -86,13 +88,15 @@ export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
   "S: Large": "S: Large",
   "S: Medium": "S: Medium",
   "S: Small": "S: Small",
-  "T: Auto Accident": "T: Auto Accident",
   "T: Commercial / 18 Wheeler": "T: Commercial / 18 Wheeler",
   "T: Dog Bite": "T: Dog Bite",
+  "T: Non-PI Legal Matter": "T: Non-PI Legal Matter",
   "T: Other Injury": "T: Other Injury",
   "T: Pedestrian / Bicycle / Scooter": "T: Pedestrian / Bicycle / Scooter",
   "T: Premises Liability": "T: Premises Liability",
   "T: Sexual Assault / Child Abuse": "T: Sexual Assault / Child Abuse",
+  "T: TBD": "T: TBD",
+  "T: Work Injury": "T: Work Injury",
   "T: Wrongful Death": "T: Wrongful Death",
 };
 
@@ -131,9 +135,16 @@ const SIZE_SET = new Set<string>(SIZE_TAGS);
 const TYPE_SET = new Set<string>(TYPE_TAGS);
 
 const CASE_TO_INJURY: Record<string, (typeof TYPE_TAGS)[number]> = {
-  "Auto Accident": "T: Auto Accident",
-  "Commercial / 18 Wheeler": "T: Commercial / 18 Wheeler",
-  "Dog Bite": "T: Dog Bite",
+  "T: Commercial / 18 Wheeler": "T: Commercial / 18 Wheeler",
+  "T: Dog Bite": "T: Dog Bite",
+  "T: Non-PI Legal Matter": "T: Non-PI Legal Matter",
+  "T: Other Injury": "T: Other Injury",
+  "T: Pedestrian / Bicycle / Scooter": "T: Pedestrian / Bicycle / Scooter",
+  "T: Premises Liability": "T: Premises Liability",
+  "T: Sexual Assault / Child Abuse": "T: Sexual Assault / Child Abuse",
+  "T: TBD": "T: TBD",
+  "T: Work Injury": "T: Work Injury",
+  "T: Wrongful Death": "T: Wrongful Death",
   "Other Injury": "T: Other Injury",
   "Pedestrian / Bicycle / Scooter": "T: Pedestrian / Bicycle / Scooter",
   "Premises Liability": "T: Premises Liability",

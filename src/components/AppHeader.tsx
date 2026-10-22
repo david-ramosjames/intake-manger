@@ -20,6 +20,7 @@ const LINKS = [
 
 const ADMIN_LINKS = [
   { href: "/sequences", label: "Sequences" },
+  { href: "/outreach-timeline", label: "Timeline" },
   { href: "/how-it-fits", label: "How it fits" },
   { href: "/staff", label: "Staff" },
 ];

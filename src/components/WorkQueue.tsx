@@ -148,10 +148,11 @@ const COLUMNS: { id: Exclude<Column, "type">; label: string; width: string }[] =
 ];
 
 const TYPE_SHORT: Record<string, string> = {
-  "Non-PI Legal Matter": "Non-PI",
-  "Commercial / 18 Wheeler": "18 Wheeler",
-  "No Injuries / Property Damage": "Property damage",
-  "Pedestrian / Bicycle / Scooter": "Ped / bike",
+  "T: Non-PI Legal Matter": "Non-PI",
+  "T: Commercial / 18 Wheeler": "18 Wheeler",
+  "T: Pedestrian / Bicycle / Scooter": "Ped / bike",
+  "T: Sexual Assault / Child Abuse": "Assault",
+  "T: TBD": "TBD",
   "Premises Liability": "Premises",
   "Sexual Assault / Child Abuse": "Assault",
 };
@@ -184,7 +185,7 @@ function shortType(text: string): string | null {
   if (official === "Unknown / No Response") return null;
   if (official) return TYPE_SHORT[official] ?? official;
   if (/resbal|slip|ca[ií]da|premises/i.test(text)) return "Premises";
-  if (/18-?\s*wheeler|tractor-?trailer/i.test(text)) return "18 Wheeler";
+  if (/18-?\s*wheeler|tractor-?trailer/i.test(text)) return "T: 18 Wheeler";
   if (/unknown|no response|not captured|unclassified|personal injury claim|^n\/?a$/i.test(text)) return null;
   const head = text.split(/\s*[\/|]\s*/)[0].replace(/\s+/g, " ").trim();
   if (!head) return null;
@@ -222,6 +223,14 @@ function screenByLabel(row: QueueRow): string {
 
 function intakeByLabel(row: QueueRow): string {
   return row.intakeBy?.trim() || "Not set";
+}
+
+function sourceTypeLabel(row: QueueRow): string {
+  return row.sourceType?.trim() || "Not set";
+}
+
+function leadSourceLabel(row: QueueRow): string {
+  return row.leadSource?.trim() || "Not set";
 }
 
 function columnValue(row: QueueRow, column: Column): string {
@@ -271,6 +280,8 @@ export function WorkQueue({
   priorityFilter = "",
   screenFilter = "",
   intakeFilter = "",
+  sourceTypeFilter = "",
+  leadSourceFilter = "",
 }: {
   rows: QueueRow[];
   initialId?: string;
@@ -282,6 +293,8 @@ export function WorkQueue({
   priorityFilter?: string;
   screenFilter?: string;
   intakeFilter?: string;
+  sourceTypeFilter?: string;
+  leadSourceFilter?: string;
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [shownId, setShownId] = useState(selectedId);
@@ -312,6 +325,8 @@ export function WorkQueue({
     .filter((row) => !nextDay || row.nextDayKey === nextDay)
     .filter((row) => !gradeFilter || gradeLabel(row) === gradeFilter)
     .filter((row) => !priorityFilter || priorityLabel(row) === priorityFilter)
+    .filter((row) => !sourceTypeFilter || sourceTypeLabel(row) === sourceTypeFilter)
+    .filter((row) => !leadSourceFilter || leadSourceLabel(row) === leadSourceFilter)
     .filter((row) => !screenFilter || screenByLabel(row) === screenFilter)
     .filter((row) => !intakeFilter || intakeByLabel(row) === intakeFilter)
     .filter((row) => !filters.type || columnValue(row, "type") === filters.type)

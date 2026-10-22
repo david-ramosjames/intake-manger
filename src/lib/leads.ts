@@ -332,6 +332,7 @@ export type Lead = {
   email: string | null;
   lead_source: string | null;
   source_type: string | null;
+  source_category: string | null;
   source_channel: string | null;
   source_note: string | null;
   case_type: string | null;

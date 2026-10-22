@@ -18,6 +18,7 @@ const EDITABLE = [
   "email",
   "lead_source",
   "source_type",
+  "source_category",
   "source_channel",
   "source_note",
   "case_type",
@@ -123,10 +124,9 @@ function fieldsFromForm(formData: FormData) {
     phone: text(formData, "phone"),
     phone_e164: toE164(text(formData, "phone")),
     email: displayContact(text(formData, "email")),
-    lead_source: canonicalLeadSource(text(formData, "lead_source")).source || null,
-    source_type: isSourceType(text(formData, "source_type"))
-      ? text(formData, "source_type")
-      : canonicalLeadSource(text(formData, "lead_source")).type || null,
+    lead_source: text(formData, "lead_source") || null,
+    source_type: text(formData, "source_type") || null,
+    source_category: text(formData, "source_category") || null,
     source_channel: text(formData, "source_channel"),
     source_note: text(formData, "source_note"),
     case_type: text(formData, "case_type"),

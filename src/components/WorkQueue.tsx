@@ -6,12 +6,12 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
-import { DECLINE_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
+import { DECLINE_TAGS, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, saveLeadTags, sendReferral, setConsultation, setDesired, setLostLead, setNextAction, setQualified, startTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -138,8 +138,9 @@ type Touch = {
 type Column = "type" | "stage" | "consult" | "qualified" | "desired" | "last" | "automation";
 type SortColumn = Column | "opened";
 
-const COLUMNS: { id: Exclude<Column, "type">; label: string; width: string }[] = [
-  { id: "stage", label: "Stage", width: "8%" },
+const STAGE_COLUMN: { id: "stage"; label: string; width: string } = { id: "stage", label: "Stage", width: "8%" };
+
+const COLUMNS: { id: Exclude<Column, "type" | "stage">; label: string; width: string }[] = [
   { id: "consult", label: "Consult", width: "8%" },
   { id: "qualified", label: "Qualified", width: "8%" },
   { id: "desired", label: "Desired", width: "8%" },
@@ -300,6 +301,7 @@ export function WorkQueue({
     .filter((row) => !screenFilter || screenByLabel(row) === screenFilter)
     .filter((row) => !intakeFilter || intakeByLabel(row) === intakeFilter)
     .filter((row) => !filters.type || columnValue(row, "type") === filters.type)
+    .filter((row) => !filters.stage || columnValue(row, "stage") === filters.stage)
     .filter((row) => COLUMNS.every((column) => !filters[column.id] || columnValue(row, column.id) === filters[column.id]))
     .sort((a, b) => {
       if (!sort) return compareRecent(a, b);
@@ -318,6 +320,7 @@ export function WorkQueue({
           <colgroup>
             <col style={{ width: "9%" }} />
             <col style={{ width: "15%" }} />
+            <col style={{ width: STAGE_COLUMN.width }} />
             <col style={{ width: "12%" }} />
             <col style={{ width: "10%" }} />
             {COLUMNS.map((column) => (
@@ -346,6 +349,22 @@ export function WorkQueue({
                 </button>
               </th>
               <th className="sticky top-16 z-20 border-b border-slate-200 bg-white px-2 py-2 text-left font-medium uppercase tracking-wide">Lead</th>
+              <HeadSort
+                label={STAGE_COLUMN.label}
+                column={STAGE_COLUMN.id}
+                align="start"
+                rows={rows}
+                filter={filters.stage ?? ""}
+                sort={sort}
+                onChange={(value) => {
+                  if (value === "sort:asc" || value === "sort:desc") {
+                    setSort({ column: "stage", dir: value === "sort:asc" ? "asc" : "desc" });
+                    return;
+                  }
+                  if (!value) setSort((current) => (current?.column === "stage" ? null : current));
+                  setFilters((current) => ({ ...current, stage: value }));
+                }}
+              />
               <NextDayHead rows={rows} day={nextDay} onChange={setNextDay} />
               <HeadSort
                 label="Type"
@@ -414,13 +433,6 @@ export function WorkQueue({
                     <p className="mt-0.5 font-medium text-orange-800">Suggested close: {CLOSE_SUGGESTION_LABEL[row.closeSuggestion]}</p>
                   ) : null}
                 </td>
-                <td className="px-2 py-2 text-slate-800">
-                  <p className="font-medium text-slate-900">{row.actionTitle ?? "—"}</p>
-                  <ActionLines lines={row.nextAction} />
-                </td>
-                <td className="px-2 py-2 text-slate-700">
-                  {columnValue(row, "type") === "TBD" ? <TbdValue /> : <p className="line-clamp-2">{columnValue(row, "type")}</p>}
-                </td>
                 <td className="px-2 py-2 text-center">
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
                     {row.label}
@@ -442,6 +454,12 @@ export function WorkQueue({
                       </button>
                     )
                   ) : null}
+                </td>
+                <td className="px-2 py-2 text-slate-800">
+                  <ActionLines lines={row.nextAction} />
+                </td>
+                <td className="px-2 py-2 text-slate-700">
+                  {columnValue(row, "type") === "TBD" ? <TbdValue /> : <p className="line-clamp-2">{columnValue(row, "type")}</p>}
                 </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.consultWhen}</td>
                 <td className="px-1 py-2 text-center">
@@ -975,43 +993,43 @@ function LeadFacts({
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
     try {
-      await saveLeadDetails(formData);
-      if (!notALead) {
-        const tagsData = new FormData();
-        tagsData.set("qualified_tag", qualified === "yes" ? QUALIFIED_YES : qualified === "no" ? QUALIFIED_NO : "");
-        tagsData.set("not_qualified_tag", "");
-        tagsData.set("decline_tag", desired === "yes" ? "" : decline);
-        tagsData.set("size_tag", desired === "no" ? "" : size);
-        await saveLeadTags(row.id, tagsData);
-        if (qualified === "yes" || qualified === "no") {
-          const decision = new FormData();
-          decision.set("lead_id", row.id);
-          decision.set("decision", qualified);
-          await setQualified(decision);
-        }
-        if (!contractLocked && (desired === "yes" || desired === "no")) {
-          const decision = new FormData();
-          decision.set("lead_id", row.id);
-          decision.set("decision", desired);
-          await setDesired(decision);
-        }
-        if (dirty.lost && (lostChoice === "yes" || lostChoice === "no")) {
-          const lostData = new FormData();
-          lostData.set("lead_id", row.id);
-          lostData.set("decision", lostChoice);
-          if (lostChoice === "yes") lostData.set("reason", lostReason);
-          await setLostLead(lostData);
-        }
+      await persistDetails(formData);
+      if (dirty.lost && (lostChoice === "yes" || lostChoice === "no")) {
+        const lostData = new FormData();
+        lostData.set("lead_id", row.id);
+        lostData.set("decision", lostChoice);
+        if (lostChoice === "yes") lostData.set("reason", lostReason);
+        await setLostLead(lostData);
       }
       setSaved(true);
       setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
       notify({ tone: "saved", text: "Saved" });
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
-      notify({ tone: "error", text });
-      setError(text);
+      if (text.includes("Server Components render")) {
+        setSaved(true);
+        setError("Saved. Reload the page if the list looks stale.");
+        notify({ tone: "saved", text: "Saved" });
+      } else {
+        notify({ tone: "error", text });
+        setError(text);
+      }
     } finally {
       setPending(false);
+    }
+  }
+
+  async function persistDetails(formData?: FormData) {
+    const data = formData ?? new FormData(document.getElementById(formId) as HTMLFormElement);
+    data.set("qualified_decision", qualified);
+    data.set("desired_decision", desired);
+    data.set("decline_tag", desired === "yes" ? "" : decline);
+    data.set("size_tag", desired === "no" ? "" : size);
+    try {
+      await saveLeadDetails(data);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : "Could not save";
+      if (!text.includes("Server Components render")) throw err;
     }
   }
   const caseOptions = caseTypeChoices(row.caseType);
@@ -1230,7 +1248,7 @@ function LeadFacts({
             </FieldLabel>
             {decline === "DEC: Referred" || row.nonPi || startReferral ? (
               <div className="col-span-2 border-t border-slate-200 pt-3">
-                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen />
+                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen prepare={persistDetails} />
               </div>
             ) : null}
           </PanelSection>
@@ -1348,11 +1366,13 @@ function QueueReferral({
   destinations,
   templates,
   startOpen = false,
+  prepare,
 }: {
   row: QueueRow;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   startOpen?: boolean;
+  prepare?: () => Promise<void>;
 }) {
   const firms = referralFirms(destinations);
   const types = PRACTICE_AREAS.filter((area) => firms.some((firm) => firm.practice_areas.includes(area.id))).sort((a, b) =>
@@ -1399,6 +1419,7 @@ function QueueReferral({
     data.set("language", language);
     data.set("practice_area", area);
     try {
+      if (prepare) await prepare();
       const result = kind === "send" ? await sendReferral(row.id, data) : await markReferralAlreadySent(row.id, data);
       if (result.error) {
         notify({ tone: "error", text: result.error });

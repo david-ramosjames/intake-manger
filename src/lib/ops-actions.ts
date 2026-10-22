@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags, pushCallrailTags } from "./callrail";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG, type ExcludedCallerClass } from "./caller-class";
-import { MANAGED_CALLRAIL_TAGS, NOT_A_LEAD_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
+import { MANAGED_CALLRAIL_TAGS, NOT_A_LEAD_TAGS, QUALIFIED_NO, QUALIFIED_YES, injuryTagForCaseType, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
@@ -383,7 +383,7 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const { data: before, error: loadError } = await supabase
     .from("leads")
-    .select("caller_class, close_suggestion, signed_case, date_signed")
+    .select("caller_class, close_suggestion, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case")
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
@@ -428,6 +428,43 @@ export async function saveLeadDetails(formData: FormData) {
     actor,
     payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType, lead_name: leadName },
   });
+  const qualifiedDecision = text(formData, "qualified_decision");
+  const desiredDecision = text(formData, "desired_decision");
+  if (!markingNonLead && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no")) {
+    if (desiredDecision === "yes" && qualifiedDecision === "no") throw new Error("A lead that is not qualified is not desired.");
+    const qualifiedTag = qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "";
+    const desired = desiredDecision === "yes" ? true : desiredDecision === "no" ? false : before.desired_case === true;
+    const tagged = tagsFromSelection({
+      qualified: qualifiedTag,
+      coverage: ["CVR DESIRED", "CVR SIGNED"].filter((tag) => (before.callrail_tags ?? []).includes(tag)),
+      decline: text(formData, "decline_tag") ?? "",
+      desired,
+      signed: Boolean(before.signed_case),
+      nonPi: officialType === "Non-PI Legal Matter" || before.caller_class === "non_pi",
+      size: text(formData, "size_tag") ?? "",
+      injuryType: injuryTagForCaseType(patch.case_type),
+      requireQualified: Boolean(qualifiedTag),
+    });
+    const milestone: Record<string, unknown> = {
+      callrail_tags: tagged.tags,
+      decline_reason: tagged.decline_reason,
+    };
+    if (tagged.qualified === true || tagged.qualified === false) milestone.qualified = tagged.qualified;
+    if (desiredDecision === "yes" || desiredDecision === "no") {
+      milestone.desired_case = desiredDecision === "yes";
+      milestone.desired_source = "staff";
+    }
+    const { error: milestoneError } = await supabase.from("leads").update(milestone).eq("id", leadId);
+    if (milestoneError) throw new Error(milestoneError.message);
+    if (callrailConfigured() && before.callrail_call_id) {
+      try {
+        await pushCallrailTags(before.callrail_call_id, tagged.tags, MANAGED_CALLRAIL_TAGS);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "CallRail did not take the tags.";
+        throw new Error(`Saved on the lead. CallRail did not take the tags. ${message}`);
+      }
+    }
+  }
   revalidatePath("/");
   revalidatePath("/priority");
   revalidatePath("/review");

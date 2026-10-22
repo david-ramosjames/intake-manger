@@ -93,17 +93,26 @@ function toCard(job: JobRow, channelId: string, now: number, totals: Map<string,
     assignedName: assigned,
     consultName: consultName(lead),
     consulted: Boolean(lead?.consultation_date),
+    tagName: assigned || (lead?.consultation_date ? consultName(lead) || "Not tagged" : "Outbound"),
     dueAt: job.due_at,
   };
+}
+
+function tagOptions(names: string[]): string[] {
+  const unique = [...new Set(names.filter(Boolean))];
+  unique.sort((a, b) => a.localeCompare(b));
+  const rest = unique.filter((name) => name !== "Outbound");
+  return unique.includes("Outbound") ? ["Outbound", ...rest] : rest;
 }
 
 export default async function OpenCallsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; lead?: string }>;
+  searchParams: Promise<{ view?: string; lead?: string; tag?: string }>;
 }) {
   const params = await searchParams;
   const view: CallView = params.view === "upcoming" ? "upcoming" : "waiting";
+  const tag = params.tag?.trim() || "";
   const { supabase, admin } = await requireStaff();
   await collapseDuplicateOpenCalls(supabase);
   const finishCounts = await callFinishCounts(supabase);
@@ -138,11 +147,14 @@ export default async function OpenCallsPage({
     const position = Number((row as { position?: number }).position || 0);
     totals.set(sequence, Math.max(totals.get(sequence) ?? 0, position));
   }
-  const waiting = (waitingRows ?? []) as JobRow[];
-  const upcoming = (upcomingRows ?? []) as JobRow[];
+  const waiting = ((waitingRows ?? []) as JobRow[]).map((job) => toCard(job, slack.channelId, now, totals));
+  const upcoming = ((upcomingRows ?? []) as JobRow[]).map((job) => toCard(job, slack.channelId, now, totals));
+  const people = tagOptions(["Outbound", ...staff.map((person) => person.name), ...waiting.map((job) => job.tagName), ...upcoming.map((job) => job.tagName)]);
+  const matches = (job: OpenCallCard) => !tag || job.tagName === tag;
+  const waitingShown = waiting.filter(matches);
+  const upcomingShown = upcoming.filter(matches);
   const error = waitingError?.message || upcomingError?.message || null;
-  const rows = view === "upcoming" ? upcoming : waiting;
-  const jobs = rows.map((job) => toCard(job, slack.channelId, now, totals));
+  const jobs = view === "upcoming" ? upcomingShown : waitingShown;
   const selectedLead = params.lead?.trim() || "";
   const [shelf, selected] = await Promise.all([
     loadWorkQueueShelfContext(supabase),
@@ -165,13 +177,15 @@ export default async function OpenCallsPage({
       {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
       <OpenCallsList
         view={view}
-        waitingCount={waiting.length}
-        upcomingCount={upcoming.length}
+        waitingCount={waitingShown.length}
+        upcomingCount={upcomingShown.length}
         jobs={jobs}
         destinations={shelf.destinations}
         templates={shelf.templates}
         staff={staff}
         staffNames={shelf.staffNames}
+        people={people}
+        tag={tag}
         admin={admin}
         initialRow={selected.rows[0] ?? null}
       />

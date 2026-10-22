@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { OpenCallPlan } from "@/components/OpenCallPlan";
 import { LeadDrawer, type QueueRow } from "@/components/WorkQueue";
 import type { StaffPerson } from "@/lib/identity";
@@ -21,6 +22,7 @@ export type OpenCallCard = {
   assignedName: string;
   consultName: string;
   consulted: boolean;
+  tagName: string;
   dueAt: string;
 };
 
@@ -33,6 +35,8 @@ export function OpenCallsList({
   templates,
   staff,
   staffNames,
+  people,
+  tag,
   initialRow,
 }: {
   view: "waiting" | "upcoming";
@@ -43,9 +47,12 @@ export function OpenCallsList({
   templates: { en: string; es: string };
   staff: StaffPerson[];
   staffNames: string[];
+  people: string[];
+  tag: string;
   admin?: boolean;
   initialRow?: QueueRow | null;
 }) {
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState(initialRow?.id ?? "");
   const [row, setRow] = useState<QueueRow | null>(initialRow ?? null);
 
@@ -66,13 +73,13 @@ export function OpenCallsList({
   function openLead(job: OpenCallCard) {
     setSelectedId(job.leadId);
     setRow((current) => (current?.id === job.leadId ? current : fallbackRow(job)));
-    window.history.replaceState(null, "", callsHref(view, job.leadId));
+    window.history.replaceState(null, "", callsHref(view, job.leadId, tag));
   }
 
   function closeLead() {
     setSelectedId("");
     setRow(null);
-    window.history.replaceState(null, "", callsHref(view));
+    window.history.replaceState(null, "", callsHref(view, "", tag));
   }
 
   const job = jobs.find((item) => item.leadId === selectedId);
@@ -80,14 +87,14 @@ export function OpenCallsList({
 
   return (
     <>
-      <div className="mt-6 flex flex-wrap gap-2">
+      <div className="mt-6 flex flex-wrap items-center gap-2">
         <Link
-          href={callsHref("waiting", selectedId)}
+          href={callsHref("waiting", selectedId, tag)}
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
             view === "waiting" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
           }`}
         >
-          Open calls
+          Past due
           <span
             className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${
               view === "waiting" ? "bg-accent text-white" : "bg-slate-100 text-slate-700"
@@ -97,12 +104,12 @@ export function OpenCallsList({
           </span>
         </Link>
         <Link
-          href={callsHref("upcoming", selectedId)}
+          href={callsHref("upcoming", selectedId, tag)}
           className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
             view === "upcoming" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
           }`}
         >
-          Upcoming tags
+          Upcoming Calls
           <span
             className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${
               view === "upcoming" ? "bg-accent text-white" : "bg-slate-100 text-slate-700"
@@ -111,6 +118,21 @@ export function OpenCallsList({
             {upcomingCount}
           </span>
         </Link>
+        <label className="ml-auto inline-flex items-center gap-2 text-sm text-slate-600">
+          Tagged
+          <select
+            value={tag}
+            onChange={(event) => router.push(callsHref(view, selectedId, event.target.value))}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900"
+          >
+            <option value="">Everyone</option>
+            {people.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className={`mt-6 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
@@ -164,7 +186,11 @@ export function OpenCallsList({
           ))}
           {jobs.length === 0 ? (
             <li className="text-sm text-slate-500">
-              {view === "upcoming" ? "No upcoming call tags are scheduled." : "Every due call has a return in the log."}
+              {tag
+                ? "No calls for that person in this list."
+                : view === "upcoming"
+                  ? "No upcoming calls are scheduled."
+                  : "Every due call has a return in the log."}
             </li>
           ) : null}
         </ul>
@@ -183,10 +209,11 @@ export function OpenCallsList({
   );
 }
 
-function callsHref(view: "waiting" | "upcoming", leadId?: string): string {
+function callsHref(view: "waiting" | "upcoming", leadId?: string, tag?: string): string {
   const params = new URLSearchParams();
   if (view === "upcoming") params.set("view", "upcoming");
   if (leadId) params.set("lead", leadId);
+  if (tag) params.set("tag", tag);
   const query = params.toString();
   return query ? `/open-calls?${query}` : "/open-calls";
 }

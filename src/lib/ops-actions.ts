@@ -15,6 +15,7 @@ import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
 import { canonicalLeadSource, isPiCaseType, isSourceType, officialCaseType, standardLeadEmail } from "./leads";
+import { isSourceCategory } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage } from "./close-ready";
@@ -394,6 +395,10 @@ export async function saveLeadDetails(formData: FormData) {
     lead_source: leadSource,
     source_type: sourceType,
   };
+  if (formData.has("source_category")) {
+    const chosenCategory = text(formData, "source_category");
+    patch.source_category = isSourceCategory(chosenCategory) ? chosenCategory : null;
+  }
   if (!keepPhone) {
     patch.phone = phone;
     patch.phone_e164 = phoneE164;

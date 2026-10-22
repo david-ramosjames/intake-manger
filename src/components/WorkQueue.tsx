@@ -1,14 +1,16 @@
 "use client";
 
-import { createContext, useActionState, useContext, useEffect, useLayoutEffect, useRef, useState, useTransition, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { createContext, useActionState, useContext, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, useTransition, type MouseEvent, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { IdentityMark } from "@/components/IdentityMark";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
 import type { LeadEntry } from "@/lib/lead-entry";
-import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, leadSourcesFor, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
+import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
+import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
 import { closeGaps } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
@@ -18,6 +20,9 @@ import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
 import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary, buttonSecondary } from "@/lib/ui";
+import { inArrivedRange, useWorkFilters } from "@/components/WorkFilters";
+import { phoneMatches, phoneTail } from "@/lib/phone";
+import { matchesQueue } from "@/lib/queue";
 
 type DrawerNotice = { tone: "saving" | "saved" | "error"; text: string };
 const DrawerNoticeContext = createContext<(notice: DrawerNotice | null) => void>(() => {});
@@ -52,6 +57,7 @@ export type QueueRow = {
   caseType: string;
   leadSource: string;
   sourceType: string;
+  sourceCategory: string;
   when: string;
   openedLabel: string;
   openedKey: string;
@@ -91,6 +97,7 @@ export type QueueRow = {
   leadName: string;
   phone: string | null;
   email: string | null;
+  caseNumber: string | null;
   summary: string | null;
   owner: string | null;
   grade: string | null;
@@ -106,6 +113,9 @@ export type QueueRow = {
   caseHref: string | null;
   calls: number;
   texts: number;
+  age: number | null;
+  cycle: "contact" | "information" | "signing" | "signed" | "closed";
+  attention: boolean;
   nextCallLabel: string;
   callJobId: string | null;
   callTag: string | null;
@@ -228,6 +238,14 @@ function decisionLabel(value: string): string {
   return "Not yet";
 }
 
+function matchesSearch(row: QueueRow, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const text = [row.title, row.leadName, row.phone, row.email, row.caseNumber, ...row.samePhone.map((item) => item.title)];
+  if (text.some((value) => (value || "").toLowerCase().includes(needle))) return true;
+  return phoneMatches(row.phone, query);
+}
+
 function phoneLabel(phone: string | null): string {
   const digits = (phone ?? "").replace(/\D/g, "");
   const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
@@ -249,13 +267,6 @@ export function WorkQueue({
   templates,
   staff,
   admin = false,
-  gradeFilter = "",
-  priorityFilter = "",
-  screenFilter = "",
-  intakeFilter = "",
-  sourceTypeFilter = "",
-  leadSourceFilter = "",
-  entryFilter = "",
 }: {
   rows: QueueRow[];
   initialId?: string;
@@ -263,14 +274,23 @@ export function WorkQueue({
   templates: { en: string; es: string };
   staff: string[];
   admin?: boolean;
-  gradeFilter?: string;
-  priorityFilter?: string;
-  screenFilter?: string;
-  intakeFilter?: string;
-  sourceTypeFilter?: string;
-  leadSourceFilter?: string;
-  entryFilter?: string;
 }) {
+  const { values } = useWorkFilters();
+  const filtersNow = useDeferredValue(values);
+  const router = useRouter();
+  const lookedUp = useRef<string | null>(null);
+  useEffect(() => {
+    const query = values.q.trim();
+    if (lookedUp.current === null) {
+      lookedUp.current = query;
+      return;
+    }
+    if (phoneTail(query).length < 7) return;
+    if (rows.some((row) => phoneMatches(row.phone, query))) return;
+    if (lookedUp.current === query) return;
+    lookedUp.current = query;
+    router.refresh();
+  }, [values.q, rows, router]);
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [shownId, setShownId] = useState(selectedId);
   const [, startOpening] = useTransition();
@@ -296,15 +316,19 @@ export function WorkQueue({
     pick(id);
   }
   const selected = rows.find((row) => row.id === selectedId) ?? null;
+  const phoneSearch = phoneTail(filtersNow.q).length >= 7;
   const shown = rows
+    .filter((row) => phoneSearch || inArrivedRange(row.age, filtersNow.range))
+    .filter((row) => phoneSearch || matchesQueue(filtersNow.queue, row.cycle, row.attention))
     .filter((row) => !nextDay || row.nextDayKey === nextDay)
-    .filter((row) => !gradeFilter || gradeLabel(row) === gradeFilter)
-    .filter((row) => !priorityFilter || priorityLabel(row) === priorityFilter)
-    .filter((row) => !sourceTypeFilter || sourceTypeLabel(row) === sourceTypeFilter)
-    .filter((row) => !leadSourceFilter || leadSourceLabel(row) === leadSourceFilter)
-    .filter((row) => !screenFilter || screenByLabel(row) === screenFilter)
-    .filter((row) => !intakeFilter || intakeByLabel(row) === intakeFilter)
-    .filter((row) => !entryFilter || row.entry === entryFilter)
+    .filter((row) => matchesSearch(row, filtersNow.q))
+    .filter((row) => !filtersNow.grade || gradeLabel(row) === filtersNow.grade)
+    .filter((row) => !filtersNow.priority || priorityLabel(row) === filtersNow.priority)
+    .filter((row) => !filtersNow.sourceType || sourceTypeLabel(row) === filtersNow.sourceType)
+    .filter((row) => !filtersNow.leadSource || leadSourceLabel(row) === filtersNow.leadSource)
+    .filter((row) => !filtersNow.screen || screenByLabel(row) === filtersNow.screen)
+    .filter((row) => !filtersNow.intake || intakeByLabel(row) === filtersNow.intake)
+    .filter((row) => !filtersNow.entry || row.entry === filtersNow.entry)
     .filter((row) => !filters.type || columnValue(row, "type") === filters.type)
     .filter((row) => !filters.stage || columnValue(row, "stage") === filters.stage)
     .filter((row) => COLUMNS.every((column) => !filters[column.id] || columnValue(row, column.id) === filters[column.id]))
@@ -887,26 +911,34 @@ function chosenSourceType(value: string): string {
   return isSourceType(value) && value !== "Unknown" ? value : "";
 }
 
-function chosenLeadSource(value: string, type: string): string {
-  const source = canonicalLeadSource(value).source;
-  if (!source) return "";
-  if (!type) return source;
-  return leadSourcesFor(type).includes(source) ? source : "";
+function cascadeType(value: string): SourceType | "" {
+  return value === "Marketing" || value === "Referral" || value === "Repeat" ? value : "";
 }
 
-function marketingFromRow(row: { sourceType: string; leadSource: string; summary?: string | null }): { type: string; source: string } {
-  const fromSource = canonicalLeadSource(row.leadSource);
-  let type = chosenSourceType(row.sourceType) || chosenSourceType(fromSource.type);
-  let source = chosenLeadSource(fromSource.source || row.leadSource, type);
-  if (!type || !source) {
+function marketingFromRow(row: { sourceType: string; sourceCategory?: string; leadSource: string; summary?: string | null }): {
+  type: SourceType | "";
+  category: SourceCategory | "";
+  source: string;
+} {
+  const named = canonicalLeadSource(row.leadSource).source || row.leadSource;
+  let match = findSourceOption(named);
+  let type: SourceType | "" = cascadeType(chosenSourceType(row.sourceType)) || match?.type || "";
+  if (match && type && match.type !== type) match = null;
+  let category: SourceCategory | "" =
+    type && isSourceCategory(row.sourceCategory) && getCategoriesForType(type).includes(row.sourceCategory) ? row.sourceCategory : "";
+  if (match && !category) category = match.category;
+  if (match && category && match.category !== category) match = null;
+  let source = match?.source ?? "";
+  if (!type || !category || !source) {
     const guessed = leadSourceFromText(row.summary);
-    if (guessed) {
-      type = type || chosenSourceType(guessed.type);
-      source = source || chosenLeadSource(guessed.source, type);
-      if (!type) type = chosenSourceType(canonicalLeadSource(source).type);
+    const guessedMatch = guessed ? findSourceOption(guessed.source) : null;
+    if (guessedMatch && (!type || guessedMatch.type === type)) {
+      type = type || guessedMatch.type;
+      if (!category) category = guessedMatch.category;
+      if (!source && category === guessedMatch.category) source = guessedMatch.source;
     }
   }
-  return { type, source };
+  return { type, category, source };
 }
 
 function shownCaseType(value: string): string {
@@ -942,6 +974,7 @@ function LeadFacts({
   const [desired, setDesiredChoice] = useState<"yes" | "no" | "">(row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "");
   const [size, setSize] = useState(selectedOne(row.tags, SIZE_TAGS));
   const [sourceType, setSourceType] = useState(() => marketingFromRow(row).type);
+  const [sourceCategory, setSourceCategory] = useState(() => marketingFromRow(row).category);
   const [leadSource, setLeadSource] = useState(() => marketingFromRow(row).source);
   const [caseType, setCaseType] = useState(() => shownCaseType(row.caseType));
   const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
@@ -953,6 +986,7 @@ function LeadFacts({
   useEffect(() => {
     const marketing = marketingFromRow(row);
     setSourceType(marketing.type);
+    setSourceCategory(marketing.category);
     setLeadSource(marketing.source);
     setCaseType(shownCaseType(row.caseType));
     setEmail(standardLeadEmail(row.email) ?? "");
@@ -1103,14 +1137,11 @@ function LeadFacts({
                 value={sourceType}
                 autoComplete="off"
                 onChange={(event) => {
-                  const next = event.target.value;
+                  const next = cascadeType(event.target.value);
+                  const category = next && isSourceCategory(sourceCategory) && getCategoriesForType(next).includes(sourceCategory) ? sourceCategory : "";
                   setSourceType(next);
-                  setLeadSource((current) => {
-                    if (!next) return "";
-                    if (leadSourcesFor(next).includes(current)) return current;
-                    const inferred = canonicalLeadSource(current);
-                    return inferred.type === next ? chosenLeadSource(inferred.source, next) : "";
-                  });
+                  setSourceCategory(category);
+                  setLeadSource(next && category && getSourcesForCategory(next, category).includes(leadSource) ? leadSource : "");
                 }}
                 className={fieldClass()}
               >
@@ -1122,23 +1153,41 @@ function LeadFacts({
                 ))}
               </select>
             </FieldLabel>
-            <FieldLabel label="Lead source">
-              <input type="hidden" name="lead_source" value={leadSource} />
+            <FieldLabel label="Source category">
+              <input type="hidden" name="source_category" value={sourceCategory} />
               <select
-                value={leadSource}
+                value={sourceCategory}
                 autoComplete="off"
                 disabled={!sourceType}
                 onChange={(event) => {
-                  const next = event.target.value;
-                  setLeadSource(next);
-                  const inferred = canonicalLeadSource(next).type;
-                  if (inferred && inferred !== "Unknown") setSourceType(inferred);
+                  const next = isSourceCategory(event.target.value) ? event.target.value : "";
+                  setSourceCategory(next);
+                  setLeadSource(sourceType && next && getSourcesForCategory(sourceType, next).includes(leadSource) ? leadSource : "");
                 }}
                 className={fieldClass(!sourceType)}
               >
                 <option value="">{sourceType ? "Not set" : "Pick source type first"}</option>
                 {sourceType
-                  ? leadSourcesFor(sourceType).map((item) => (
+                  ? getCategoriesForType(sourceType).map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))
+                  : null}
+              </select>
+            </FieldLabel>
+            <FieldLabel label="Lead source" className="col-span-2">
+              <input type="hidden" name="lead_source" value={leadSource} />
+              <select
+                value={leadSource}
+                autoComplete="off"
+                disabled={!sourceCategory}
+                onChange={(event) => setLeadSource(event.target.value)}
+                className={fieldClass(!sourceCategory)}
+              >
+                <option value="">{sourceCategory ? "Not set" : "Pick category first"}</option>
+                {sourceType && sourceCategory
+                  ? getSourcesForCategory(sourceType, sourceCategory).map((item) => (
                       <option key={item} value={item}>
                         {item}
                       </option>

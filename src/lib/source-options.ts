@@ -161,6 +161,12 @@ export function getSourcesForCategory(
     .sort();
 }
 
+export function findSourceOption(source: string | null | undefined): SourceOption | null {
+  const key = (source ?? "").trim().toLowerCase();
+  if (!key) return null;
+  return SOURCE_OPTIONS.find((option) => option.source.toLowerCase() === key) ?? null;
+}
+
 export function isSourceCategory(value: string | null | undefined): value is SourceCategory {
   if (!value) return false;
   return SOURCE_OPTIONS.some((option) => option.category === value);

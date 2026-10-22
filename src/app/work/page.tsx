@@ -1,11 +1,10 @@
 import Link from "next/link";
-import { Suspense } from "react";
 import { QueueHelp } from "@/components/QueueHelp";
+import { WorkArrivedPills, WorkFilterLink, WorkFilterState, WorkMetric, WorkSearch, WorkStatusPills } from "@/components/WorkFilters";
 import { WorkListFilters } from "@/components/WorkListFilters";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { loadLeadCallJobs } from "@/lib/call-grade";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
-import { workGradeOptions, workHandlerOptions, workLeadSourceOptions, workPriorityOptions, workSourceTypeOptions } from "@/lib/work-queue-options";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
@@ -13,11 +12,11 @@ import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccid
 import { CYCLE_LABEL, leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
 import { isLostLeadReason } from "@/lib/funnel";
-import { automationLine, isQueue, matchesQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
+import { automationLine, isQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
 import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
-import { phoneLikePattern, phoneMatches, phoneTail } from "@/lib/phone";
+import { phoneLikePattern, phoneTail } from "@/lib/phone";
 import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, formatCallDay, formatCallWhen, formatQueueStamp } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
@@ -197,19 +196,6 @@ type LeadRange = "all" | "today" | "7";
 function isLeadRange(value: string | undefined): value is LeadRange {
   return value === "all" || value === "today" || value === "7";
 }
-
-function arrivedInRange(age: number | null, range: LeadRange): boolean {
-  if (range === "all") return true;
-  if (age == null) return false;
-  if (range === "today") return age === 0;
-  return age <= 6;
-}
-
-const RANGES: { id: LeadRange; label: string }[] = [
-  { id: "all", label: "Any time" },
-  { id: "today", label: "Today" },
-  { id: "7", label: "Last 7 days" },
-];
 
 const LEGACY: { id: LeadView; label: string }[] = [
   { id: "pursue", label: "Want to sign" },
@@ -710,37 +696,15 @@ export default async function LeadListPage({
   if (desiredCount.error) throw new Error(desiredCount.error.message);
   const desired = desiredCount.count ?? 0;
   const conversion = desired ? Math.round((metrics.signed / desired) * 100) : 0;
-  const pipeline = [
-    { id: "contact" as const, label: CYCLE_LABEL.contact, count: metrics.contact, className: "bg-amber-400" },
-    { id: "information" as const, label: CYCLE_LABEL.information, count: metrics.information, className: "bg-sky-500" },
-    { id: "signing" as const, label: "Finish signing", count: metrics.signing, className: "bg-violet-500" },
-    { id: "signed" as const, label: "Signed", count: metrics.signed, className: "bg-emerald-500" },
-    { id: "closed" as const, label: "Closed", count: metrics.closed, className: "bg-slate-300" },
-  ];
 
-  const needle = q.toLowerCase();
-  const phoneSearch = phoneTail(q).length >= 7;
   const shown = combined
-    .filter((group) => phoneSearch || arrivedInRange(group.row.age, range))
-    .filter((group) => phoneSearch || matchesQueue(queue, group.row.cycle, group.row.attention))
     .filter((group) => {
       if (focus === "priority") return Boolean(priorityPlace(group.row.lead));
       if (focus === "desired") return milestoneDesired(group.row.lead) === true;
       if (focus === "contact") return callWaiting.has(group.row.lead.id) && !calledOut.has(group.row.lead.id);
       return true;
     })
-    .filter((group) => phoneSearch || matchesLegacy(view, group.row.lead))
-    .filter((group) => {
-      if (!needle) return true;
-      return [group.row, ...group.others].some((item) => {
-        const lead = item.lead;
-        const textHit = [lead.lead_name, lead.phone, lead.phone_e164, lead.email, lead.case_number].some((value) =>
-          (value || "").toLowerCase().includes(needle),
-        );
-        if (textHit) return true;
-        return phoneMatches(lead.phone || lead.phone_e164, q);
-      });
-    })
+    .filter((group) => matchesLegacy(view, group.row.lead))
     .sort((a, b) => (a.row.lead.id < b.row.lead.id ? -1 : a.row.lead.id > b.row.lead.id ? 1 : 0));
   if (selectedId && !shown.some((group) => group.row.lead.id === selectedId || group.others.some((other) => other.lead.id === selectedId))) {
     const extra = combined.find((group) => group.row.lead.id === selectedId || group.others.some((other) => other.lead.id === selectedId));
@@ -804,6 +768,7 @@ export default async function LeadListPage({
       caseType: suggestedCaseType(row.lead),
       leadSource: row.lead.lead_source?.trim() || (listDetail(row.lead) === "—" ? "" : listDetail(row.lead)),
       sourceType: isSourceType(row.lead.source_type) ? row.lead.source_type : "",
+      sourceCategory: row.lead.source_category?.trim() || "",
       stageClassName: stageClass(row.label),
       stageStripe: stageStripe(row.label),
       step: row.step,
@@ -844,6 +809,7 @@ export default async function LeadListPage({
       leadName: row.lead.lead_name?.trim() || "",
       phone: displayPhone(row.lead.phone),
       email: row.lead.email,
+      caseNumber: row.lead.case_number,
       summary: row.lead.summary,
       owner: row.lead.owner_name,
       grade: row.lead.grade,
@@ -859,6 +825,9 @@ export default async function LeadListPage({
       caseHref: row.lead.case_id ? `${docket}/cases/${row.lead.case_id}` : null,
       calls: row.tally.calls,
       texts: row.tally.texts,
+      age: row.age,
+      cycle: row.cycle,
+      attention: row.attention,
       nextCallLabel: formatCallWhen(row.nextAt),
       callJobId: nextCall.get(row.lead.id)?.id ?? null,
       callTag: slackTag(nextCall.get(row.lead.id)?.tag, row.lead.owner_name, row.lead.consultation_date),
@@ -884,14 +853,10 @@ export default async function LeadListPage({
   });
 
   const href = (input: Parameters<typeof listHref>[0]) => listHref({ grade, priority, screen, intake, sourceType, leadSource, ...input });
-  const gradeOptions = workGradeOptions(queueRows);
-  const priorityOptions = workPriorityOptions(queueRows);
-  const screenOptions = workHandlerOptions(queueRows, "screen");
-  const intakeOptions = workHandlerOptions(queueRows, "intake");
-  const sourceTypeOptions = workSourceTypeOptions(queueRows);
-  const leadSourceOptions = workLeadSourceOptions(queueRows);
+  const instantStage = queue !== "nonleads";
 
   return (
+    <WorkFilterState initial={{ grade, priority, screen, intake, sourceType, leadSource, q, range, queue, entry: funnel === "open" && queue !== "nonleads" ? entry : "" }}>
     <main className="w-full px-4 py-4 xl:px-6">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-2">
@@ -902,27 +867,15 @@ export default async function LeadListPage({
           <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400" title="Where leads from the last 30 days are now. Filtering the list below leaves these numbers in place.">
             Last 30 days
           </span>
-          <Metric href={href({ queue: "contact", q, range, funnel, focus, entry })} active={queue === "contact"} label={CYCLE_LABEL.contact} value={String(metrics.contact)} tone="text-amber-700" />
-          <Metric href={href({ queue: "information", q, range, funnel, focus, entry })} active={queue === "information"} label={CYCLE_LABEL.information} value={String(metrics.information)} tone="text-sky-700" />
-          <Metric href={href({ queue: "signing", q, range, funnel, focus, entry })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
-          <Metric href={href({ queue: "signed", q, range, funnel: "closed", focus })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
+          <WorkMetric href={href({ queue: "contact", q, range, funnel, focus, entry })} active={queue === "contact"} label={CYCLE_LABEL.contact} value={String(metrics.contact)} tone="text-amber-700" instantQueue={instantStage ? "contact" : undefined} />
+          <WorkMetric href={href({ queue: "information", q, range, funnel, focus, entry })} active={queue === "information"} label={CYCLE_LABEL.information} value={String(metrics.information)} tone="text-sky-700" instantQueue={instantStage ? "information" : undefined} />
+          <WorkMetric href={href({ queue: "signing", q, range, funnel, focus, entry })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" instantQueue={instantStage ? "signing" : undefined} />
+          <WorkMetric href={href({ queue: "signed", q, range, funnel: "closed", focus })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" instantQueue={funnel === "closed" ? "signed" : undefined} />
           <span className="flex items-baseline gap-1.5 px-1" title="Signed leads among desired cases from the last 30 days.">
             <span className="text-lg font-semibold tabular-nums leading-none text-navy">{conversion}%</span>
             <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Of desired</span>
           </span>
-          <div className="flex h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-slate-200" title="Last 30 days. Each lead is counted once, in the stage it is in now.">
-            {pipeline.map((part) =>
-              part.count ? (
-                <Link
-                  key={part.id}
-                  href={href({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel, focus, entry })}
-                  title={`${part.label}: ${part.count}`}
-                  className={part.className}
-                  style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
-                />
-              ) : null,
-            )}
-          </div>
+          <WorkSearch />
         </div>
       </div>
 
@@ -939,88 +892,17 @@ export default async function LeadListPage({
 
       <div className="mt-3 flex flex-nowrap items-center gap-x-1.5 text-sm">
         <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400">Arrived</span>
-        {RANGES.map((item) => (
-          <Link
-            key={item.id}
-            href={href({ queue, view, q, range: item.id, funnel, focus, entry })}
-            className={`shrink-0 rounded-full px-2.5 py-0.5 ${
-              range === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
-            }`}
-          >
-            {item.label}
-          </Link>
-        ))}
+        <WorkArrivedPills />
         <span className="mx-0.5 h-4 w-px shrink-0 bg-slate-200" aria-hidden="true" />
         <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400">Status</span>
-        <Link
-          href={href({ queue: queue === "signed" || queue === "closed" || queue === "nonleads" ? "all" : queue, view, q, range, funnel: "open", focus })}
-          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" && queue !== "nonleads" && !entry ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
-        >
-          Open
-        </Link>
-        <Link
-          href={href({ queue: queue === "signed" || queue === "closed" || queue === "nonleads" ? "all" : queue, view, q, range, funnel: "open", focus, entry: "New" })}
-          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" && queue !== "nonleads" && entry === "New" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
-        >
-          New
-        </Link>
-        <Link
-          href={href({ queue: queue === "signed" || queue === "closed" || queue === "nonleads" ? "all" : queue, view, q, range, funnel: "open", focus, entry: "In Progress" })}
-          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" && queue !== "nonleads" && entry === "In Progress" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
-        >
-          In Progress
-        </Link>
-        <Link
-          href={href({ queue, view, q, range, funnel: "closed", focus })}
-          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "closed" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
-        >
-          Closed
-        </Link>
-        <Link
-          href={href({ queue: "nonleads", view, q, range, funnel, focus })}
-          className={`shrink-0 rounded-full px-2.5 py-0.5 ${
-            queue === "nonleads" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
-          }`}
-        >
-          Non-leads{reviewCount.count ? ` (${reviewCount.count})` : ""}
-        </Link>
+        <WorkStatusPills
+          local={funnel === "open" && queue !== "nonleads"}
+          closed={funnel === "closed"}
+          nonLeads={queue === "nonleads"}
+          nonLeadsCount={reviewCount.count ?? 0}
+        />
         <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-1.5 pl-2">
-          <Suspense fallback={null}>
-            <WorkListFilters
-              gradeOptions={gradeOptions}
-              priorityOptions={priorityOptions}
-              screenOptions={screenOptions}
-              intakeOptions={intakeOptions}
-              sourceTypeOptions={sourceTypeOptions}
-              leadSourceOptions={leadSourceOptions}
-            />
-          </Suspense>
-          <form action="/work" className="flex items-center">
-            {focus !== "open" ? <input type="hidden" name="focus" value={focus} /> : null}
-            {funnel === "closed" ? <input type="hidden" name="funnel" value="closed" /> : null}
-            {queue !== "all" ? <input type="hidden" name="queue" value={queue} /> : null}
-            {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
-            {range !== "all" ? <input type="hidden" name="range" value={range} /> : null}
-            {grade ? <input type="hidden" name="grade" value={grade} /> : null}
-            {priority ? <input type="hidden" name="priority" value={priority} /> : null}
-            {screen ? <input type="hidden" name="screen" value={screen} /> : null}
-            {intake ? <input type="hidden" name="intake" value={intake} /> : null}
-            {sourceType ? <input type="hidden" name="sourceType" value={sourceType} /> : null}
-            {leadSource ? <input type="hidden" name="leadSource" value={leadSource} /> : null}
-            {entry && funnel === "open" ? <input type="hidden" name="entry" value={entry} /> : null}
-            <input
-              name="q"
-              defaultValue={q}
-              placeholder="Name, phone…"
-              className="w-36 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-sm xl:w-44"
-            />
-          </form>
-          <Link
-            href={href({ queue, view, range, funnel, focus, grade: "", priority: "", screen: "", intake: "", sourceType: "", leadSource: "", q: "" })}
-            className="shrink-0 rounded-md bg-navy px-2.5 py-0.5 text-sm font-medium text-white hover:bg-[#0c2a56]"
-          >
-            Clear
-          </Link>
+          <WorkListFilters rows={queueRows} />
         </div>
       </div>
 
@@ -1031,21 +913,14 @@ export default async function LeadListPage({
         admin={admin}
         templates={referralTemplates}
         staff={staff.map((person) => person.name)}
-        gradeFilter={grade}
-        priorityFilter={priority}
-        screenFilter={screen}
-        intakeFilter={intake}
-        sourceTypeFilter={sourceType}
-        leadSourceFilter={leadSource}
-        entryFilter={funnel === "open" && queue !== "nonleads" ? entry : ""}
       />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>
         {LEGACY.map((item) => (
-          <Link key={item.id} href={href({ view: item.id, q, range, funnel, focus, entry })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
+          <WorkFilterLink key={item.id} carryView href={href({ view: item.id, q, range, funnel, focus, entry })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
             {item.label}
-          </Link>
+          </WorkFilterLink>
         ))}
         {view !== "all" ? (
           <Link href={href({ queue, q, range, funnel, focus })} className="hover:text-slate-900">
@@ -1054,6 +929,7 @@ export default async function LeadListPage({
         ) : null}
       </p>
     </main>
+    </WorkFilterState>
   );
 }
 
@@ -1106,23 +982,3 @@ function matchesLegacy(view: LeadView, lead: ListLead): boolean {
   return true;
 }
 
-function Metric({
-  href,
-  active,
-  label,
-  value,
-  tone,
-}: {
-  href: string;
-  active: boolean;
-  label: string;
-  value: string;
-  tone: string;
-}) {
-  return (
-    <Link href={href} className={`flex items-baseline gap-1.5 rounded-md px-1 py-0.5 ${active ? "bg-brand/40" : "hover:bg-slate-100"}`}>
-      <span className={`text-lg font-semibold tabular-nums leading-none ${tone}`}>{value}</span>
-      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</span>
-    </Link>
-  );
-}

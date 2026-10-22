@@ -12,7 +12,7 @@ import { daysSince, isPiCaseType, isSourceType, leadTitle, listAccident, listDet
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
 import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
-import { automationLine, receivedLabel, stageClass, stageStripe, waitingTooLong } from "@/lib/queue";
+import { automationLine, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong } from "@/lib/queue";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { leadSequenceId } from "@/lib/sequences";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -37,6 +37,7 @@ type ListLead = Pick<
   | "lead_source"
   | "source_channel"
   | "source_type"
+  | "source_category"
   | "source_note"
   | "case_type"
   | "case_detail"
@@ -184,6 +185,12 @@ function toQueueRow(
   const opened = formatQueueStamp(lead.created_at || lead.lead_date);
   const outreach = daysSince(input.outreachAt);
   const waiting = waitingTooLong(cycle, age, outreach, input.nextAt ?? undefined);
+  const attention = needsAttention({
+    cycle,
+    waiting,
+    identityStatus: lead.identity_status,
+    agreementStatus: lead.agreement_status,
+  });
   const label = (lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType(lead)) ? null : callerClassLabel(lead.caller_class)) ?? leadStatusLabel(lead, cycle);
   const priority = priorityPlace(lead);
   const closed = !isPracticeTestPhone(lead.phone_e164 || lead.phone) && (cycle === "signed" || cycle === "closed");
@@ -233,6 +240,7 @@ function toQueueRow(
     caseType: suggestedCaseType(lead),
     leadSource: lead.lead_source?.trim() || (listDetail(lead) === "—" ? "" : listDetail(lead)),
     sourceType: isSourceType(lead.source_type) ? lead.source_type : "",
+    sourceCategory: lead.source_category?.trim() || "",
     stageClassName: stageClass(label),
     stageStripe: stageStripe(label),
     step: nextStepLabel(nextCallPurpose(cycle, input.tally.calls)),
@@ -273,6 +281,7 @@ function toQueueRow(
     leadName: lead.lead_name?.trim() || "",
     phone: displayPhone(lead.phone),
     email: lead.email,
+    caseNumber: lead.case_number,
     summary: lead.summary,
     owner: lead.owner_name,
     grade: lead.grade,
@@ -288,6 +297,9 @@ function toQueueRow(
     caseHref: lead.case_id ? `${input.docket}/cases/${lead.case_id}` : null,
     calls: input.tally.calls,
     texts: input.tally.texts,
+    age,
+    cycle,
+    attention,
     nextCallLabel: formatCallWhen(input.nextAt),
     callJobId: input.nextCall?.id ?? null,
     callTag: slackTag(input.nextCall?.tag, lead.owner_name, lead.consultation_date),

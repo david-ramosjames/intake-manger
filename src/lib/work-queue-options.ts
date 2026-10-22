@@ -5,6 +5,8 @@ export type WorkFilterRow = {
   priority: string | null;
   screenBy: string | null;
   intakeBy: string | null;
+  sourceType: string;
+  leadSource: string;
 };
 
 function gradeLabel(row: WorkFilterRow): string {
@@ -41,6 +43,26 @@ export function workPriorityOptions(rows: WorkFilterRow[]): string[] {
 export function workHandlerOptions(rows: WorkFilterRow[], kind: "screen" | "intake"): string[] {
   const labels = rows.map((row) => (kind === "screen" ? screenByLabel(row) : intakeByLabel(row)));
   return [...new Set(labels)].sort((left, right) =>
+    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
+  );
+}
+
+function sourceTypeLabel(row: WorkFilterRow): string {
+  return row.sourceType?.trim() || "Not set";
+}
+
+function leadSourceLabel(row: WorkFilterRow): string {
+  return row.leadSource?.trim() || "Not set";
+}
+
+export function workSourceTypeOptions(rows: WorkFilterRow[]): string[] {
+  return [...new Set(rows.map(sourceTypeLabel))].sort((left, right) =>
+    left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
+  );
+}
+
+export function workLeadSourceOptions(rows: WorkFilterRow[]): string[] {
+  return [...new Set(rows.map(leadSourceLabel))].sort((left, right) =>
     left === "Not set" ? 1 : right === "Not set" ? -1 : left.localeCompare(right),
   );
 }

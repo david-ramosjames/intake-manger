@@ -224,6 +224,14 @@ function intakeByLabel(row: QueueRow): string {
   return row.intakeBy?.trim() || "Not set";
 }
 
+function sourceTypeLabel(row: QueueRow): string {
+  return row.sourceType?.trim() || "Not set";
+}
+
+function leadSourceLabel(row: QueueRow): string {
+  return row.leadSource?.trim() || "Not set";
+}
+
 function columnValue(row: QueueRow, column: Column): string {
   if (column === "type") return typeLabel(row);
   if (column === "stage") return row.label;
@@ -271,6 +279,8 @@ export function WorkQueue({
   priorityFilter = "",
   screenFilter = "",
   intakeFilter = "",
+  sourceTypeFilter = "",
+  leadSourceFilter = "",
 }: {
   rows: QueueRow[];
   initialId?: string;
@@ -282,6 +292,8 @@ export function WorkQueue({
   priorityFilter?: string;
   screenFilter?: string;
   intakeFilter?: string;
+  sourceTypeFilter?: string;
+  leadSourceFilter?: string;
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [shownId, setShownId] = useState(selectedId);
@@ -312,6 +324,8 @@ export function WorkQueue({
     .filter((row) => !nextDay || row.nextDayKey === nextDay)
     .filter((row) => !gradeFilter || gradeLabel(row) === gradeFilter)
     .filter((row) => !priorityFilter || priorityLabel(row) === priorityFilter)
+    .filter((row) => !sourceTypeFilter || sourceTypeLabel(row) === sourceTypeFilter)
+    .filter((row) => !leadSourceFilter || leadSourceLabel(row) === leadSourceFilter)
     .filter((row) => !screenFilter || screenByLabel(row) === screenFilter)
     .filter((row) => !intakeFilter || intakeByLabel(row) === intakeFilter)
     .filter((row) => !filters.type || columnValue(row, "type") === filters.type)

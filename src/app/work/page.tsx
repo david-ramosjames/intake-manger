@@ -4,7 +4,7 @@ import { QueueHelp } from "@/components/QueueHelp";
 import { WorkListFilters } from "@/components/WorkListFilters";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { loadLeadCallJobs } from "@/lib/call-grade";
-import { workGradeOptions, workHandlerOptions, workPriorityOptions } from "@/lib/work-queue-options";
+import { workGradeOptions, workHandlerOptions, workLeadSourceOptions, workPriorityOptions, workSourceTypeOptions } from "@/lib/work-queue-options";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
@@ -299,6 +299,8 @@ function listHref(input: {
   priority?: string;
   screen?: string;
   intake?: string;
+  sourceType?: string;
+  leadSource?: string;
 }): string {
   const params = new URLSearchParams();
   if (input.funnel === "closed") params.set("funnel", "closed");
@@ -312,6 +314,8 @@ function listHref(input: {
   if (input.priority) params.set("priority", input.priority);
   if (input.screen) params.set("screen", input.screen);
   if (input.intake) params.set("intake", input.intake);
+  if (input.sourceType) params.set("sourceType", input.sourceType);
+  if (input.leadSource) params.set("leadSource", input.leadSource);
   const query = params.toString();
   return query ? `/work?${query}` : "/work";
 }
@@ -386,6 +390,8 @@ export default async function LeadListPage({
     priority?: string;
     screen?: string;
     intake?: string;
+    sourceType?: string;
+    leadSource?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -403,6 +409,8 @@ export default async function LeadListPage({
   const priority = (params.priority ?? "").trim();
   const screen = (params.screen ?? "").trim();
   const intake = (params.intake ?? "").trim();
+  const sourceType = (params.sourceType ?? "").trim();
+  const leadSource = (params.leadSource ?? "").trim();
   const selectedId = params.lead?.trim() || "";
   const { supabase, admin } = await requireStaff();
   const docket = docketBaseUrl();
@@ -861,11 +869,13 @@ export default async function LeadListPage({
     return a.title.localeCompare(b.title);
   });
 
-  const href = (input: Parameters<typeof listHref>[0]) => listHref({ grade, priority, screen, intake, ...input });
+  const href = (input: Parameters<typeof listHref>[0]) => listHref({ grade, priority, screen, intake, sourceType, leadSource, ...input });
   const gradeOptions = workGradeOptions(queueRows);
   const priorityOptions = workPriorityOptions(queueRows);
   const screenOptions = workHandlerOptions(queueRows, "screen");
   const intakeOptions = workHandlerOptions(queueRows, "intake");
+  const sourceTypeOptions = workSourceTypeOptions(queueRows);
+  const leadSourceOptions = workLeadSourceOptions(queueRows);
 
   return (
     <main className="w-full px-4 py-4 xl:px-6">
@@ -955,6 +965,8 @@ export default async function LeadListPage({
               priorityOptions={priorityOptions}
               screenOptions={screenOptions}
               intakeOptions={intakeOptions}
+              sourceTypeOptions={sourceTypeOptions}
+              leadSourceOptions={leadSourceOptions}
             />
           </Suspense>
           <form action="/work" className="flex items-center">
@@ -967,6 +979,8 @@ export default async function LeadListPage({
             {priority ? <input type="hidden" name="priority" value={priority} /> : null}
             {screen ? <input type="hidden" name="screen" value={screen} /> : null}
             {intake ? <input type="hidden" name="intake" value={intake} /> : null}
+            {sourceType ? <input type="hidden" name="sourceType" value={sourceType} /> : null}
+            {leadSource ? <input type="hidden" name="leadSource" value={leadSource} /> : null}
             <input
               name="q"
               defaultValue={q}
@@ -975,7 +989,7 @@ export default async function LeadListPage({
             />
           </form>
           <Link
-            href={href({ queue, view, range, funnel, focus, grade: "", priority: "", screen: "", intake: "", q: "" })}
+            href={href({ queue, view, range, funnel, focus, grade: "", priority: "", screen: "", intake: "", sourceType: "", leadSource: "", q: "" })}
             className="shrink-0 rounded-md bg-navy px-2.5 py-0.5 text-sm font-medium text-white hover:bg-[#0c2a56]"
           >
             Clear
@@ -994,6 +1008,8 @@ export default async function LeadListPage({
         priorityFilter={priority}
         screenFilter={screen}
         intakeFilter={intake}
+        sourceTypeFilter={sourceType}
+        leadSourceFilter={leadSource}
       />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">

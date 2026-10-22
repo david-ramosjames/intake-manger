@@ -7,7 +7,8 @@ import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
-import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
+import type { LeadEntry } from "@/lib/lead-entry";
+import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, leadSourcesFor, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
@@ -114,6 +115,7 @@ export type QueueRow = {
   nextActionAt: string | null;
   nextDayKey: string;
   nextDayLabel: string;
+  entry: LeadEntry;
 };
 
 type LeadIdentity = "ok" | "needs_review" | "confirmed";
@@ -253,6 +255,7 @@ export function WorkQueue({
   intakeFilter = "",
   sourceTypeFilter = "",
   leadSourceFilter = "",
+  entryFilter = "",
 }: {
   rows: QueueRow[];
   initialId?: string;
@@ -266,6 +269,7 @@ export function WorkQueue({
   intakeFilter?: string;
   sourceTypeFilter?: string;
   leadSourceFilter?: string;
+  entryFilter?: string;
 }) {
   const [selectedId, setSelectedId] = useState(initialId && rows.some((row) => row.id === initialId) ? initialId : "");
   const [shownId, setShownId] = useState(selectedId);
@@ -300,6 +304,7 @@ export function WorkQueue({
     .filter((row) => !leadSourceFilter || leadSourceLabel(row) === leadSourceFilter)
     .filter((row) => !screenFilter || screenByLabel(row) === screenFilter)
     .filter((row) => !intakeFilter || intakeByLabel(row) === intakeFilter)
+    .filter((row) => !entryFilter || row.entry === entryFilter)
     .filter((row) => !filters.type || columnValue(row, "type") === filters.type)
     .filter((row) => !filters.stage || columnValue(row, "stage") === filters.stage)
     .filter((row) => COLUMNS.every((column) => !filters[column.id] || columnValue(row, column.id) === filters[column.id]))
@@ -412,7 +417,7 @@ export function WorkQueue({
                 aria-selected={row.id === selectedId}
                 aria-busy={opening && row.id === selectedId}
                 className={`cursor-pointer border-b border-slate-100 last:border-0 ${
-                  row.id === selectedId ? "bg-brand/10" : "hover:bg-slate-50"
+                  row.id === selectedId ? "bg-brand/10" : row.entry === "New" ? "bg-slate-100 hover:bg-slate-200/80" : "bg-white hover:bg-slate-50"
                 } ${row.stageStripe}`}
               >
                 <td className="px-2 py-2 whitespace-pre-line leading-tight text-slate-700">{row.openedLabel}</td>
@@ -458,8 +463,8 @@ export function WorkQueue({
                 <td className="px-2 py-2 text-slate-800">
                   <ActionLines lines={row.nextAction} />
                 </td>
-                <td className="px-2 py-2 text-slate-700">
-                  {columnValue(row, "type") === "TBD" ? <TbdValue /> : <p className="line-clamp-2">{columnValue(row, "type")}</p>}
+                <td className="px-2 py-2">
+                  <TypeValue value={columnValue(row, "type")} />
                 </td>
                 <td className="px-2 py-2 text-center text-slate-700">{row.consultWhen}</td>
                 <td className="px-1 py-2 text-center">
@@ -572,7 +577,11 @@ function HeadSort({
   onChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const values = [...new Set(rows.map((row) => columnValue(row, column)).filter((value) => value && value !== "—"))].sort();
+  const present = rows.map((row) => columnValue(row, column)).filter((value) => value && value !== "—");
+  const values =
+    column === "type"
+      ? [...PI_CASE_TYPES, ...present.filter((value) => !PI_CASE_TYPES.includes(value as (typeof PI_CASE_TYPES)[number]))]
+      : [...new Set(present)].sort();
   const recent = column === "last" || column === "consult";
   const sortedHere = sort?.column === column;
   const pick = (value: string) => {
@@ -761,13 +770,31 @@ function TbdMark() {
   return <span aria-hidden="true" className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />;
 }
 
-function TbdValue() {
-  return (
-    <span className="inline-flex items-center gap-1 text-slate-500" title="Not classified yet">
-      <TbdMark />
-      TBD
-    </span>
-  );
+const TYPE_SHADE: Record<string, string> = {
+  "Auto Accident": "bg-emerald-100 text-emerald-950",
+  "Commercial / 18 Wheeler": "bg-green-100 text-green-950",
+  "Non-PI Legal Matter": "bg-slate-200 text-slate-500",
+  "Wrongful Death": "bg-rose-50 text-rose-900",
+  "Work Injury": "bg-amber-50 text-amber-900",
+  "Sexual Assault / Child Abuse": "bg-violet-50 text-violet-900",
+  "Premises Liability": "bg-sky-50 text-sky-900",
+  "Pedestrian / Bicycle / Scooter": "bg-cyan-50 text-cyan-900",
+  "Other Injury": "bg-orange-50 text-orange-900",
+  "Dog Bite": "bg-yellow-50 text-yellow-900",
+  TBD: "bg-stone-50 text-stone-600",
+};
+
+function TypeValue({ value }: { value: string }) {
+  const shade = TYPE_SHADE[value] ?? "bg-stone-50 text-stone-700";
+  if (value === "TBD") {
+    return (
+      <span className={`inline-flex items-center gap-1 rounded px-1 py-0.5 ${shade}`} title="Not classified yet">
+        <TbdMark />
+        TBD
+      </span>
+    );
+  }
+  return <p className={`line-clamp-2 rounded px-1 py-0.5 ${shade}`}>{value}</p>;
 }
 
 function DecisionValue({ value }: { value: string }) {

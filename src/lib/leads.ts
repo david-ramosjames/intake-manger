@@ -269,6 +269,7 @@ export function leadSourceFromText(text: string | null | undefined): { source: s
 }
 
 export const PI_CASE_TYPES = [
+  "Auto Accident",
   "Wrongful Death",
   "Work Injury",
   "Sexual Assault / Child Abuse",
@@ -283,9 +284,9 @@ export const PI_CASE_TYPES = [
 
 const CASE_TYPE_ALIASES: Record<string, (typeof PI_CASE_TYPES)[number]> = {
   "dog bite": "Dog Bite",
-  "auto accident": "TBD",
-  "car accident": "TBD",
-  motorcycle: "TBD",
+  "auto accident": "Auto Accident",
+  "car accident": "Auto Accident",
+  motorcycle: "Auto Accident",
   "truck accident": "Commercial / 18 Wheeler",
   "18 wheeler": "Commercial / 18 Wheeler",
   "18-wheeler": "Commercial / 18 Wheeler",
@@ -595,7 +596,7 @@ function narrativeCaseType(text: string | null | undefined): string | null {
   if (/\b(?:18-?\s*wheeler|tractor-?trailer|commercial truck|truck accident)\b/i.test(body)) return "Commercial / 18 Wheeler";
   if (/\b(?:pedestrian|bicycle|scooter)\b/i.test(body)) return "Pedestrian / Bicycle / Scooter";
   if (/\b(?:no injuries|property damage only)\b/i.test(body)) return "TBD";
-  if (/\b(?:car accident|auto accident|rear-?ended|motorcycle|other driver|hit and run)\b/i.test(body)) return "TBD";
+  if (/\b(?:car accident|auto accident|rear-?ended|motorcycle|other driver|hit and run)\b/i.test(body)) return "Auto Accident";
   if (/\b(?:slip(?:ped)? and fall|premises liability|wet floor)\b/i.test(body)) return "Premises Liability";
   if (/\b(?:immigration|divorce|child support|criminal defense|family law)\b/i.test(body)) return "Non-PI Legal Matter";
   if (/\b(?:injur(?:y|ed|ies)|hurt)\b/i.test(body)) return "Other Injury";

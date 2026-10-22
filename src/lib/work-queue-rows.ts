@@ -6,6 +6,7 @@ import { consultationWhen, consultedChoice, contractSent, desiredWord, milestone
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { isLostLeadReason } from "@/lib/funnel";
+import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { daysSince, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
@@ -175,6 +176,7 @@ function toQueueRow(
     staff: StaffPerson[];
     screenBy: string | null;
     intakeBy: string | null;
+    staffTouched: boolean;
   },
 ): QueueRow {
   const cycle = leadCycle(lead, input.talked ? [{ type: "call", direction: "inbound" }] : []);
@@ -295,6 +297,12 @@ function toQueueRow(
     nextActionAt,
     nextDayKey: nextActionAt ? chicagoDay(nextActionAt) : "",
     nextDayLabel: formatCallDay(nextActionAt),
+    entry: leadEntry({
+      staffTouched: input.staffTouched,
+      grade: lead.grade,
+      screenBy: input.screenBy,
+      intakeBy: input.intakeBy,
+    }),
   };
 }
 
@@ -343,7 +351,7 @@ export async function loadWorkQueueRows(
     return { rows: [], destinations: [], templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es }, staffNames: [] };
   }
 
-  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }, callJobs] =
+  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }, callJobs, staffTouched] =
     await Promise.all([
       supabase.from("leads").select(LIST_COLUMNS).in("id", ids),
       supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
@@ -363,6 +371,7 @@ export async function loadWorkQueueRows(
         .order("occurred_at", { ascending: false })
         .limit(2000),
       loadLeadCallJobs(supabase, ids),
+      loadStaffTouchedIds(supabase, ids),
     ]);
 
   const leads = (leadRows ?? []) as ListLead[];
@@ -464,6 +473,7 @@ export async function loadWorkQueueRows(
       staff,
       screenBy: callJobs.get(lead.id)?.screenBy ?? null,
       intakeBy: callJobs.get(lead.id)?.intakeBy ?? null,
+      staffTouched: staffTouched.has(lead.id),
     }),
   );
 

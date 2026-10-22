@@ -26,6 +26,9 @@ type LeadBits = {
   slack_message_ts: string | null;
   slack_thread_ts: string | null;
   identity_status: string | null;
+  lead_status: string | null;
+  signed_case: boolean | null;
+  case_id: string | null;
 };
 
 type JobRow = {
@@ -41,8 +44,15 @@ type JobRow = {
   leads: LeadBits | LeadBits[] | null;
 };
 
+const CLOSED_STATUSES = "(Signed,Promoted,Lost,Referred)";
 const JOB_SELECT =
-  "id, lead_id, sequence, position, due_at, status, mention, assigned_name, notified_at, leads(id, lead_name, phone, owner_name, consultation_date, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, identity_status)";
+  "id, lead_id, sequence, position, due_at, status, mention, assigned_name, notified_at, leads!inner(id, lead_name, phone, owner_name, consultation_date, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, identity_status, lead_status, signed_case, case_id)";
+
+function leadStillOpen(lead: LeadBits | null): boolean {
+  if (!lead) return false;
+  if (lead.signed_case === true || lead.case_id) return false;
+  return !["Signed", "Promoted", "Lost", "Referred"].includes(lead.lead_status || "");
+}
 
 function leadOf(job: JobRow): LeadBits | null {
   if (!job.leads) return null;
@@ -126,6 +136,9 @@ export default async function OpenCallsPage({
         .eq("queue", "call")
         .eq("status", "pending")
         .lte("due_at", nowIso)
+        .or("signed_case.is.null,signed_case.eq.false", { referencedTable: "leads" })
+        .is("leads.case_id", null)
+        .not("leads.lead_status", "in", CLOSED_STATUSES)
         .order("due_at")
         .limit(200),
       supabase
@@ -134,6 +147,9 @@ export default async function OpenCallsPage({
         .eq("queue", "call")
         .eq("status", "pending")
         .gt("due_at", nowIso)
+        .or("signed_case.is.null,signed_case.eq.false", { referencedTable: "leads" })
+        .is("leads.case_id", null)
+        .not("leads.lead_status", "in", CLOSED_STATUSES)
         .order("due_at")
         .limit(200),
       supabase.from("sequence_steps").select("sequence, position").eq("queue", "call"),
@@ -147,8 +163,12 @@ export default async function OpenCallsPage({
     const position = Number((row as { position?: number }).position || 0);
     totals.set(sequence, Math.max(totals.get(sequence) ?? 0, position));
   }
-  const waiting = ((waitingRows ?? []) as JobRow[]).map((job) => toCard(job, slack.channelId, now, totals));
-  const upcoming = ((upcomingRows ?? []) as JobRow[]).map((job) => toCard(job, slack.channelId, now, totals));
+  const waiting = ((waitingRows ?? []) as JobRow[])
+    .filter((job) => leadStillOpen(leadOf(job)))
+    .map((job) => toCard(job, slack.channelId, now, totals));
+  const upcoming = ((upcomingRows ?? []) as JobRow[])
+    .filter((job) => leadStillOpen(leadOf(job)))
+    .map((job) => toCard(job, slack.channelId, now, totals));
   const people = tagOptions(["Outbound", ...staff.map((person) => person.name), ...waiting.map((job) => job.tagName), ...upcoming.map((job) => job.tagName)]);
   const matches = (job: OpenCallCard) => !tag || job.tagName === tag;
   const waitingShown = waiting.filter(matches);
@@ -163,17 +183,26 @@ export default async function OpenCallsPage({
 
   return (
     <main className="w-full px-4 py-8 xl:px-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-navy">Open calls</h1>
-      <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Check tags that are still waiting for a return call, and the ones coming up. Change the time
-        or who is tagged before it goes out. After a consult, tag the person who handled it — not
-        Outbound. Uncontacted leads still use today’s Outbound on #lead-calls.
-      </p>
-      <p className="mt-3 text-sm text-slate-700">
-        <span className="font-semibold text-navy">{finishCounts.completed}</span> completed
-        <span className="mx-2 text-slate-300">·</span>
-        <span className="font-semibold text-navy">{finishCounts.autoClosed}</span> auto-closed
-      </p>
+      <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-navy">
+        Open calls
+        <span className="group relative inline-flex">
+          <button
+            type="button"
+            aria-label="About open calls"
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-xs font-semibold text-slate-500 hover:border-slate-400 hover:text-slate-700"
+          >
+            ?
+          </button>
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute top-full left-0 z-20 mt-2 hidden w-80 rounded-md border border-slate-200 bg-white p-3 text-sm font-normal tracking-normal text-slate-600 shadow-lg group-hover:block group-focus-within:block"
+          >
+            Check tags that are still waiting for a return call, and the ones coming up. Change the time or who is tagged
+            before it goes out. After a consult, tag the person who handled it — not Outbound. Uncontacted leads still use
+            today’s Outbound on #lead-calls.
+          </span>
+        </span>
+      </h1>
       {error ? <p className="mt-4 text-sm text-red-700">{error}</p> : null}
       <OpenCallsList
         view={view}
@@ -186,6 +215,8 @@ export default async function OpenCallsPage({
         staffNames={shelf.staffNames}
         people={people}
         tag={tag}
+        completed={finishCounts.completed}
+        autoClosed={finishCounts.autoClosed}
         admin={admin}
         initialRow={selected.rows[0] ?? null}
       />

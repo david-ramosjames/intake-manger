@@ -37,6 +37,8 @@ export function OpenCallsList({
   staffNames,
   people,
   tag,
+  completed,
+  autoClosed,
   initialRow,
 }: {
   view: "waiting" | "upcoming";
@@ -49,6 +51,8 @@ export function OpenCallsList({
   staffNames: string[];
   people: string[];
   tag: string;
+  completed: number;
+  autoClosed: number;
   admin?: boolean;
   initialRow?: QueueRow | null;
 }) {
@@ -118,7 +122,12 @@ export function OpenCallsList({
             {upcomingCount}
           </span>
         </Link>
-        <label className="ml-auto inline-flex items-center gap-2 text-sm text-slate-600">
+        <p className="ml-auto text-sm text-slate-700">
+          <span className="font-semibold text-navy">{completed}</span> completed
+          <span className="mx-2 text-slate-300">·</span>
+          <span className="font-semibold text-navy">{autoClosed}</span> auto-closed
+        </p>
+        <label className="inline-flex items-center gap-2 text-sm text-slate-600">
           Tagged
           <select
             value={tag}
@@ -294,5 +303,6 @@ function fallbackRow(job: OpenCallCard): QueueRow {
     nextActionAt: job.dueAt,
     nextDayKey: "",
     nextDayLabel: "",
+    entry: "New",
   };
 }

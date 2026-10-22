@@ -4,6 +4,7 @@ import { QueueHelp } from "@/components/QueueHelp";
 import { WorkListFilters } from "@/components/WorkListFilters";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { loadLeadCallJobs } from "@/lib/call-grade";
+import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { workGradeOptions, workHandlerOptions, workLeadSourceOptions, workPriorityOptions, workSourceTypeOptions } from "@/lib/work-queue-options";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
@@ -303,6 +304,7 @@ function listHref(input: {
   intake?: string;
   sourceType?: string;
   leadSource?: string;
+  entry?: string;
 }): string {
   const params = new URLSearchParams();
   if (input.funnel === "closed") params.set("funnel", "closed");
@@ -318,6 +320,7 @@ function listHref(input: {
   if (input.intake) params.set("intake", input.intake);
   if (input.sourceType) params.set("sourceType", input.sourceType);
   if (input.leadSource) params.set("leadSource", input.leadSource);
+  if (input.funnel !== "closed" && (input.entry === "New" || input.entry === "In Progress")) params.set("entry", input.entry);
   const query = params.toString();
   return query ? `/work?${query}` : "/work";
 }
@@ -394,6 +397,7 @@ export default async function LeadListPage({
     intake?: string;
     sourceType?: string;
     leadSource?: string;
+    entry?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -413,6 +417,7 @@ export default async function LeadListPage({
   const intake = (params.intake ?? "").trim();
   const sourceType = (params.sourceType ?? "").trim();
   const leadSource = (params.leadSource ?? "").trim();
+  const entry = params.entry === "New" || params.entry === "In Progress" ? params.entry : "";
   const selectedId = params.lead?.trim() || "";
   const { supabase, admin } = await requireStaff();
   const docket = docketBaseUrl();
@@ -534,7 +539,7 @@ export default async function LeadListPage({
     list.push(lead.id);
     idsByPhone.set(key, list);
   }
-  const [staff, sendResult, activity, calls, callJobs] = await Promise.all([
+  const [staff, sendResult, activity, calls, callJobs, staffTouched] = await Promise.all([
     loadStaff(supabase),
     leadIds.length
       ? eachSlice(leadIds, 100, async (slice) => {
@@ -548,6 +553,7 @@ export default async function LeadListPage({
     leadIds.length ? supabase.rpc("work_queue_activity", { lead_ids: leadIds }) : Promise.resolve({ data: [] as QueueActivity[], error: null }),
     loadPendingJobs(supabase, idSet),
     loadLeadCallJobs(supabase, leadIds),
+    loadStaffTouchedIds(supabase, leadIds),
   ]);
   const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
   sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -862,6 +868,12 @@ export default async function LeadListPage({
       nextActionAt,
       nextDayKey: nextActionAt ? chicagoDay(nextActionAt) : "",
       nextDayLabel: formatCallDay(nextActionAt),
+      entry: leadEntry({
+        staffTouched: staffTouched.has(row.lead.id),
+        grade: row.lead.grade,
+        screenBy: callJobs.get(row.lead.id)?.screenBy ?? null,
+        intakeBy: callJobs.get(row.lead.id)?.intakeBy ?? null,
+      }),
     };
   });
   queueRows.sort((a, b) => {
@@ -890,9 +902,9 @@ export default async function LeadListPage({
           <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400" title="Where leads from the last 30 days are now. Filtering the list below leaves these numbers in place.">
             Last 30 days
           </span>
-          <Metric href={href({ queue: "contact", q, range, funnel, focus })} active={queue === "contact"} label={CYCLE_LABEL.contact} value={String(metrics.contact)} tone="text-amber-700" />
-          <Metric href={href({ queue: "information", q, range, funnel, focus })} active={queue === "information"} label={CYCLE_LABEL.information} value={String(metrics.information)} tone="text-sky-700" />
-          <Metric href={href({ queue: "signing", q, range, funnel, focus })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
+          <Metric href={href({ queue: "contact", q, range, funnel, focus, entry })} active={queue === "contact"} label={CYCLE_LABEL.contact} value={String(metrics.contact)} tone="text-amber-700" />
+          <Metric href={href({ queue: "information", q, range, funnel, focus, entry })} active={queue === "information"} label={CYCLE_LABEL.information} value={String(metrics.information)} tone="text-sky-700" />
+          <Metric href={href({ queue: "signing", q, range, funnel, focus, entry })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" />
           <Metric href={href({ queue: "signed", q, range, funnel: "closed", focus })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" />
           <span className="flex items-baseline gap-1.5 px-1" title="Signed leads among desired cases from the last 30 days.">
             <span className="text-lg font-semibold tabular-nums leading-none text-navy">{conversion}%</span>
@@ -903,7 +915,7 @@ export default async function LeadListPage({
               part.count ? (
                 <Link
                   key={part.id}
-                  href={href({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel, focus })}
+                  href={href({ queue: part.id, q, range, funnel: part.id === "signed" || part.id === "closed" ? "closed" : funnel, focus, entry })}
                   title={`${part.label}: ${part.count}`}
                   className={part.className}
                   style={{ width: `${(part.count / Math.max(metrics.total, 1)) * 100}%` }}
@@ -930,7 +942,7 @@ export default async function LeadListPage({
         {RANGES.map((item) => (
           <Link
             key={item.id}
-            href={href({ queue, view, q, range: item.id, funnel, focus })}
+            href={href({ queue, view, q, range: item.id, funnel, focus, entry })}
             className={`shrink-0 rounded-full px-2.5 py-0.5 ${
               range === item.id ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
             }`}
@@ -941,10 +953,22 @@ export default async function LeadListPage({
         <span className="mx-0.5 h-4 w-px shrink-0 bg-slate-200" aria-hidden="true" />
         <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400">Status</span>
         <Link
-          href={href({ queue: queue === "signed" || queue === "closed" ? "all" : queue, view, q, range, funnel: "open", focus })}
-          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
+          href={href({ queue: queue === "signed" || queue === "closed" || queue === "nonleads" ? "all" : queue, view, q, range, funnel: "open", focus })}
+          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" && queue !== "nonleads" && !entry ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
         >
           Open
+        </Link>
+        <Link
+          href={href({ queue: queue === "signed" || queue === "closed" || queue === "nonleads" ? "all" : queue, view, q, range, funnel: "open", focus, entry: "New" })}
+          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" && queue !== "nonleads" && entry === "New" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
+        >
+          New
+        </Link>
+        <Link
+          href={href({ queue: queue === "signed" || queue === "closed" || queue === "nonleads" ? "all" : queue, view, q, range, funnel: "open", focus, entry: "In Progress" })}
+          className={`shrink-0 rounded-full px-2.5 py-0.5 ${funnel === "open" && queue !== "nonleads" && entry === "In Progress" ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"}`}
+        >
+          In Progress
         </Link>
         <Link
           href={href({ queue, view, q, range, funnel: "closed", focus })}
@@ -983,6 +1007,7 @@ export default async function LeadListPage({
             {intake ? <input type="hidden" name="intake" value={intake} /> : null}
             {sourceType ? <input type="hidden" name="sourceType" value={sourceType} /> : null}
             {leadSource ? <input type="hidden" name="leadSource" value={leadSource} /> : null}
+            {entry && funnel === "open" ? <input type="hidden" name="entry" value={entry} /> : null}
             <input
               name="q"
               defaultValue={q}
@@ -1012,12 +1037,13 @@ export default async function LeadListPage({
         intakeFilter={intake}
         sourceTypeFilter={sourceType}
         leadSourceFilter={leadSource}
+        entryFilter={funnel === "open" && queue !== "nonleads" ? entry : ""}
       />
 
       <p className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>Also</span>
         {LEGACY.map((item) => (
-          <Link key={item.id} href={href({ view: item.id, q, range, funnel, focus })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
+          <Link key={item.id} href={href({ view: item.id, q, range, funnel, focus, entry })} className={view === item.id ? "font-medium text-slate-900" : "hover:text-slate-900"}>
             {item.label}
           </Link>
         ))}

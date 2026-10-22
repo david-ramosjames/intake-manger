@@ -642,13 +642,13 @@ export function QueueFilter({
 
   useEffect(() => {
     if (!open) return;
-    const onPointer = (event: MouseEvent) => {
+    const onPointer = (event: globalThis.MouseEvent) => {
       if (root.current?.contains(event.target as Node)) return;
       const panel = document.getElementById(`queue-filter-${label}`);
       if (panel?.contains(event.target as Node)) return;
       setOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
     document.addEventListener("mousedown", onPointer);

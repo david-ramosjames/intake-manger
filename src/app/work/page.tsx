@@ -629,12 +629,16 @@ export default async function LeadListPage({
       }
       if (job.queue !== "call") continue;
       callWaiting.add(job.lead_id);
-      if (new Date(job.due_at).getTime() <= Date.now()) continue;
+      // Keep overdue pending jobs too — they still need Call time / Slack tag editors.
       const position = typeof job.position === "number" ? job.position : Number.MAX_SAFE_INTEGER;
       const current = nextCall.get(job.lead_id);
-      if (!current || position < current.position) {
-        nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name, position });
-      }
+      const jobFuture = new Date(job.due_at).getTime() > Date.now();
+      const currentFuture = current ? new Date(current.dueAt).getTime() > Date.now() : false;
+      const better =
+        !current ||
+        (jobFuture && !currentFuture) ||
+        (jobFuture === currentFuture && (position < current.position || (position === current.position && job.due_at < current.dueAt)));
+      if (better) nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name, position });
   }
 
 
@@ -645,7 +649,8 @@ export default async function LeadListPage({
     const outreachAt = lastOutreach.get(lead.id);
     const outreach = daysSince(outreachAt);
     const pendingCall = nextCall.get(lead.id);
-    const nextAt = pendingCall?.dueAt ?? null;
+    // Only future dues drive "next at" / waiting; overdue jobs still expose callJobId for editing.
+    const nextAt = pendingCall && new Date(pendingCall.dueAt).getTime() > Date.now() ? pendingCall.dueAt : null;
     const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
     const waiting = waitingTooLong(cycle, age, outreach, nextAt ?? undefined);
     const attention = needsAttention({
@@ -908,7 +913,7 @@ export default async function LeadListPage({
 
       {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
 
-      <div className="mt-3 flex flex-nowrap items-center gap-x-1.5 overflow-x-auto pb-0.5 text-sm">
+      <div className="mt-3 flex flex-nowrap items-center gap-x-1.5 text-sm">
         <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-400">Arrived</span>
         {RANGES.map((item) => (
           <Link

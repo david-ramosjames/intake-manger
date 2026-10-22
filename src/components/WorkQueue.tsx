@@ -7,7 +7,7 @@ import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
-import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, LEAD_SOURCES, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
+import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, leadSourcesFor, officialCaseType, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { closeGaps } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
@@ -628,18 +628,49 @@ export function QueueFilter({
   onChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !root.current) {
+      setMenu(null);
+      return;
+    }
+    const box = root.current.getBoundingClientRect();
+    setMenu({ top: box.bottom + 4, left: box.left });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (root.current?.contains(event.target as Node)) return;
+      const panel = document.getElementById(`queue-filter-${label}`);
+      if (panel?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, label]);
+
   const pick = (next: string) => {
     onChange(next);
     setOpen(false);
   };
   return (
-    <div className={`relative ${open ? "z-40" : ""}`}>
+    <div ref={root} className="relative shrink-0">
       <button
         type="button"
         aria-label={`Filter ${label}`}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-sm whitespace-nowrap ${
+        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-sm whitespace-nowrap ${
           value ? "border-sky-300 bg-sky-50 text-navy" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
         }`}
       >
@@ -648,20 +679,23 @@ export function QueueFilter({
           ▾
         </span>
       </button>
-      {open ? (
-        <>
-          <button type="button" aria-label="Close filter" className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 z-50 mt-1 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg">
-            <MenuChoice current={!value} onPick={() => pick("")}>
-              All
+      {open && menu ? (
+        <div
+          id={`queue-filter-${label}`}
+          role="listbox"
+          aria-label={label}
+          className="fixed z-50 max-h-64 w-48 overflow-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm normal-case tracking-normal text-slate-700 shadow-lg"
+          style={{ top: menu.top, left: menu.left }}
+        >
+          <MenuChoice current={!value} onPick={() => pick("")}>
+            All
+          </MenuChoice>
+          {options.map((option) => (
+            <MenuChoice key={option} current={value === option} onPick={() => pick(option)}>
+              {option}
             </MenuChoice>
-            {options.map((option) => (
-              <MenuChoice key={option} current={value === option} onPick={() => pick(option)}>
-                {option}
-              </MenuChoice>
-            ))}
-          </div>
-        </>
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -823,10 +857,19 @@ function chosenLeadSource(value: string, type: string): string {
   return leadSourcesFor(type).includes(source) ? source : "";
 }
 
-function marketingFromRow(row: { sourceType: string; leadSource: string }): { type: string; source: string } {
+function marketingFromRow(row: { sourceType: string; leadSource: string; summary?: string | null }): { type: string; source: string } {
   const fromSource = canonicalLeadSource(row.leadSource);
-  const type = chosenSourceType(row.sourceType) || chosenSourceType(fromSource.type);
-  return { type, source: chosenLeadSource(fromSource.source || row.leadSource, type) };
+  let type = chosenSourceType(row.sourceType) || chosenSourceType(fromSource.type);
+  let source = chosenLeadSource(fromSource.source || row.leadSource, type);
+  if (!type || !source) {
+    const guessed = leadSourceFromText(row.summary);
+    if (guessed) {
+      type = type || chosenSourceType(guessed.type);
+      source = source || chosenLeadSource(guessed.source, type);
+      if (!type) type = chosenSourceType(canonicalLeadSource(source).type);
+    }
+  }
+  return { type, source };
 }
 
 function LeadFacts({
@@ -857,9 +900,10 @@ function LeadFacts({
   const [size, setSize] = useState(selectedOne(row.tags, SIZE_TAGS));
   const [sourceType, setSourceType] = useState(() => marketingFromRow(row).type);
   const [leadSource, setLeadSource] = useState(() => marketingFromRow(row).source);
+  const [caseType, setCaseType] = useState(row.caseType || "");
   const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
   const [decline, setDecline] = useState(selectedDecline(row.tags));
-  const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(row.signed ? "yes" : "");
+  const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(() => (row.signed || row.confirmSigned ? "yes" : ""));
   const [signedDate, setSignedDate] = useState(row.signedDate);
   const [lostChoice, setLostChoice] = useState<"yes" | "no" | "">(row.lostReason ? "yes" : "");
   const [lostReason, setLostReason] = useState<string>(row.lostReason ?? "");
@@ -867,8 +911,11 @@ function LeadFacts({
     const marketing = marketingFromRow(row);
     setSourceType(marketing.type);
     setLeadSource(marketing.source);
+    setCaseType(row.caseType || "");
     setEmail(standardLeadEmail(row.email) ?? "");
     setNotLeadReason(notLeadReasonFor(row));
+    setSignedChoice(row.signed || row.confirmSigned ? "yes" : "");
+    setSignedDate(row.signedDate);
     setLostChoice(row.lostReason ? "yes" : "");
     setLostReason(row.lostReason ?? "");
   }, [row.id]);
@@ -1007,27 +1054,6 @@ function LeadFacts({
           <input type="hidden" name="consulted" value={consulted} />
           {admin ? <input type="hidden" name="signed_decision" value={signedChoice} /> : null}
           <PanelSection title="Marketing">
-            <FieldLabel label="Lead source">
-              <input type="hidden" name="lead_source" value={leadSource} />
-              <select
-                value={leadSource}
-                autoComplete="off"
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setLeadSource(next);
-                  const inferred = canonicalLeadSource(next).type;
-                  if (inferred && inferred !== "Unknown") setSourceType(inferred);
-                }}
-                className={fieldClass()}
-              >
-                <option value="">Not set</option>
-                {(sourceType ? leadSourcesFor(sourceType) : LEAD_SOURCES.map((item) => item.source)).map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </FieldLabel>
             <FieldLabel label="Source type">
               <input type="hidden" name="source_type" value={sourceType} />
               <select
@@ -1036,8 +1062,12 @@ function LeadFacts({
                 onChange={(event) => {
                   const next = event.target.value;
                   setSourceType(next);
-                  if (!next) return;
-                  setLeadSource((current) => (leadSourcesFor(next).includes(current) ? current : ""));
+                  setLeadSource((current) => {
+                    if (!next) return "";
+                    if (leadSourcesFor(next).includes(current)) return current;
+                    const inferred = canonicalLeadSource(current);
+                    return inferred.type === next ? chosenLeadSource(inferred.source, next) : "";
+                  });
                 }}
                 className={fieldClass()}
               >
@@ -1049,33 +1079,77 @@ function LeadFacts({
                 ))}
               </select>
             </FieldLabel>
+            <FieldLabel label="Lead source">
+              <input type="hidden" name="lead_source" value={leadSource} />
+              <select
+                value={leadSource}
+                autoComplete="off"
+                disabled={!sourceType}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setLeadSource(next);
+                  const inferred = canonicalLeadSource(next).type;
+                  if (inferred && inferred !== "Unknown") setSourceType(inferred);
+                }}
+                className={fieldClass(!sourceType)}
+              >
+                <option value="">{sourceType ? "Not set" : "Pick source type first"}</option>
+                {sourceType
+                  ? leadSourcesFor(sourceType).map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))
+                  : null}
+              </select>
+            </FieldLabel>
           </PanelSection>
           <PanelSection title="Case type">
-            <FieldLabel label="Case type" className="col-span-2">
-              <select name="case_type" defaultValue={caseOptions.includes(row.caseType) ? row.caseType : ""} className={fieldClass()}>
+            <div className="col-span-2">
+              <select
+                name="case_type"
+                value={caseOptions.includes(caseType) ? caseType : caseType || ""}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setCaseType(next);
+                  if (next !== "Non-PI Legal Matter") return;
+                  mark("consult");
+                  setConsulted("no");
+                  setConsultDate("");
+                  mark("qualified");
+                  setQualifiedChoice("no");
+                  mark("desired");
+                  setDesiredChoice("no");
+                  setSize("");
+                  setDecline("DEC: Non-PI Legal Matter");
+                }}
+                className={fieldClass()}
+              >
                 <option value="">Not set</option>
                 {[...caseOptions].map((item) => (
                   <option key={item} value={item}>
                     {item}
                   </option>
                 ))}
+                {caseType && !caseOptions.includes(caseType) ? (
+                  <option key={caseType} value={caseType}>
+                    {caseType}
+                  </option>
+                ) : null}
               </select>
-            </FieldLabel>
+            </div>
           </PanelSection>
           <PanelSection title="Consultation">
             <div className="col-span-2 sm:col-span-1">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Consultation</p>
-              <div className="mt-1">
-                <ChoiceToggle
-                  label="Consultation"
-                  value={consulted}
-                  onChange={(value) => {
-                    mark("consult");
-                    setConsulted(value);
-                    if (value === "no") setConsultDate("");
-                  }}
-                />
-              </div>
+              <ChoiceToggle
+                label="Consultation"
+                value={consulted}
+                onChange={(value) => {
+                  mark("consult");
+                  setConsulted(value);
+                  if (value === "no") setConsultDate("");
+                }}
+              />
             </div>
             <FieldLabel label="Consultation date">
               <input
@@ -1094,35 +1168,29 @@ function LeadFacts({
           </PanelSection>
           <PanelSection title="Qualified">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Qualified</p>
-              <div className="mt-1">
-                <ChoiceToggle
-                  label="Qualified"
-                  value={qualified}
-                  onChange={(value) => {
-                    mark("qualified");
-                    setQualifiedChoice(value);
-                  }}
-                />
-              </div>
+              <ChoiceToggle
+                label="Qualified"
+                value={qualified}
+                onChange={(value) => {
+                  mark("qualified");
+                  setQualifiedChoice(value);
+                }}
+              />
             </div>
           </PanelSection>
           <PanelSection title="Desired">
-            <div className="col-span-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Desired</p>
-              <div className="mt-1 max-w-[12rem]">
-                <ChoiceToggle
-                  label="Desired"
-                  value={desired}
-                  disabled={contractLocked}
-                  onChange={(value) => {
-                    mark("desired");
-                    setDesiredChoice(value);
-                    if (value === "yes") setDecline("");
-                    if (value === "no") setSize("");
-                  }}
-                />
-              </div>
+            <div className="col-span-2 max-w-[12rem]">
+              <ChoiceToggle
+                label="Desired"
+                value={desired}
+                disabled={contractLocked}
+                onChange={(value) => {
+                  mark("desired");
+                  setDesiredChoice(value);
+                  if (value === "yes") setDecline("");
+                  if (value === "no") setSize("");
+                }}
+              />
             </div>
             <FieldLabel label="Size">
               <select
@@ -1170,25 +1238,26 @@ function LeadFacts({
           </PanelSection>
           <PanelSection title="Signed">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Signed</p>
-              <div className="mt-1">
-                <ChoiceToggle
-                  label="Signed"
-                  value={signedChoice}
-                  disabled={!admin}
-                  onChange={(value) => {
-                    mark("signed");
-                    setSignedChoice(value);
-                    if (value === "no") setSignedDate("");
-                    if (value === "yes") {
-                      setLostChoice("no");
-                      setLostReason("");
-                      mark("lost");
-                    }
-                  }}
-                />
-              </div>
-              {admin ? null : <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">Locked until an admin changes it.</p>}
+              <ChoiceToggle
+                label="Signed"
+                value={signedChoice}
+                disabled={!admin}
+                onChange={(value) => {
+                  mark("signed");
+                  setSignedChoice(value);
+                  if (value === "no") setSignedDate("");
+                  if (value === "yes") {
+                    setLostChoice("no");
+                    setLostReason("");
+                    mark("lost");
+                  }
+                }}
+              />
+              {admin ? null : (
+                <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">
+                  {row.confirmSigned || row.signed ? "Filled from the signing flow. Only an admin can change it." : "Locked until an admin changes it."}
+                </p>
+              )}
             </div>
             <FieldLabel label="Signed date">
               <input
@@ -1221,24 +1290,21 @@ function LeadFacts({
           </PanelSection>
           <PanelSection title="Lost lead">
             <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Lost lead</p>
-              <div className="mt-1">
-                <ChoiceToggle
-                  label="Lost lead"
-                  value={lostChoice}
-                  disabled={lostLocked}
-                  onChange={(value) => {
-                    mark("lost");
-                    setLostChoice(value);
-                    if (value === "no") setLostReason("");
-                    if (value === "yes" && signedChoice === "yes") {
-                      setSignedChoice("no");
-                      setSignedDate("");
-                      mark("signed");
-                    }
-                  }}
-                />
-              </div>
+              <ChoiceToggle
+                label="Lost lead"
+                value={lostChoice}
+                disabled={lostLocked}
+                onChange={(value) => {
+                  mark("lost");
+                  setLostChoice(value);
+                  if (value === "no") setLostReason("");
+                  if (value === "yes" && signedChoice === "yes") {
+                    setSignedChoice("no");
+                    setSignedDate("");
+                    mark("signed");
+                  }
+                }}
+              />
               {lostLocked ? (
                 <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">Unavailable once the lead is signed.</p>
               ) : null}
@@ -1821,7 +1887,9 @@ function TextSequence({ row }: { row: QueueRow }) {
 function NextActionEdit({ row, staff, part }: { row: QueueRow; staff: string[]; part: "call" | "reminder" }) {
   const call = row.nextAction.find((line) => line.label === "Call" && line.at);
   const reminder = row.nextAction.find((line) => line.label === "Reminder" && line.at);
-  const showCall = part === "call" && Boolean(row.callJobId && call?.at);
+  // Show editors whenever a next call/reminder time exists — even if the pending job is overdue
+  // or the time is only computed from the call sequence (setNextAction will attach/create the job).
+  const showCall = part === "call" && Boolean(call?.at);
   const showReminder = part === "reminder" && Boolean(reminder?.at);
   if (!showCall && !showReminder) return null;
   const extra = row.callTag && row.callTag !== "Outbound" && !staff.includes(row.callTag) ? [row.callTag] : [];

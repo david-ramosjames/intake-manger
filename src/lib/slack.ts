@@ -142,11 +142,33 @@ export type LeadChannelMessage = {
   permalink: string;
 };
 
+const channelNameCache = new Map<string, { at: number; name: string }>();
+
+async function slackChannelLabel(token: string, channelId: string): Promise<string> {
+  const cached = channelNameCache.get(channelId);
+  if (cached && Date.now() - cached.at < 30 * 60_000) return cached.name;
+  const info = await slackMethod(token, "conversations.info", { channel: channelId });
+  const channel = info.ok ? (info.payload.channel as { name?: string; name_normalized?: string } | undefined) : undefined;
+  const name = channel?.name?.trim() || channel?.name_normalized?.trim() || "";
+  const label = name ? `#${name}` : `#${channelId}`;
+  channelNameCache.set(channelId, { at: Date.now(), name: label });
+  return label;
+}
+
+/** Turn Slack user/channel markup leftovers into readable names. */
 async function slackTextWithNames(token: string, text: string): Promise<string> {
-  const ids = [...text.matchAll(/@([UW][A-Z0-9]{6,})/g)].map((match) => match[1]);
-  const names = new Map<string, string>();
-  for (const id of [...new Set(ids)]) names.set(id, await slackUserName(token, id, "a teammate"));
-  return text.replace(/@([UW][A-Z0-9]{6,})/g, (mention, id: string) => names.get(id) || mention);
+  let out = text;
+  const userIds = [...out.matchAll(/@([UW][A-Z0-9]{6,})/g)].map((match) => match[1]);
+  const userNames = new Map<string, string>();
+  for (const id of [...new Set(userIds)]) userNames.set(id, await slackUserName(token, id, "a teammate"));
+  out = out.replace(/@([UW][A-Z0-9]{6,})/g, (_mention, id: string) => userNames.get(id) || _mention);
+
+  // Bare channel ids (often from <#C…> after markup strip) → #channel-name
+  const channelIds = [...out.matchAll(/#?([CGD][A-Z0-9]{8,})\b/g)].map((match) => match[1]);
+  const channelNames = new Map<string, string>();
+  for (const id of [...new Set(channelIds)]) channelNames.set(id, await slackChannelLabel(token, id));
+  out = out.replace(/#?([CGD][A-Z0-9]{8,})\b/g, (_match, id: string) => channelNames.get(id) || `#${id}`);
+  return out;
 }
 
 function slackMessageText(message: SlackHistoryMessage): string {
@@ -156,6 +178,9 @@ function slackMessageText(message: SlackHistoryMessage): string {
   }
   return chunks
     .join("\n")
+    .replace(/<#([CGD][A-Z0-9]+)(?:\|([^>]+))?>/gi, (_match, id: string, label?: string) =>
+      label?.trim() ? `#${label.trim()}` : `#${id}`,
+    )
     .replace(/<([^|>]+)\|([^>]+)>/g, "$2")
     .replace(/<tel:[^|>]*\|([^>]+)>/g, "$1")
     .replace(/<([^>]+)>/g, "$1")

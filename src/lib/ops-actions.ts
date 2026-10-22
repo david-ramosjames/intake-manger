@@ -241,32 +241,58 @@ export async function setNextAction(formData: FormData) {
   const reminderAt = text(formData, "reminder_at");
   const tag = text(formData, "tag");
 
-  if (callJobId) {
-    if (!callAt) throw new Error("Choose a call time.");
+  if (callAt) {
     const due = chicagoLocalToIso(callAt);
-    const { data: job, error } = await supabase
-      .from("lead_jobs")
-      .select("id, lead_id, queue, status")
-      .eq("id", callJobId)
-      .maybeSingle();
-    if (error || !job || job.lead_id !== leadId || job.queue !== "call" || job.status !== "pending") {
-      throw new Error(error?.message ?? "That call is no longer on the schedule.");
+    const assigned = tag || "Outbound";
+    const detail = !tag || tag === "Outbound" ? "Tag Slack Outbound." : `Tag ${tag}.`;
+    let jobId = callJobId;
+    if (!jobId) {
+      const { data: existing } = await supabase
+        .from("lead_jobs")
+        .select("id")
+        .eq("lead_id", leadId)
+        .eq("queue", "call")
+        .eq("status", "pending")
+        .order("position", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      jobId = existing?.id ?? "";
     }
-    const { error: updateError } = await supabase
-      .from("lead_jobs")
-      .update({
+    if (jobId) {
+      const { data: job, error } = await supabase
+        .from("lead_jobs")
+        .select("id, lead_id, queue, status")
+        .eq("id", jobId)
+        .maybeSingle();
+      if (error || !job || job.lead_id !== leadId || job.queue !== "call" || job.status !== "pending") {
+        throw new Error(error?.message ?? "That call is no longer on the schedule.");
+      }
+      const { error: updateError } = await supabase
+        .from("lead_jobs")
+        .update({ due_at: due, assigned_name: assigned, mention: null, detail })
+        .eq("id", jobId);
+      if (updateError) throw new Error(updateError.message);
+    } else {
+      const { data: lead } = await supabase.from("leads").select("sequence").eq("id", leadId).maybeSingle();
+      const sequence = String(lead?.sequence || "more_info");
+      const { error: insertError } = await supabase.from("lead_jobs").insert({
+        lead_id: leadId,
+        queue: "call",
+        sequence,
+        position: 1,
         due_at: due,
-        assigned_name: tag || "Outbound",
-        mention: null,
-        detail: !tag || tag === "Outbound" ? "Tag Slack Outbound." : `Tag ${tag}.`,
-      })
-      .eq("id", callJobId);
-    if (updateError) throw new Error(updateError.message);
+        body: "Call the lead.",
+        status: "pending",
+        assigned_name: assigned,
+        detail,
+      });
+      if (insertError) throw new Error(insertError.message);
+    }
     await supabase.from("lead_events").insert({
       lead_id: leadId,
       event_type: "next_action",
       actor: email,
-      payload: { queue: "call", due_at: due, assigned_name: tag || "Outbound" },
+      payload: { queue: "call", due_at: due, assigned_name: assigned },
     });
   }
 
@@ -283,7 +309,9 @@ export async function setNextAction(formData: FormData) {
   }
 
   revalidatePath("/");
+  revalidatePath("/work");
   revalidatePath("/priority");
+  revalidatePath("/open-calls");
   revalidatePath(`/leads/${leadId}`);
 }
 

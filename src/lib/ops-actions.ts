@@ -18,7 +18,7 @@ import { canonicalLeadSource, isPiCaseType, isSourceType, officialCaseType, stan
 import { isSourceCategory } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
-import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage } from "./close-ready";
+import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, type ClosePath } from "./close-ready";
 import { isLostLeadReason } from "./funnel";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
@@ -97,7 +97,7 @@ export async function startTextSequence(
     const leadId = text(formData, "lead_id");
     const sequence = text(formData, "sequence");
     if (!leadId) return { error: "Missing the lead." };
-    if (sequence !== "more-info") return { error: "More Info is the only sequence that can be started here." };
+    if (sequence !== "more-info") return { error: "Start SMS runs the More Info sequence." };
     const { data: lead, error } = await supabase
       .from("leads")
       .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email")
@@ -128,6 +128,13 @@ export async function startTextSequence(
     });
     if (!result.ok) return { error: textSequenceError(result.reason) };
     const slug = result.sequence?.slug || sequence;
+    if (slug !== "more-info") {
+      const stopped = await askSmsFollowUpStop(phone, email);
+      if (stopped.ok || stopped.reason === "no_active_enrollment") {
+        return { error: "That started a different text sequence, so it was stopped. Use Start SMS again." };
+      }
+      return { error: "SMS Follow-Up started Web Qualified instead of More Info." };
+    }
     const { error: updateError } = await supabase
       .from("leads")
       .update({
@@ -149,6 +156,44 @@ export async function startTextSequence(
     return null;
   } catch (err) {
     return { error: err instanceof Error ? err.message : "The text sequence could not be started." };
+  }
+}
+
+export async function stopTextSequence(
+  _prev: { error: string } | null,
+  formData: FormData,
+): Promise<{ error: string } | null> {
+  try {
+    const { supabase, email } = await requireStaff();
+    const leadId = text(formData, "lead_id");
+    if (!leadId) return { error: "Missing the lead." };
+    const { data: lead, error } = await supabase
+      .from("leads")
+      .select("id, phone, phone_e164")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (error || !lead) return { error: error?.message ?? "Lead not found" };
+    const phone = lead.phone_e164 || lead.phone;
+    if (!phone) return { error: "This lead has no phone number." };
+    const result = await askSmsFollowUpStop(phone, email);
+    if (!result.ok && result.reason !== "no_active_enrollment") return { error: textSequenceError(result.reason) };
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({ text_sequence_status: "stopped", text_next_at: null })
+      .eq("id", leadId);
+    if (updateError) return { error: updateError.message };
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "text_sequence_stopped",
+      actor: email,
+      payload: { stopped: result.stopped ?? 0 },
+    });
+    revalidatePath("/");
+    revalidatePath("/priority");
+    revalidatePath(`/leads/${leadId}`);
+    return null;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "The text sequences could not be stopped." };
   }
 }
 
@@ -174,6 +219,20 @@ async function askSmsFollowUp(body: Record<string, unknown>): Promise<{
   } | null;
   if (!data) return { ok: false, reason: "unreachable" };
   return { ok: Boolean(data.ok), reason: data.reason, next_run_at: data.next_run_at, sequence: data.sequence };
+}
+
+async function askSmsFollowUpStop(phone: string, actor: string): Promise<{ ok: boolean; reason?: string; stopped?: number }> {
+  const base = process.env.SMS_FOLLOWUP_URL?.replace(/\/$/, "");
+  const token = process.env.SMS_FOLLOWUP_TOKEN || process.env.INTAKE_ENROLL_TOKEN;
+  if (!base || !token) return { ok: false, reason: "not_configured" };
+  const response = await fetch(`${base}/api/intake/stop`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, actor }),
+  });
+  const data = (await response.json().catch(() => null)) as { ok?: boolean; reason?: string; stopped?: number } | null;
+  if (!data) return { ok: false, reason: "unreachable" };
+  return { ok: Boolean(data.ok), reason: data.reason, stopped: data.stopped };
 }
 
 function textSequenceError(reason: string | undefined): string {
@@ -433,19 +492,26 @@ export async function saveLeadDetails(formData: FormData) {
     actor,
     payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType, lead_name: leadName },
   });
-  const qualifiedDecision = text(formData, "qualified_decision");
-  const desiredDecision = text(formData, "desired_decision");
+  let qualifiedDecision = text(formData, "qualified_decision");
+  let desiredDecision = text(formData, "desired_decision");
+  let declineTag = text(formData, "decline_tag") ?? "";
+  if (officialType === "Non-PI Legal Matter") {
+    qualifiedDecision = "no";
+    desiredDecision = "no";
+    declineTag = "DEC: Non-PI Legal Matter";
+  } else if (qualifiedDecision === "no") {
+    desiredDecision = "no";
+  }
   if (!markingNonLead && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no")) {
-    if (desiredDecision === "yes" && qualifiedDecision === "no") throw new Error("A lead that is not qualified is not desired.");
     const qualifiedTag = qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "";
     const desired = desiredDecision === "yes" ? true : desiredDecision === "no" ? false : before.desired_case === true;
     const tagged = tagsFromSelection({
       qualified: qualifiedTag,
       coverage: ["CVR DESIRED", "CVR SIGNED"].filter((tag) => (before.callrail_tags ?? []).includes(tag)),
-      decline: text(formData, "decline_tag") ?? "",
+      decline: declineTag,
       desired,
       signed: Boolean(before.signed_case),
-      nonPi: officialType === "Non-PI Legal Matter" || before.caller_class === "non_pi",
+      nonPi: officialType === "Non-PI Legal Matter",
       size: text(formData, "size_tag") ?? "",
       injuryType: injuryTagForCaseType(patch.case_type),
       requireQualified: Boolean(qualifiedTag),
@@ -491,13 +557,55 @@ export async function saveLeadDetails(formData: FormData) {
       });
     }
   }
-  const closed = await closeUndesiredLead(supabase, leadId, actor);
+  const signedNow = admin && signedDecision === "yes";
+  if (signedNow) await markSignedQualified(supabase, leadId);
+  const closed = signedNow
+    ? await closeSignedLead(supabase, leadId, actor)
+    : await closeUndesiredLead(supabase, leadId, actor);
   revalidatePath("/");
   revalidatePath("/priority");
   revalidatePath("/review");
   revalidatePath("/open-calls");
   revalidatePath(`/leads/${leadId}`);
   return { closed };
+}
+
+/** Signing makes the lead qualified and desired. Size is still required before it can close. */
+async function markSignedQualified(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+) {
+  const { data: lead, error } = await supabase.from("leads").select("callrail_tags").eq("id", leadId).maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+  const tags = (lead.callrail_tags ?? []).filter((tag: string) => tag !== QUALIFIED_NO && tag !== QUALIFIED_YES && !tag.startsWith("DEC:"));
+  tags.push(QUALIFIED_YES, "CVR DESIRED");
+  if (!tags.includes("CVR SIGNED")) tags.push("CVR SIGNED");
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({ qualified: true, desired_case: true, desired_source: "staff", callrail_tags: tags, decline_reason: null })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+}
+
+async function closeSignedLead(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+  actor: string,
+): Promise<boolean> {
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select(`lead_status, case_id, text_sequence_status, ${CLOSE_READY_COLUMNS}`)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+  if (lead.lead_status === "Signed" || lead.lead_status === "Promoted") return false;
+  if (lead.signed_case !== true) return false;
+  if (closeGaps(lead, "signed").length) return false;
+  await closeLead(supabase, leadId, actor, { lead_status: "Signed", close_reason: "signed", event: "signed", path: "signed" });
+  if (lead.text_sequence_status === "active") {
+    await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
+  }
+  return true;
 }
 
 /** A finished lead that is not desired has reached the end of the path, so saving closes it. */
@@ -515,15 +623,15 @@ async function closeUndesiredLead(
   if (lead.signed_case || lead.case_id) return false;
   if (lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.lead_status === "Lost" || lead.lead_status === "Referred") return false;
   if (lead.desired_case !== false) return false;
-  if (closeGaps(lead).length) return false;
+  if (closeGaps(lead, "declined").length) return false;
   const referred = (lead.callrail_tags ?? []).includes("DEC: Referred");
   await closeLead(
     supabase,
     leadId,
     actor,
     referred
-      ? { lead_status: "Referred", close_reason: "referred", event: "referred" }
-      : { lead_status: "Lost", close_reason: "declined", event: "declined" },
+      ? { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" }
+      : { lead_status: "Lost", close_reason: "declined", event: "declined", path: "declined" },
   );
   if (lead.text_sequence_status === "active") {
     await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
@@ -963,7 +1071,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
   try {
-    assertCloseReady(lead);
+    assertCloseReady(lead, "declined");
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Finish the lead before sending the referral." };
   }
@@ -1057,7 +1165,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
   try {
-    assertCloseReady(lead);
+    assertCloseReady(lead, "declined");
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Finish the lead before closing it." };
   }
@@ -1343,13 +1451,13 @@ export async function confirmCloseSuggestion(formData: FormData) {
     const { error } = await supabase.from("leads").update({ close_suggestion: null }).eq("id", leadId);
     if (error) throw new Error(error.message);
   } else if (suggestion === "decline" && decision === "refer") {
-    await closeLead(supabase, leadId, email, { lead_status: "Referred", close_reason: "referred", event: "referred" });
+    await closeLead(supabase, leadId, email, { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" });
   } else if (suggestion === "decline" && decision === "decline") {
-    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "declined", event: "declined" });
+    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "declined", event: "declined", path: "declined" });
   } else if (suggestion === "not_interested" && decision === "confirm") {
-    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "not_interested", event: "not_interested" });
+    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "not_interested", event: "not_interested", path: "lost" });
   } else if (suggestion === "not_a_lead" && decision === "confirm") {
-    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "not_a_lead", event: "not_a_lead" });
+    await closeLead(supabase, leadId, email, { lead_status: "Lost", close_reason: "not_a_lead", event: "not_a_lead", path: "nonlead" });
   } else {
     throw new Error("Choose confirm or keep open.");
   }
@@ -1361,7 +1469,7 @@ async function closeLead(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
   leadId: string,
   email: string,
-  change: { lead_status: string; close_reason: string; event: string },
+  change: { lead_status: string; close_reason: string; event: string; path: ClosePath },
 ) {
   const { data: lead, error: loadError } = await supabase
     .from("leads")
@@ -1369,7 +1477,7 @@ async function closeLead(
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
-  assertCloseReady(lead, change.close_reason === "not_a_lead" ? "nonlead" : "lead");
+  assertCloseReady(lead, change.path);
   const { error } = await supabase
     .from("leads")
     .update({
@@ -1408,6 +1516,9 @@ export async function setLostLead(formData: FormData) {
   if (before.signed_case || before.lead_status === "Signed" || before.case_id) {
     throw new Error("A signed or promoted case cannot be marked lost.");
   }
+  if (decision === "yes" && (before.qualified === false || officialCaseType(before.case_type) === "Non-PI Legal Matter")) {
+    throw new Error("A lead that is not qualified cannot be marked lost.");
+  }
 
   if (decision === "yes") {
     if (!isLostLeadReason(reason)) throw new Error("Choose why the lead was lost.");
@@ -1417,6 +1528,7 @@ export async function setLostLead(formData: FormData) {
         lead_status: "Lost",
         close_reason: reason,
         event: "lost_lead",
+        path: "lost",
       });
     }
   } else if (before.lead_status === "Lost" && isLostLeadReason(before.close_reason)) {
@@ -1456,24 +1568,27 @@ export async function confirmSigned(formData: FormData) {
     .eq("id", leadId)
     .maybeSingle();
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
-  const tags = Array.from(new Set([...(before.callrail_tags ?? []), "CVR DESIRED", "CVR SIGNED"]));
+  const tags = Array.from(new Set([...((before.callrail_tags ?? []) as string[]).filter((tag) => tag !== QUALIFIED_NO && !tag.startsWith("DEC:")), QUALIFIED_YES, "CVR DESIRED", "CVR SIGNED"]));
   const now = new Date().toISOString();
   const dateSigned = before.date_signed ?? chicagoDay(new Date());
   const gaps = closeGaps({
     ...before,
     signed_case: true,
+    qualified: true,
     desired_case: true,
     date_signed: dateSigned,
     callrail_tags: tags,
-  });
+  }, "signed");
   const { error: updateError } = await supabase
     .from("leads")
     .update({
       signed_case: true,
       signed_at: now,
       date_signed: dateSigned,
+      qualified: true,
       desired_case: true,
       desired_source: before.desired_source === "staff" ? "staff" : "contract",
+      decline_reason: null,
       callrail_tags: tags,
       ...(gaps.length
         ? {}

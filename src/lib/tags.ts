@@ -181,8 +181,9 @@ export function tagsFromSelection(input: {
         ? input.qualified
         : "";
   if (!qualified && input.requireQualified !== false) throw new Error("Choose Qualified YES or Qualified NO.");
-  const decline =
-    DECLINE_SET.has(input.decline)
+  const decline = nonPi
+    ? "DEC: Non-PI Legal Matter"
+    : DECLINE_SET.has(input.decline)
       ? input.decline
       : legacy === "NQ: Outside Service Area"
         ? "DEC: Outside Service Area"

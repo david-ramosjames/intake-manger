@@ -11,10 +11,10 @@ import { DECLINE_TAGS, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tag
 import type { LeadEntry } from "@/lib/lead-entry";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
-import { closeGaps } from "@/lib/close-ready";
+import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -773,16 +773,49 @@ function TextStartButtons({ leadId, compact = false }: { leadId: string; compact
     <form action={action} className={compact ? "flex flex-col items-center gap-1" : "flex flex-wrap gap-2"}>
       <input type="hidden" name="lead_id" value={leadId} />
       <button name="sequence" value="more-info" disabled={pending} className={compact ? button : buttonPrimary}>
-        More Info
+        Start SMS
       </button>
       {state?.error ? <p className="w-full text-[11px] font-medium text-red-700">{state.error}</p> : null}
     </form>
   );
 }
 
+function TextStopButton({ leadId, compact = false }: { leadId: string; compact?: boolean }) {
+  const [state, action, pending] = useActionState(stopTextSequence, null);
+  const notify = useContext(DrawerNoticeContext);
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (pending) {
+      wasPending.current = true;
+      notify({ tone: "saving", text: "Saving…" });
+      return;
+    }
+    if (!wasPending.current) return;
+    wasPending.current = false;
+    notify(state?.error ? { tone: "error", text: state.error } : { tone: "saved", text: "Texts stopped" });
+  }, [notify, pending, state]);
+  const button = compact
+    ? "cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
+    : buttonSecondary;
+  return (
+    <form action={action}>
+      <input type="hidden" name="lead_id" value={leadId} />
+      <button type="submit" disabled={pending} className={button}>
+        Stop SMS
+      </button>
+      {state?.error ? <p className="mt-1 w-full text-[11px] font-medium text-red-700">{state.error}</p> : null}
+    </form>
+  );
+}
+
 function TextAutomation({ row }: { row: QueueRow }) {
   if (row.textsLive) {
-    return <span className={row.automationBad ? "font-medium text-red-700" : "font-medium text-slate-800"}>{row.automationLabel}</span>;
+    return (
+      <span className="flex flex-col items-start gap-1">
+        <span className={row.automationBad ? "font-medium text-red-700" : "font-medium text-slate-800"}>{row.automationLabel}</span>
+        <TextStopButton leadId={row.id} compact />
+      </span>
+    );
   }
   if (!row.canStartText) {
     return <span className={row.automationBad ? "font-medium text-red-700" : "text-slate-400"}>{row.automationLabel}</span>;
@@ -962,6 +995,10 @@ function marketingFromRow(row: { sourceType: string; sourceCategory?: string; le
   return { type, category, source };
 }
 
+function contactNameFromRow(row: { leadName: string; title: string }): string {
+  return row.leadName || (row.title === "Not captured" ? "" : row.title);
+}
+
 function shownCaseType(value: string): string {
   const official = officialCaseType(value);
   if (!official || official === "Unknown / No Response") return value.trim() ? "TBD" : "";
@@ -999,6 +1036,7 @@ function LeadFacts({
   const [leadSource, setLeadSource] = useState(() => marketingFromRow(row).source);
   const [caseType, setCaseType] = useState(() => shownCaseType(row.caseType));
   const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
+  const [contactName, setContactName] = useState(() => contactNameFromRow(row));
   const [decline, setDecline] = useState(selectedDecline(row.tags));
   const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(() => (row.signed || row.confirmSigned ? "yes" : ""));
   const [signedDate, setSignedDate] = useState(row.signedDate);
@@ -1009,16 +1047,38 @@ function LeadFacts({
     setSourceType(marketing.type);
     setSourceCategory(marketing.category);
     setLeadSource(marketing.source);
-    setCaseType(shownCaseType(row.caseType));
+    const nextType = shownCaseType(row.caseType);
+    const nextQualified = nextType === "Non-PI Legal Matter" ? "no" : row.qualifiedLabel === "Yes" ? "yes" : row.qualifiedLabel === "No" ? "no" : "";
+    const nextDesired = nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "no" : row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "";
+    setCaseType(nextType);
+    setConsulted(row.consulted);
+    setConsultDate(row.consultKey.slice(0, 10));
+    setQualifiedChoice(nextQualified);
+    setDesiredChoice(nextDesired);
+    setSize(nextDesired === "yes" ? selectedOne(row.tags, SIZE_TAGS) : "");
+    setDecline(nextType === "Non-PI Legal Matter" ? "DEC: Non-PI Legal Matter" : selectedDecline(row.tags));
     setEmail(standardLeadEmail(row.email) ?? "");
+    setContactName(contactNameFromRow(row));
     setNotLeadReason(notLeadReasonFor(row));
     setSignedChoice(row.signed || row.confirmSigned ? "yes" : "");
     setSignedDate(row.signedDate);
-    setLostChoice(row.lostReason ? "yes" : "");
-    setLostReason(row.lostReason ?? "");
+    setLostChoice(nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "no" : row.lostReason ? "yes" : "");
+    setLostReason(nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "" : (row.lostReason ?? ""));
+    setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
   }, [row.id]);
-  const contractLocked = row.desiredLocked && row.qualifiedLabel !== "No";
-  const lostLocked = row.signed || signedChoice === "yes";
+  useEffect(() => {
+    setContactName(contactNameFromRow(row));
+  }, [row.id, row.leadName, row.title]);
+  const nonPi = caseType === "Non-PI Legal Matter";
+  const qualifiedValue = nonPi ? "no" : qualified;
+  const desiredValue = nonPi || qualifiedValue === "no" ? "no" : desired;
+  const lostValue = nonPi || qualifiedValue === "no" ? "no" : lostChoice;
+  const declineValue = nonPi ? "DEC: Non-PI Legal Matter" : desiredValue === "no" ? decline : "";
+  const sizeValue = desiredValue === "yes" ? size : "";
+  const contractLocked = row.desiredLocked && qualifiedValue !== "no";
+  const qualifiedLocked = nonPi;
+  const desiredLocked = contractLocked || nonPi || qualifiedValue === "no";
+  const lostLocked = row.signed || signedChoice === "yes" || nonPi || qualifiedValue === "no";
   const { pending: confirming, submit: confirmSubmit } = useNotedSubmit();
 
   const notALead = Boolean(notLeadReason);
@@ -1027,14 +1087,14 @@ function LeadFacts({
       notALead,
       consulted,
       consultDate,
-      qualified,
-      desired,
-      size,
-      decline,
+      qualified: qualifiedValue,
+      desired: desiredValue,
+      size: sizeValue,
+      decline: declineValue,
       signedChoice,
       signedDate,
-      lostChoice,
-      lostReason,
+      lostChoice: lostValue,
+      lostReason: lostValue === "yes" ? lostReason : "",
       admin,
     });
   }
@@ -1042,12 +1102,11 @@ function LeadFacts({
   function exitGap() {
     if (notALead) return null;
     if (dirty.consult && consulted === "yes" && !consultDate) return "Enter the consultation date before saving or closing.";
-    if ((dirty.qualified || dirty.desired) && qualified === "no" && desired === "yes") return "A lead that is not qualified is not desired.";
-    if (dirty.desired && desired === "yes" && !size) return "Choose a size before saving or closing.";
-    if (dirty.desired && desired === "no" && !decline) return "Choose a decline reason before saving or closing.";
+    if (dirty.desired && desiredValue === "yes" && !sizeValue) return "Choose a size before saving or closing.";
+    if (dirty.desired && desiredValue === "no" && !declineValue) return "Choose a decline reason before saving or closing.";
     if (dirty.signed && admin && signedChoice === "yes" && !signedDate) return "Enter the signed date before saving or closing.";
-    if (dirty.lost && lostChoice === "yes" && !isLostLeadReason(lostReason)) return "Choose why the lead was lost before saving or closing.";
-    if (dirty.lost && signedChoice === "yes" && lostChoice === "yes") return "A lead cannot be both signed and lost.";
+    if (dirty.lost && lostValue === "yes" && !isLostLeadReason(lostReason)) return "Choose why the lead was lost before saving or closing.";
+    if (dirty.lost && signedChoice === "yes" && lostValue === "yes") return "A lead cannot be both signed and lost.";
     return null;
   }
 
@@ -1076,11 +1135,12 @@ function LeadFacts({
     notify({ tone: "saving", text: "Saving…" });
     try {
       const saved = await persistDetails(formData);
-      if (dirty.lost && (lostChoice === "yes" || lostChoice === "no")) {
+      const clearLost = (nonPi || qualifiedValue === "no") && Boolean(row.lostReason);
+      if ((dirty.lost || clearLost) && (lostValue === "yes" || lostValue === "no")) {
         const lostData = new FormData();
         lostData.set("lead_id", row.id);
-        lostData.set("decision", lostChoice);
-        if (lostChoice === "yes") lostData.set("reason", lostReason);
+        lostData.set("decision", lostValue);
+        if (lostValue === "yes") lostData.set("reason", lostReason);
         await setLostLead(lostData);
       }
       setSaved(true);
@@ -1103,10 +1163,10 @@ function LeadFacts({
 
   async function persistDetails(formData?: FormData) {
     const data = formData ?? new FormData(document.getElementById(formId) as HTMLFormElement);
-    data.set("qualified_decision", qualified);
-    data.set("desired_decision", desired);
-    data.set("decline_tag", desired === "yes" ? "" : decline);
-    data.set("size_tag", desired === "no" ? "" : size);
+    data.set("qualified_decision", qualifiedValue);
+    data.set("desired_decision", desiredValue);
+    data.set("decline_tag", declineValue);
+    data.set("size_tag", sizeValue);
     try {
       return await saveLeadDetails(data);
     } catch (err) {
@@ -1116,7 +1176,6 @@ function LeadFacts({
   }
   const caseOptions = caseTypeChoices(row.caseType);
   const formId = `lead-details-${row.id}`;
-  const nameValue = row.leadName || (row.title === "Not captured" ? "" : row.title);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -1128,7 +1187,7 @@ function LeadFacts({
           )}
           <PanelSection title="Contact">
             <FieldLabel label="Name" className="col-span-2">
-              <input name="lead_name" defaultValue={nameValue} className={fieldClass()} />
+              <input name="lead_name" value={contactName} onChange={(event) => setContactName(event.target.value)} className={fieldClass()} />
             </FieldLabel>
             <FieldLabel label="Phone">
               <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
@@ -1235,6 +1294,9 @@ function LeadFacts({
                   setDesiredChoice("no");
                   setSize("");
                   setDecline("DEC: Non-PI Legal Matter");
+                  mark("lost");
+                  setLostChoice("no");
+                  setLostReason("");
                 }}
                 className={fieldClass()}
               >
@@ -1286,20 +1348,30 @@ function LeadFacts({
             <div>
               <ChoiceToggle
                 label="Qualified"
-                value={qualified}
+                value={qualifiedValue}
+                disabled={qualifiedLocked}
                 onChange={(value) => {
                   mark("qualified");
                   setQualifiedChoice(value);
+                  if (value === "no") {
+                    mark("desired");
+                    setDesiredChoice("no");
+                    setSize("");
+                    mark("lost");
+                    setLostChoice("no");
+                    setLostReason("");
+                  }
                 }}
               />
             </div>
+            {qualifiedLocked ? <p className="col-span-2 text-xs text-slate-500">Non-PI legal matters are not qualified.</p> : null}
           </PanelSection>
           <PanelSection title="Desired">
             <div className="col-span-2 max-w-[12rem]">
               <ChoiceToggle
                 label="Desired"
-                value={desired}
-                disabled={contractLocked}
+                value={desiredValue}
+                disabled={desiredLocked}
                 onChange={(value) => {
                   mark("desired");
                   setDesiredChoice(value);
@@ -1308,18 +1380,21 @@ function LeadFacts({
                 }}
               />
             </div>
+            {desiredLocked && qualifiedValue === "no" ? (
+              <p className="col-span-2 text-xs text-slate-500">Not desired when the lead is not qualified.</p>
+            ) : null}
             <FieldLabel label="Size">
               <select
-                value={size}
-                required={!notALead && desired === "yes"}
-                disabled={desired !== "yes"}
+                value={sizeValue}
+                required={!notALead && desiredValue === "yes"}
+                disabled={desiredValue !== "yes"}
                 onChange={(event) => {
                   mark("desired");
                   setSize(event.target.value);
                 }}
-                className={fieldClass(desired !== "yes")}
+                className={fieldClass(desiredValue !== "yes")}
               >
-                <option value="">{desired === "yes" ? "Choose a size" : "Locked"}</option>
+                <option value="">{desiredValue === "yes" ? "Choose a size" : "Locked"}</option>
                 {SIZE_TAGS.map((tag) => (
                   <option key={tag} value={tag}>
                     {tag.slice("S: ".length)}
@@ -1329,16 +1404,16 @@ function LeadFacts({
             </FieldLabel>
             <FieldLabel label="Decline reason">
               <select
-                value={decline}
-                required={!notALead && desired === "no"}
-                disabled={desired !== "no"}
+                value={declineValue}
+                required={!notALead && desiredValue === "no"}
+                disabled={desiredValue !== "no" || nonPi}
                 onChange={(event) => {
                   mark("desired");
                   setDecline(event.target.value);
                 }}
-                className={fieldClass(desired !== "no")}
+                className={fieldClass(desiredValue !== "no" || nonPi)}
               >
-                <option value="">{desired === "no" ? "Choose a reason" : "Locked"}</option>
+                <option value="">{desiredValue === "no" ? "Choose a reason" : "Locked"}</option>
                 {DECLINE_TAGS.map((tag) => (
                   <option key={tag} value={tag}>
                     {tag.slice("DEC: ".length)}
@@ -1346,11 +1421,6 @@ function LeadFacts({
                 ))}
               </select>
             </FieldLabel>
-            {decline === "DEC: Referred" || row.nonPi || startReferral ? (
-              <div className="col-span-2 border-t border-slate-200 pt-3">
-                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen prepare={() => persistDetails().then(() => undefined)} />
-              </div>
-            ) : null}
           </PanelSection>
           <PanelSection title="Signed">
             <ControlPair
@@ -1409,13 +1479,26 @@ function LeadFacts({
               </button>
             ) : null}
           </PanelSection>
+          {desiredValue === "no" || startReferral ? (
+            <PanelSection title="Referral">
+              <div className="col-span-2">
+                <QueueReferral
+                  row={row}
+                  destinations={destinations}
+                  templates={templates}
+                  startOpen={startReferral}
+                  prepare={() => persistDetails().then(() => undefined)}
+                />
+              </div>
+            </PanelSection>
+          ) : null}
           <PanelSection title="Lost lead">
             <ControlPair
               label="Lost reason"
               control={
                 <ChoiceToggle
                   label="Lost lead"
-                  value={lostChoice}
+                  value={lostValue}
                   disabled={lostLocked}
                   onChange={(value) => {
                     mark("lost");
@@ -1431,16 +1514,16 @@ function LeadFacts({
               }
               field={
                 <select
-                  value={lostReason}
-                  required={lostChoice === "yes"}
-                  disabled={lostLocked || lostChoice !== "yes"}
+                  value={lostValue === "yes" ? lostReason : ""}
+                  required={lostValue === "yes"}
+                  disabled={lostLocked || lostValue !== "yes"}
                   onChange={(event) => {
                     mark("lost");
                     setLostReason(event.target.value);
                   }}
-                  className={fieldClass(lostLocked || lostChoice !== "yes")}
+                  className={fieldClass(lostLocked || lostValue !== "yes")}
                 >
-                  <option value="">{lostChoice === "yes" ? "Choose a reason" : "Locked"}</option>
+                  <option value="">{lostValue === "yes" ? "Choose a reason" : "Locked"}</option>
                   {(Object.entries(LOST_LEAD_REASONS) as [LostLeadReason, string][]).map(([id, label]) => (
                     <option key={id} value={id}>
                       {label}
@@ -1448,7 +1531,15 @@ function LeadFacts({
                   ))}
                 </select>
               }
-              note={lostLocked ? <p className="text-xs normal-case tracking-normal text-slate-500">Unavailable once the lead is signed.</p> : null}
+              note={
+                lostLocked ? (
+                  <p className="text-xs normal-case tracking-normal text-slate-500">
+                    {row.signed || signedChoice === "yes"
+                      ? "Unavailable once the lead is signed."
+                      : "Unavailable when the lead is not qualified."}
+                  </p>
+                ) : null
+              }
             />
           </PanelSection>
         </form>
@@ -1545,7 +1636,6 @@ function QueueReferral({
 
   return (
     <section ref={sectionRef}>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Referral</h3>
       {row.referralSent ? (
         <p className="mt-2 text-sm font-medium text-emerald-800">
           Referral sent{row.referralFirm ? ` · ${row.referralFirm}` : ""}
@@ -2000,7 +2090,11 @@ function TextSequence({ row }: { row: QueueRow }) {
         {row.textsLive ? row.automationLabel : "Off"}
         {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
       </p>
-      {row.canStartText ? (
+      {row.textsLive ? (
+        <div className="ml-auto shrink-0">
+          <TextStopButton leadId={row.id} />
+        </div>
+      ) : row.canStartText ? (
         <div className="ml-auto shrink-0">
           <TextStartButtons leadId={row.id} />
         </div>
@@ -2073,7 +2167,7 @@ function NextActionEdit({ row, staff, part }: { row: QueueRow; staff: string[]; 
   );
 }
 
-function rowCloseGaps(row: QueueRow, kind: "lead" | "nonlead" = "lead") {
+function rowCloseGaps(row: QueueRow, path: ClosePath = "base") {
   return closeGaps(
     {
       lead_name: row.leadName,
@@ -2090,15 +2184,16 @@ function rowCloseGaps(row: QueueRow, kind: "lead" | "nonlead" = "lead") {
       case_type: row.caseType,
       lead_source: row.leadSource,
       source_type: row.sourceType,
+      source_category: row.sourceCategory,
       consultation: row.consulted === "yes" ? "staff" : row.consulted === "no" ? "no" : null,
       consultation_date: row.consultKey,
     },
-    kind,
+    path,
   );
 }
 
 function IdentityShelf({ row }: { row: QueueRow }) {
-  const currentName = row.leadName || (row.title === "Not captured" ? "" : row.title);
+  const currentName = contactNameFromRow(row);
   const heard = heardClientName(row.identityEvidence);
   return (
     <NotedForm action={resolveIdentity.bind(null, row.id)}>
@@ -2218,9 +2313,9 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
       <input type="hidden" name="lead_id" value={row.id} />
       <input type="hidden" name="suggestion" value={suggestion} />
       <p className="font-medium text-orange-950">Suggested close: {CLOSE_SUGGESTION_LABEL[suggestion]}</p>
-      {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : "lead").length ? (
+      {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : suggestion === "not_interested" ? "lost" : "declined").length ? (
         <p className="mt-2 text-orange-900">
-          Closing needs: {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : "lead").join(", ")}.
+          Closing needs: {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : suggestion === "not_interested" ? "lost" : "declined").join(", ")}.
         </p>
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
@@ -2326,7 +2421,7 @@ function ChoiceToggle({
         onClick={() => onChange("no")}
         className={`${side} ${value === "no" ? "bg-slate-200 text-slate-900 hover:bg-slate-300" : "text-slate-600"}`}
       >
-        No
+        {value === "no" ? "✓ No" : "No"}
       </button>
     </div>
   );

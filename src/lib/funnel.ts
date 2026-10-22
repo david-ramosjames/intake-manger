@@ -70,7 +70,7 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     .not("lead_status", "in", CLOSED_LIST);
   if (error) throw new Error(error.message);
   const rows = (data ?? []).filter(
-    (row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")) && closeGaps(row).length === 0,
+    (row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")) && closeGaps(row, "chase").length === 0,
   );
   if (!rows.length) return 0;
   const ids = rows.map((row) => row.id as string);
@@ -272,7 +272,7 @@ async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
     .not("phone_e164", "eq", "+17654183805");
   if (error) throw new Error(error.message);
   const ids = (data ?? [])
-    .filter((row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")) && closeGaps(row).length === 0)
+    .filter((row) => !isPracticeTestPhone(String(row.phone_e164 || row.phone || "")) && closeGaps(row, "signed").length === 0)
     .map((row) => row.id as string);
   if (!ids.length) return 0;
   const { error: closeError } = await supabase
@@ -283,6 +283,8 @@ async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
       sequence: "stop",
       close_reason: "signed",
       close_suggestion: null,
+      qualified: true,
+      desired_case: true,
     })
     .in("id", ids)
     .not("lead_status", "in", CLOSED_LIST);
@@ -358,7 +360,12 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
     if (type === "call" || type === "sona_call" || type === "text" || type === "email") replied.add(leadId);
   }
 
-  const closing = finished.filter((row) => !replied.has(row.id)).map((row) => row.id);
+  const ready = new Set(
+    (leads ?? [])
+      .filter((row) => closeGaps(row, "chase").length === 0)
+      .map((row) => String(row.id)),
+  );
+  const closing = finished.filter((row) => !replied.has(row.id) && ready.has(row.id)).map((row) => row.id);
   if (!closing.length) return 0;
   const { error: closeError } = await supabase
     .from("leads")

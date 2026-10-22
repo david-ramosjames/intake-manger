@@ -470,10 +470,6 @@ export async function saveLeadDetails(formData: FormData) {
       }
     }
   }
-  revalidatePath("/");
-  revalidatePath("/priority");
-  revalidatePath("/review");
-  revalidatePath("/open-calls");
   if (admin && (signedDecision === "yes" || signedDecision === "no")) {
     const wantSigned = signedDecision === "yes";
     const nextDate = wantSigned ? signedDate : null;
@@ -495,7 +491,44 @@ export async function saveLeadDetails(formData: FormData) {
       });
     }
   }
+  const closed = await closeUndesiredLead(supabase, leadId, actor);
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath("/review");
+  revalidatePath("/open-calls");
   revalidatePath(`/leads/${leadId}`);
+  return { closed };
+}
+
+/** A finished lead that is not desired has reached the end of the path, so saving closes it. */
+async function closeUndesiredLead(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+  actor: string,
+): Promise<boolean> {
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select(`lead_status, case_id, text_sequence_status, ${CLOSE_READY_COLUMNS}`)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+  if (lead.signed_case || lead.case_id) return false;
+  if (lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.lead_status === "Lost" || lead.lead_status === "Referred") return false;
+  if (lead.desired_case !== false) return false;
+  if (closeGaps(lead).length) return false;
+  const referred = (lead.callrail_tags ?? []).includes("DEC: Referred");
+  await closeLead(
+    supabase,
+    leadId,
+    actor,
+    referred
+      ? { lead_status: "Referred", close_reason: "referred", event: "referred" }
+      : { lead_status: "Lost", close_reason: "declined", event: "declined" },
+  );
+  if (lead.text_sequence_status === "active") {
+    await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
+  }
+  return true;
 }
 
 export async function setDesired(formData: FormData) {

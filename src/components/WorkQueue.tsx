@@ -855,8 +855,8 @@ function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: strin
 
 function fieldClass(locked = false) {
   return locked
-    ? "mt-1 w-full cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-400"
-    : "mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900";
+    ? "mt-1 block h-9 w-full cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-2 py-0 text-sm font-normal normal-case tracking-normal text-slate-400"
+    : "mt-1 block h-9 w-full rounded-md border border-slate-300 bg-white px-2 py-0 text-sm font-normal normal-case tracking-normal text-slate-900";
 }
 
 function PanelSection({ title, children }: { title: string; children: ReactNode }) {
@@ -870,10 +870,31 @@ function PanelSection({ title, children }: { title: string; children: ReactNode 
 
 function FieldLabel({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <label className={`block text-xs font-medium uppercase tracking-wide text-slate-500 ${className}`}>
-      {label}
+    <label className={`flex flex-col text-xs font-medium uppercase leading-4 tracking-wide text-slate-500 ${className}`}>
+      <span>{label}</span>
       {children}
     </label>
+  );
+}
+
+function ControlPair({
+  control,
+  label,
+  field,
+  note,
+}: {
+  control: ReactNode;
+  label: string;
+  field: ReactNode;
+  note?: ReactNode;
+}) {
+  return (
+    <div className="col-span-2 grid grid-cols-2 grid-rows-[auto_2.25rem] gap-x-3 gap-y-1">
+      <div className="col-start-2 row-start-1 self-end text-xs font-medium uppercase leading-4 tracking-wide text-slate-500">{label}</div>
+      <div className="col-start-1 row-start-2 h-9">{control}</div>
+      <div className="col-start-2 row-start-2 h-9 [&_input]:m-0 [&_input]:h-9 [&_select]:m-0 [&_select]:h-9">{field}</div>
+      {note ? <div className="col-span-2 row-start-3">{note}</div> : null}
+    </div>
   );
 }
 
@@ -1054,7 +1075,7 @@ function LeadFacts({
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
     try {
-      await persistDetails(formData);
+      const saved = await persistDetails(formData);
       if (dirty.lost && (lostChoice === "yes" || lostChoice === "no")) {
         const lostData = new FormData();
         lostData.set("lead_id", row.id);
@@ -1064,7 +1085,7 @@ function LeadFacts({
       }
       setSaved(true);
       setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
-      notify({ tone: "saved", text: "Saved" });
+      notify({ tone: "saved", text: saved?.closed ? "Saved and closed" : "Saved" });
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
       if (text.includes("Server Components render")) {
@@ -1087,7 +1108,7 @@ function LeadFacts({
     data.set("decline_tag", desired === "yes" ? "" : decline);
     data.set("size_tag", desired === "no" ? "" : size);
     try {
-      await saveLeadDetails(data);
+      return await saveLeadDetails(data);
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
       if (!text.includes("Server Components render")) throw err;
@@ -1232,31 +1253,34 @@ function LeadFacts({
             </div>
           </PanelSection>
           <PanelSection title="Consultation">
-            <div className="col-span-2 sm:col-span-1">
-              <ChoiceToggle
-                label="Consultation"
-                value={consulted}
-                onChange={(value) => {
-                  mark("consult");
-                  setConsulted(value);
-                  if (value === "no") setConsultDate("");
-                }}
-              />
-            </div>
-            <FieldLabel label="Consultation date">
-              <input
-                type="date"
-                name="consultation_date"
-                value={consultDate}
-                required={!notALead && consulted === "yes"}
-                disabled={consulted !== "yes"}
-                onChange={(event) => {
-                  mark("consult");
-                  setConsultDate(event.target.value);
-                }}
-                className={fieldClass(consulted !== "yes")}
-              />
-            </FieldLabel>
+            <ControlPair
+              label="Consultation date"
+              control={
+                <ChoiceToggle
+                  label="Consultation"
+                  value={consulted}
+                  onChange={(value) => {
+                    mark("consult");
+                    setConsulted(value);
+                    if (value === "no") setConsultDate("");
+                  }}
+                />
+              }
+              field={
+                <input
+                  type="date"
+                  name="consultation_date"
+                  value={consultDate}
+                  required={!notALead && consulted === "yes"}
+                  disabled={consulted !== "yes"}
+                  onChange={(event) => {
+                    mark("consult");
+                    setConsultDate(event.target.value);
+                  }}
+                  className={fieldClass(consulted !== "yes")}
+                />
+              }
+            />
           </PanelSection>
           <PanelSection title="Qualified">
             <div>
@@ -1324,47 +1348,52 @@ function LeadFacts({
             </FieldLabel>
             {decline === "DEC: Referred" || row.nonPi || startReferral ? (
               <div className="col-span-2 border-t border-slate-200 pt-3">
-                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen prepare={persistDetails} />
+                <QueueReferral row={row} destinations={destinations} templates={templates} startOpen prepare={() => persistDetails().then(() => undefined)} />
               </div>
             ) : null}
           </PanelSection>
           <PanelSection title="Signed">
-            <div>
-              <ChoiceToggle
-                label="Signed"
-                value={signedChoice}
-                disabled={!admin}
-                onChange={(value) => {
-                  mark("signed");
-                  setSignedChoice(value);
-                  if (value === "no") setSignedDate("");
-                  if (value === "yes") {
-                    setLostChoice("no");
-                    setLostReason("");
-                    mark("lost");
-                  }
-                }}
-              />
-              {admin ? null : (
-                <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">
-                  {row.confirmSigned || row.signed ? "Filled from the signing flow. Only an admin can change it." : "Locked until an admin changes it."}
-                </p>
-              )}
-            </div>
-            <FieldLabel label="Signed date">
-              <input
-                type="date"
-                name="date_signed"
-                value={signedDate}
-                required={admin && signedChoice === "yes"}
-                disabled={!admin}
-                onChange={(event) => {
-                  mark("signed");
-                  setSignedDate(event.target.value);
-                }}
-                className={fieldClass(!admin)}
-              />
-            </FieldLabel>
+            <ControlPair
+              label="Signed date"
+              control={
+                <ChoiceToggle
+                  label="Signed"
+                  value={signedChoice}
+                  disabled={!admin}
+                  onChange={(value) => {
+                    mark("signed");
+                    setSignedChoice(value);
+                    if (value === "no") setSignedDate("");
+                    if (value === "yes") {
+                      setLostChoice("no");
+                      setLostReason("");
+                      mark("lost");
+                    }
+                  }}
+                />
+              }
+              field={
+                <input
+                  type="date"
+                  name="date_signed"
+                  value={signedDate}
+                  required={admin && signedChoice === "yes"}
+                  disabled={!admin}
+                  onChange={(event) => {
+                    mark("signed");
+                    setSignedDate(event.target.value);
+                  }}
+                  className={fieldClass(!admin)}
+                />
+              }
+              note={
+                admin ? null : (
+                  <p className="text-xs normal-case tracking-normal text-slate-500">
+                    {row.confirmSigned || row.signed ? "Filled from the signing flow. Only an admin can change it." : "Locked until an admin changes it."}
+                  </p>
+                )
+              }
+            />
             {row.confirmSigned ? (
               <button
                 type="button"
@@ -1381,45 +1410,46 @@ function LeadFacts({
             ) : null}
           </PanelSection>
           <PanelSection title="Lost lead">
-            <div>
-              <ChoiceToggle
-                label="Lost lead"
-                value={lostChoice}
-                disabled={lostLocked}
-                onChange={(value) => {
-                  mark("lost");
-                  setLostChoice(value);
-                  if (value === "no") setLostReason("");
-                  if (value === "yes" && signedChoice === "yes") {
-                    setSignedChoice("no");
-                    setSignedDate("");
-                    mark("signed");
-                  }
-                }}
-              />
-              {lostLocked ? (
-                <p className="mt-1 text-xs normal-case tracking-normal text-slate-500">Unavailable once the lead is signed.</p>
-              ) : null}
-            </div>
-            <FieldLabel label="Lost reason">
-              <select
-                value={lostReason}
-                required={lostChoice === "yes"}
-                disabled={lostLocked || lostChoice !== "yes"}
-                onChange={(event) => {
-                  mark("lost");
-                  setLostReason(event.target.value);
-                }}
-                className={fieldClass(lostLocked || lostChoice !== "yes")}
-              >
-                <option value="">{lostChoice === "yes" ? "Choose a reason" : "Locked"}</option>
-                {(Object.entries(LOST_LEAD_REASONS) as [LostLeadReason, string][]).map(([id, label]) => (
-                  <option key={id} value={id}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </FieldLabel>
+            <ControlPair
+              label="Lost reason"
+              control={
+                <ChoiceToggle
+                  label="Lost lead"
+                  value={lostChoice}
+                  disabled={lostLocked}
+                  onChange={(value) => {
+                    mark("lost");
+                    setLostChoice(value);
+                    if (value === "no") setLostReason("");
+                    if (value === "yes" && signedChoice === "yes") {
+                      setSignedChoice("no");
+                      setSignedDate("");
+                      mark("signed");
+                    }
+                  }}
+                />
+              }
+              field={
+                <select
+                  value={lostReason}
+                  required={lostChoice === "yes"}
+                  disabled={lostLocked || lostChoice !== "yes"}
+                  onChange={(event) => {
+                    mark("lost");
+                    setLostReason(event.target.value);
+                  }}
+                  className={fieldClass(lostLocked || lostChoice !== "yes")}
+                >
+                  <option value="">{lostChoice === "yes" ? "Choose a reason" : "Locked"}</option>
+                  {(Object.entries(LOST_LEAD_REASONS) as [LostLeadReason, string][]).map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              }
+              note={lostLocked ? <p className="text-xs normal-case tracking-normal text-slate-500">Unavailable once the lead is signed.</p> : null}
+            />
           </PanelSection>
         </form>
       </div>
@@ -1825,23 +1855,6 @@ export function LeadDrawer({
         {row.closeSuggestion ? <CloseSuggestion row={row} /> : null}
         <PriorityPanel row={row} />
         <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next</h3>
-          <dl className="mt-2 space-y-1 text-sm text-slate-700">
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-500">Last contacted</dt>
-              <dd>{row.lastLabel}</dd>
-            </div>
-            <ActionLines lines={row.nextAction.filter((line) => line.label !== "Call" && line.label !== "Text")} layout="row" />
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-500">Calls / texts</dt>
-              <dd>
-                {row.calls} / {row.texts}
-              </dd>
-            </div>
-          </dl>
-          <NextActionEdit row={row} staff={staff} part="reminder" />
-        </section>
-        <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>
           <ul className="mt-2 space-y-2 text-sm">
             <li className="flex justify-between gap-3">
@@ -1873,6 +1886,23 @@ export function LeadDrawer({
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
           <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
+        </section>
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next</h3>
+          <dl className="mt-2 space-y-1 text-sm text-slate-700">
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Last contacted</dt>
+              <dd>{row.lastLabel}</dd>
+            </div>
+            <ActionLines lines={row.nextAction.filter((line) => line.label !== "Call" && line.label !== "Text")} layout="row" />
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Calls / texts</dt>
+              <dd>
+                {row.calls} / {row.texts}
+              </dd>
+            </div>
+          </dl>
+          <NextActionEdit row={row} staff={staff} part="reminder" />
         </section>
       </div>
       ) : null}
@@ -2277,9 +2307,9 @@ function ChoiceToggle({
   onChange: (value: "yes" | "no") => void;
 }) {
   const side =
-    "flex h-9 min-w-0 flex-1 cursor-pointer items-center justify-center px-2 text-sm font-medium normal-case tracking-normal transition duration-150 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent";
+    "flex h-full min-w-0 flex-1 cursor-pointer items-center justify-center px-2 text-sm font-medium normal-case tracking-normal transition duration-150 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent";
   return (
-    <div className={`flex w-full overflow-hidden rounded-lg border border-slate-300 bg-white ${disabled ? "bg-slate-100" : ""}`} role="group" aria-label={label}>
+    <div className={`flex h-9 w-full overflow-hidden rounded-lg border border-slate-300 bg-white ${disabled ? "bg-slate-100" : ""}`} role="group" aria-label={label}>
       <button
         type="button"
         aria-pressed={value === "yes"}

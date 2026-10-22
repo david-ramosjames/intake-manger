@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { QueueFilter } from "@/components/WorkQueue";
 
@@ -10,34 +11,60 @@ export function WorkListFilters({
   priorityOptions,
   screenOptions,
   intakeOptions,
+  onFilterChange,
 }: {
   gradeOptions: string[];
   priorityOptions: string[];
   screenOptions: string[];
   intakeOptions: string[];
+  onFilterChange?: (filters: { grade: string; priority: string; screen: string; intake: string }) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const grade = params.get("grade") ?? "";
-  const priority = params.get("priority") ?? "";
-  const screen = params.get("screen") ?? "";
-  const intake = params.get("intake") ?? "";
+  const [isPending, startTransition] = useTransition();
+  
+  const [optimisticGrade, setOptimisticGrade] = useState(params.get("grade") ?? "");
+  const [optimisticPriority, setOptimisticPriority] = useState(params.get("priority") ?? "");
+  const [optimisticScreen, setOptimisticScreen] = useState(params.get("screen") ?? "");
+  const [optimisticIntake, setOptimisticIntake] = useState(params.get("intake") ?? "");
 
   function setFilter(key: FilterKey, value: string) {
+    const newFilters = {
+      grade: key === "grade" ? value : optimisticGrade,
+      priority: key === "priority" ? value : optimisticPriority,
+      screen: key === "screen" ? value : optimisticScreen,
+      intake: key === "intake" ? value : optimisticIntake,
+    };
+
+    if (key === "grade") setOptimisticGrade(value);
+    if (key === "priority") setOptimisticPriority(value);
+    if (key === "screen") setOptimisticScreen(value);
+    if (key === "intake") setOptimisticIntake(value);
+
+    if (onFilterChange) {
+      onFilterChange(newFilters);
+    }
+
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
     else next.delete(key);
     const query = next.toString();
-    router.push(query ? `${pathname}?${query}` : pathname);
+    const url = query ? `${pathname}?${query}` : pathname;
+    
+    window.history.replaceState({}, "", url);
+    
+    startTransition(() => {
+      router.replace(url, { scroll: false });
+    });
   }
 
   return (
     <>
-      <QueueFilter label="Case grade" value={grade} options={gradeOptions} onChange={(value) => setFilter("grade", value)} />
-      <QueueFilter label="Priority" value={priority} options={priorityOptions} onChange={(value) => setFilter("priority", value)} />
-      <QueueFilter label="Screened by" value={screen} options={screenOptions} onChange={(value) => setFilter("screen", value)} />
-      <QueueFilter label="Intake by" value={intake} options={intakeOptions} onChange={(value) => setFilter("intake", value)} />
+      <QueueFilter label="Case grade" value={optimisticGrade} options={gradeOptions} onChange={(value) => setFilter("grade", value)} pending={isPending} />
+      <QueueFilter label="Priority" value={optimisticPriority} options={priorityOptions} onChange={(value) => setFilter("priority", value)} pending={isPending} />
+      <QueueFilter label="Screened by" value={optimisticScreen} options={screenOptions} onChange={(value) => setFilter("screen", value)} pending={isPending} />
+      <QueueFilter label="Intake by" value={optimisticIntake} options={intakeOptions} onChange={(value) => setFilter("intake", value)} pending={isPending} />
     </>
   );
 }

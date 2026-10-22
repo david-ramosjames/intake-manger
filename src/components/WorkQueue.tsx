@@ -291,6 +291,7 @@ export function WorkQueue({
   const [nextDay, setNextDay] = useState("");
   const [sort, setSort] = useState<{ column: SortColumn; dir: "asc" | "desc" } | null>({ column: "opened", dir: "desc" });
   const canLeave = useRef<() => boolean>(() => true);
+  
   function pick(id: string) {
     if (id !== selectedId && !canLeave.current()) return;
     setSelectedId(id);
@@ -327,7 +328,7 @@ export function WorkQueue({
 
   return (
     <div className={`mt-4 ${selected ? "xl:pr-[29rem]" : ""}`}>
-      <div className="min-w-0 rounded-xl border border-slate-200 bg-white">
+      <div className="min-w-0 rounded-xl border border-slate-200 bg-white relative">
         <table className="w-full table-fixed text-left text-xs">
           <colgroup>
             <col style={{ width: "9%" }} />
@@ -621,11 +622,13 @@ export function QueueFilter({
   value,
   options,
   onChange,
+  pending = false,
 }: {
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
+  pending?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -675,9 +678,13 @@ export function QueueFilter({
         }`}
       >
         <span>{value ? `${label}: ${value}` : label}</span>
-        <span aria-hidden="true" className="text-[10px] text-slate-400">
-          ▾
-        </span>
+        {pending ? (
+          <span aria-hidden="true" className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
+        ) : (
+          <span aria-hidden="true" className="text-[10px] text-slate-400">
+            ▾
+          </span>
+        )}
       </button>
       {open && menu ? (
         <div

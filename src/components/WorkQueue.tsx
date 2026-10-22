@@ -147,16 +147,6 @@ const COLUMNS: { id: Exclude<Column, "type">; label: string; width: string }[] =
   { id: "automation", label: "Automation", width: "8%" },
 ];
 
-const TYPE_SHORT: Record<string, string> = {
-  "T: Non-PI Legal Matter": "Non-PI",
-  "T: Commercial / 18 Wheeler": "18 Wheeler",
-  "T: Pedestrian / Bicycle / Scooter": "Ped / bike",
-  "T: Sexual Assault / Child Abuse": "Assault",
-  "T: TBD": "TBD",
-  "Premises Liability": "Premises",
-  "Sexual Assault / Child Abuse": "Assault",
-};
-
 function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; layout?: "stack" | "row" }) {
   const shown = lines.filter((line) => line.when !== "None");
   return (
@@ -180,31 +170,11 @@ function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; lay
   );
 }
 
-function shortType(text: string): string | null {
-  const official = officialCaseType(text);
-  if (official === "Unknown / No Response") return null;
-  if (official) return TYPE_SHORT[official] ?? official;
-  if (/resbal|slip|ca[ií]da|premises/i.test(text)) return "Premises";
-  if (/18-?\s*wheeler|tractor-?trailer/i.test(text)) return "T: 18 Wheeler";
-  if (/unknown|no response|not captured|unclassified|personal injury claim|^n\/?a$/i.test(text)) return null;
-  const head = text.split(/\s*[\/|]\s*/)[0].replace(/\s+/g, " ").trim();
-  if (!head) return null;
-  if (head.length <= 22) return head;
-  const words = head.split(/\s+/);
-  let built = "";
-  for (const word of words) {
-    const next = built ? `${built} ${word}` : word;
-    if (next.length > 18) break;
-    built = next;
-  }
-  return built || null;
-}
-
 function typeLabel(row: Pick<QueueRow, "accident" | "caseType">): string {
   const candidates = [row.caseType, row.accident].map((value) => (value || "").trim()).filter((value) => value && value !== "—");
   for (const text of candidates) {
-    const label = shortType(text);
-    if (label) return label;
+    const official = officialCaseType(text);
+    if (official && official !== "Unknown / No Response") return official;
   }
   return "TBD";
 }
@@ -894,6 +864,12 @@ function marketingFromRow(row: { sourceType: string; leadSource: string; summary
   return { type, source };
 }
 
+function shownCaseType(value: string): string {
+  const official = officialCaseType(value);
+  if (!official || official === "Unknown / No Response") return value.trim() ? "TBD" : "";
+  return official;
+}
+
 function LeadFacts({
   row,
   admin,
@@ -922,7 +898,7 @@ function LeadFacts({
   const [size, setSize] = useState(selectedOne(row.tags, SIZE_TAGS));
   const [sourceType, setSourceType] = useState(() => marketingFromRow(row).type);
   const [leadSource, setLeadSource] = useState(() => marketingFromRow(row).source);
-  const [caseType, setCaseType] = useState(row.caseType || "");
+  const [caseType, setCaseType] = useState(() => shownCaseType(row.caseType));
   const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
   const [decline, setDecline] = useState(selectedDecline(row.tags));
   const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(() => (row.signed || row.confirmSigned ? "yes" : ""));
@@ -933,7 +909,7 @@ function LeadFacts({
     const marketing = marketingFromRow(row);
     setSourceType(marketing.type);
     setLeadSource(marketing.source);
-    setCaseType(row.caseType || "");
+    setCaseType(shownCaseType(row.caseType));
     setEmail(standardLeadEmail(row.email) ?? "");
     setNotLeadReason(notLeadReasonFor(row));
     setSignedChoice(row.signed || row.confirmSigned ? "yes" : "");

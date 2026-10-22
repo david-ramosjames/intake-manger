@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { canonicalLeadSource, caseTypeChoices, isSourceType, LEAD_SOURCES, SOURCE_TYPE_OPTIONS } from "@/lib/leads";
+import { canonicalLeadSource, caseTypeChoices, isSourceType, LEAD_SOURCES, officialCaseType, SOURCE_TYPE_OPTIONS } from "@/lib/leads";
 import { saveLeadDetails, saveLeadTags, setConsultation, setDesired, setQualified } from "@/lib/ops-actions";
 import { toE164 } from "@/lib/phone";
 import { emailIsUnavailable, EMAIL_NOT_AVAILABLE, standardLeadEmail } from "@/lib/leads";
@@ -474,7 +474,10 @@ function ReviewRow({ row }: { row: ReviewLead }) {
         <td className="px-2 py-1.5">
           <select
             aria-label="Case type"
-            value={draft.caseType === "Unknown / No Response" ? "" : draft.caseType}
+            value={(() => {
+              const official = officialCaseType(draft.caseType);
+              return official && official !== "Unknown / No Response" ? official : "";
+            })()}
             onChange={(event) => {
               const next = { ...draft, caseType: event.target.value };
               void persistDetails(next, false);

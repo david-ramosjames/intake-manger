@@ -14,7 +14,7 @@ import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
-import { canonicalLeadSource, isPiCaseType, isSourceType, standardLeadEmail } from "./leads";
+import { canonicalLeadSource, isPiCaseType, isSourceType, officialCaseType, standardLeadEmail } from "./leads";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage } from "./close-ready";
@@ -410,7 +410,9 @@ export async function saveLeadDetails(formData: FormData) {
     patch.consultation = "no";
     patch.consultation_date = null;
   }
-  if (caseType === "Non-PI Legal Matter") {
+  const officialType = officialCaseType(caseType);
+  patch.case_type = officialType && officialType !== "Unknown / No Response" ? officialType : caseType ? "TBD" : null;
+  if (officialType === "Non-PI Legal Matter") {
     patch.caller_class = "non_pi";
     patch.close_suggestion = "decline";
   } else if (isPiCaseType(caseType) && before.caller_class === "non_pi") {

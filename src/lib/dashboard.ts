@@ -298,7 +298,7 @@ function statusWord(tone: RateMetric["tone"]): string {
 function declinedLegalLead(lead: CohortLead): boolean {
   if (milestoneDesired(lead) === true || milestoneSigned(lead)) return false;
   const tags = lead.callrail_tags ?? [];
-  const caseType = (lead.case_type || "").trim().toLowerCase();
+  const caseType = (lead.case_type || "").trim().replace(/^t:\s*/i, "").toLowerCase();
   const nonPi =
     lead.caller_class === "non_pi" ||
     caseType === "non-pi legal matter" ||

@@ -5,7 +5,7 @@ import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary } from "@/lib/ui";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
-import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, standardLeadEmail, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
+import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, officialCaseType, standardLeadEmail, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
 import { getCategoriesForType, getSourcesForCategory, isSourceCategory, isSourceType, SOURCE_TYPES, type SourceCategory, type SourceType } from "@/lib/source-options";
 
 function isNextRedirect(err: unknown): boolean {
@@ -390,10 +390,12 @@ function Field({
 
 function CaseTypeField({ value }: { value: string }) {
   const options = caseTypeChoices(value);
+  const selected = officialCaseType(value);
+  const current = selected && selected !== "Unknown / No Response" ? selected : "";
   return (
     <label className="block text-sm">
       <span className="font-medium text-slate-700">Case type</span>
-      <select name="case_type" defaultValue={value === "Unknown / No Response" ? "" : value} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
+      <select name="case_type" defaultValue={current} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2">
         <option value="">Not set</option>
         {options.map((item) => (
           <option key={item} value={item}>

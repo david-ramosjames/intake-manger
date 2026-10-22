@@ -7,7 +7,7 @@ import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { isLostLeadReason } from "@/lib/funnel";
 import { fillLeadSources } from "@/lib/lead-source-fill";
-import { daysSince, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
+import { daysSince, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
 import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
@@ -243,7 +243,7 @@ function toQueueRow(
     desiredLocked: contractSent(lead) || milestoneSigned(lead) || milestoneQualified(lead) === false,
     signed: milestoneSigned(lead),
     lostReason: lead.lead_status === "Lost" && isLostLeadReason(lead.close_reason) ? lead.close_reason : null,
-    nonPi: lead.case_type === "Non-PI Legal Matter",
+    nonPi: officialCaseType(lead.case_type) === "Non-PI Legal Matter",
     practiceArea: lead.practice_area,
     referralSent: Boolean(input.sentFirm) || lead.lead_status === "Referred" || lead.close_reason === "referred",
     referralFirm: input.sentFirm,

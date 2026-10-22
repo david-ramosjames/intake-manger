@@ -135,26 +135,21 @@ const SIZE_SET = new Set<string>(SIZE_TAGS);
 const TYPE_SET = new Set<string>(TYPE_TAGS);
 
 const CASE_TO_INJURY: Record<string, (typeof TYPE_TAGS)[number]> = {
-  "T: Commercial / 18 Wheeler": "T: Commercial / 18 Wheeler",
-  "T: Dog Bite": "T: Dog Bite",
-  "T: Non-PI Legal Matter": "T: Non-PI Legal Matter",
-  "T: Other Injury": "T: Other Injury",
-  "T: Pedestrian / Bicycle / Scooter": "T: Pedestrian / Bicycle / Scooter",
-  "T: Premises Liability": "T: Premises Liability",
-  "T: Sexual Assault / Child Abuse": "T: Sexual Assault / Child Abuse",
-  "T: TBD": "T: TBD",
-  "T: Work Injury": "T: Work Injury",
-  "T: Wrongful Death": "T: Wrongful Death",
+  "Commercial / 18 Wheeler": "T: Commercial / 18 Wheeler",
+  "Dog Bite": "T: Dog Bite",
+  "Non-PI Legal Matter": "T: Non-PI Legal Matter",
   "Other Injury": "T: Other Injury",
   "Pedestrian / Bicycle / Scooter": "T: Pedestrian / Bicycle / Scooter",
   "Premises Liability": "T: Premises Liability",
   "Sexual Assault / Child Abuse": "T: Sexual Assault / Child Abuse",
+  TBD: "T: TBD",
+  "Work Injury": "T: Work Injury",
   "Wrongful Death": "T: Wrongful Death",
 };
 
 /** The injury tag follows the case type. They are one choice. */
 export function injuryTagForCaseType(caseType: string | null | undefined): string {
-  const text = String(caseType || "").trim();
+  const text = String(caseType || "").trim().replace(/^T:\s*/i, "");
   return CASE_TO_INJURY[text] ?? "";
 }
 

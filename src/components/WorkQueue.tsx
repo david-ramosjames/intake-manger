@@ -148,10 +148,11 @@ const COLUMNS: { id: Exclude<Column, "type">; label: string; width: string }[] =
 ];
 
 const TYPE_SHORT: Record<string, string> = {
-  "Non-PI Legal Matter": "Non-PI",
-  "Commercial / 18 Wheeler": "18 Wheeler",
-  "No Injuries / Property Damage": "Property damage",
-  "Pedestrian / Bicycle / Scooter": "Ped / bike",
+  "T: Non-PI Legal Matter": "Non-PI",
+  "T: Commercial / 18 Wheeler": "18 Wheeler",
+  "T: Pedestrian / Bicycle / Scooter": "Ped / bike",
+  "T: Sexual Assault / Child Abuse": "Assault",
+  "T: TBD": "TBD",
   "Premises Liability": "Premises",
   "Sexual Assault / Child Abuse": "Assault",
 };
@@ -184,7 +185,7 @@ function shortType(text: string): string | null {
   if (official === "Unknown / No Response") return null;
   if (official) return TYPE_SHORT[official] ?? official;
   if (/resbal|slip|ca[ií]da|premises/i.test(text)) return "Premises";
-  if (/18-?\s*wheeler|tractor-?trailer/i.test(text)) return "18 Wheeler";
+  if (/18-?\s*wheeler|tractor-?trailer/i.test(text)) return "T: 18 Wheeler";
   if (/unknown|no response|not captured|unclassified|personal injury claim|^n\/?a$/i.test(text)) return null;
   const head = text.split(/\s*[\/|]\s*/)[0].replace(/\s+/g, " ").trim();
   if (!head) return null;

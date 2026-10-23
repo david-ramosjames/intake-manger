@@ -44,7 +44,18 @@ export function nameFromSummary(summary: string | null | undefined): string | nu
 
 function field(text: string, label: string): string | null {
   const match = text.match(new RegExp(`^${label}:\\s*(.+)$`, "im"));
-  return match?.[1]?.replace(/\*/g, "").trim() || null;
+  const labeled = match?.[1]?.replace(/\*/g, "").trim();
+  if (labeled) return labeled;
+  const stacked = text.match(new RegExp(`(?:^|\\n)${label}\\s*\\n([^\\n]+)`, "i"));
+  return stacked?.[1]?.replace(/\*/g, "").trim() || null;
+}
+
+function sectionAfter(text: string, label: string): string | null {
+  const match = text.match(new RegExp(`(?:^|\\n)${label}:?\\s*\\n([\\s\\S]+)`, "i"));
+  if (!match) return null;
+  const stop = match[1].search(/\n(?:First Name|Last Name|Email|Phone|Case Details)\s*(?:\n|:)/i);
+  const body = (stop >= 0 ? match[1].slice(0, stop) : match[1]).trim();
+  return body || null;
 }
 
 function phonesIn(text: string): string | null {
@@ -88,20 +99,22 @@ export function parseSlackLead(text: string): ParsedSlackLead {
   }
 
   const nameFrom = from?.replace(/\(.*\)/, "").replace(/<[^>]+>/g, "").trim() || null;
+  const stackedName = [field(body, "First Name"), field(body, "Last Name")].filter(Boolean).join(" ");
   const phone = field(body, "Phone") ?? phonesIn(from ?? "") ?? phonesIn(body);
   const email = field(body, "Email") ?? body.match(EMAIL)?.[0] ?? null;
   const named = nameFrom && !/^\+?\d/.test(nameFrom) && !JUNK.test(nameFrom) ? nameFrom : null;
   const accident = field(body, "Type of Accident") || field(body, "Accident");
+  const caseDetails = sectionAfter(body, "Case Details");
 
   return {
     kind,
     arrival,
-    name: cleanName(field(body, "Name") ?? undefined) ?? named ?? nameFromSummary(summaryBlock ?? body.slice(0, 500)),
+    name: cleanName(field(body, "Name") ?? undefined) ?? cleanName(stackedName) ?? named ?? nameFromSummary(summaryBlock ?? body.slice(0, 500)),
     phone,
     phoneE164: toE164(phone),
     email: email && !JUNK.test(email) ? email : null,
     handledBy,
-    summary: summaryBlock ? summaryBlock.slice(0, 2000) : body.slice(0, 2000),
+    summary: (summaryBlock || caseDetails || body).slice(0, 2000),
     quoLink: quo,
     tags,
     caseType: accident && !/^other$/i.test(accident) ? accident : null,

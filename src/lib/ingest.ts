@@ -14,10 +14,28 @@ type SlackEvent = {
   text?: string;
   bot_id?: string;
   app_id?: string;
+  attachments?: unknown[];
+  blocks?: unknown[];
 };
 
+function piece(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "text" in value) return piece((value as { text?: unknown }).text);
+  return "";
+}
+
+function chunkText(chunk: unknown): string[] {
+  if (!chunk || typeof chunk !== "object") return [];
+  const record = chunk as Record<string, unknown>;
+  const lines = [piece(record.text), piece(record.fallback), piece(record.pretext), piece(record.title), piece(record.value)];
+  const nested = [record.fields, record.elements].flatMap((group) => (Array.isArray(group) ? group.flatMap(chunkText) : []));
+  return [...lines, ...nested].filter(Boolean);
+}
+
 function flatten(event: SlackEvent): string {
-  return String(event.text ?? "")
+  const parts = [event.text ?? "", ...(event.attachments ?? []).flatMap(chunkText), ...(event.blocks ?? []).flatMap(chunkText)];
+  return parts
+    .join("\n")
     .replace(/<(https?:[^|>]+)\|([^>]+)>/g, "$2 ($1)")
     .replace(/<tel:[^|>]*\|([^>]+)>/g, "$1")
     .trim();
@@ -29,10 +47,10 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
     return { ignored: event.subtype };
   }
   if (event.channel !== LEAD_CHANNEL_ID) return { ignored: "other_channel" };
-  if (event.app_id && event.app_id === process.env.SLACK_APP_ID) return { ignored: "self" };
   if (!event.ts) return { ignored: "no_ts" };
 
   const text = flatten(event);
+  if (event.app_id && event.app_id === process.env.SLACK_APP_ID && !/website lead to contact/i.test(text)) return { ignored: "self" };
   if (!text) return { ignored: "empty" };
 
   const parentTs = event.thread_ts && event.thread_ts !== event.ts ? event.thread_ts : event.ts;
@@ -132,6 +150,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
   }
 
   const found = leadSourceFromText(text);
+  const website = /website lead to contact|new case is submitted/i.test(text);
   const { data: created, error } = await supabase
     .from("leads")
     .insert({
@@ -140,9 +159,10 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
       phone: parsed.phone,
       phone_e164: parsed.phoneE164,
       email: parsed.email,
-      lead_source: found?.source ?? null,
-      source_type: found?.type || null,
-      source_channel: parsed.arrival === "form" ? "Web form" : "Call",
+      lead_source: website ? "Website" : found?.source ?? null,
+      source_type: website ? "Marketing" : found?.type || null,
+      source_category: website ? "Search" : null,
+      source_channel: website || parsed.arrival === "form" ? "Web form" : "Call",
       lead_status: "New",
       kind: parsed.kind,
       arrival: parsed.arrival,

@@ -15,6 +15,8 @@ function asEvent(value: Record<string, unknown>) {
     text: stringOr("text"),
     bot_id: stringOr("bot_id"),
     app_id: stringOr("app_id"),
+    attachments: Array.isArray(value.attachments) ? value.attachments : [],
+    blocks: Array.isArray(value.blocks) ? value.blocks : [],
   };
 }
 

@@ -89,7 +89,7 @@ export async function loadNavTiles(supabase: SupabaseClient): Promise<NavTiles> 
       if (error) throw new Error(error.message);
       return (data ?? []) as OpenLead[];
     }, 2),
-    supabase.from("leads").select("phone, phone_e164").eq("signed_case", true).limit(1000),
+    supabase.from("leads").select("phone, phone_e164").eq("signed_case", true).eq("test", false).limit(1000),
     parallelRanges(async (from, to) => {
       const { data, error } = await supabase.from("lead_jobs").select("lead_id").eq("queue", "call").eq("status", "pending").order("id", { ascending: true }).range(from, to);
       if (error) throw new Error(error.message);
@@ -662,11 +662,12 @@ async function loadCallQuality(
   supabase: SupabaseClient,
   period: ResolvedPeriod,
 ): Promise<{ letter: "A" | "B" | "C" | "D" | "F"; score: number; count: number } | null> {
-  const rows: { score: number | null; lead_id: string | null; leads: { caller_class: string | null } | { caller_class: string | null }[] | null }[] = [];
+  const rows: { score: number | null; lead_id: string | null; leads: { caller_class: string | null; test?: boolean | null } | { caller_class: string | null; test?: boolean | null }[] | null }[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("call_grades")
-      .select("score, lead_id, leads(caller_class)")
+      .select("score, lead_id, leads!inner(caller_class, test)")
+      .eq("leads.test", false)
       .gte("occurred_at", period.fromIso)
       .lt("occurred_at", period.toIso)
       .range(from, from + 999);
@@ -678,7 +679,7 @@ async function loadCallQuality(
   const scores = rows
     .filter((row) => {
       const lead = Array.isArray(row.leads) ? row.leads[0] : row.leads;
-      return Boolean(row.lead_id) && isWorkLead({ caller_class: lead?.caller_class });
+      return Boolean(row.lead_id) && lead?.test !== true && isWorkLead({ caller_class: lead?.caller_class });
     })
     .map((row) => row.score ?? Number.NaN);
   const average = averageCallGrade(scores);
@@ -758,9 +759,10 @@ type LeadStamp = {
   slack_channel_id: string | null;
   slack_message_ts: string | null;
   slack_thread_ts: string | null;
+  test?: boolean | null;
 };
 
-const LEAD_STAMP = "id, lead_name, caller_class, summary, phone_e164, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+const LEAD_STAMP = "id, lead_name, caller_class, summary, phone_e164, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, test";
 
 /** The caller is an insurer or adjuster, not a person asking the firm for help. */
 function callerIsInsurer(text: string): boolean {
@@ -922,11 +924,15 @@ export async function loadSpeedDetail(
     if (isPracticeTestPhone(row.phone_e164)) continue;
     const at = new Date(row.occurred_at).getTime();
     if (!Number.isFinite(at)) continue;
-    if (row.lead_id) coveredCalls.add(row.lead_id);
     const phone = phoneTail(row.phone_e164);
     const linked = row.lead_id ? stamps.get(row.lead_id) ?? null : null;
-    const phoneLead = phone.length >= 10 ? (stampsByPhone.get(phone) ?? []).find((lead) => isWorkLead(lead)) ?? stampsByPhone.get(phone)?.[0] ?? null : null;
-    const lead = linked ?? phoneLead;
+    const matches = phone.length >= 10 ? stampsByPhone.get(phone) ?? [] : [];
+    const live = matches.filter((item) => item.test !== true);
+    if (linked?.test === true || (matches.length > 0 && live.length === 0)) continue;
+    const phoneLead = live.find((item) => isWorkLead(item)) ?? live[0] ?? null;
+    const lead = linked && linked.test !== true ? linked : phoneLead;
+    if (lead?.test === true) continue;
+    if (row.lead_id) coveredCalls.add(row.lead_id);
     if (lead) coveredCalls.add(lead.id);
     if (!intakeCaller(lead, row.content)) continue;
     const slack = (lead ? slackMessageUrl(lead) : null) || row.slack_permalink;

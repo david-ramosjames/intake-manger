@@ -1,20 +1,18 @@
-import { LeadForm } from "@/components/LeadForm";
-import { createLead } from "@/lib/actions";
-import { loadStaff } from "@/lib/identity";
+import { AddLeadForm } from "@/components/AddLeadForm";
+import { createQuickLead } from "@/lib/actions";
 import { requireStaff } from "@/lib/session";
+import { chicagoDay } from "@/lib/time";
 
 export default async function NewLeadPage() {
-  const { supabase } = await requireStaff();
-  const staff = await loadStaff(supabase);
+  await requireStaff();
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Add a lead</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Use this for a form fill or a call that is not already in the list. You can correct every
-        field later.
+        Enter the name, phone, and date. The lead opens in the work queue, and the rest of the fields are filled in there.
       </p>
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <LeadForm action={createLead} staff={staff} />
+        <AddLeadForm action={createQuickLead} defaultDate={chicagoDay(new Date())} />
       </div>
     </main>
   );

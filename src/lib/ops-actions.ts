@@ -1171,6 +1171,40 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   return {};
 }
 
+export async function markReferralSent(leadId: string): Promise<{ error?: string }> {
+  return recordReferralOutcome(leadId, "sent");
+}
+
+export async function markReferralDeclined(leadId: string): Promise<{ error?: string }> {
+  return recordReferralOutcome(leadId, "declined");
+}
+
+async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined"): Promise<{ error?: string }> {
+  const { supabase, email } = await requireStaff();
+  const { data: lead, error: leadError } = await supabase
+    .from("leads")
+    .select(`text_sequence_status, ${CLOSE_READY_COLUMNS}`)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  const sent = outcome === "sent";
+  try {
+    await closeLead(supabase, leadId, email, sent
+      ? { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" }
+      : { lead_status: "Lost", close_reason: "declined", event: "referral_declined", path: "declined" });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not record the referral." };
+  }
+  await stopFollowUp(supabase, leadId, sent ? "Referred out." : "Referral declined.");
+  if (lead.text_sequence_status === "active") {
+    await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
+  }
+  revalidatePath("/");
+  revalidatePath("/review");
+  revalidatePath(`/leads/${leadId}`);
+  return {};
+}
+
 export async function markReferralAlreadySent(leadId: string, formData: FormData): Promise<{ error?: string }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");

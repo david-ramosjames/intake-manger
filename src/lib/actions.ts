@@ -260,6 +260,70 @@ export async function createLead(formData: FormData) {
   redirect(`/leads/${data.id}`);
 }
 
+export async function createQuickLead(formData: FormData): Promise<{ error: string } | void> {
+  const { supabase, email } = await requireStaff();
+  const leadName = text(formData, "lead_name");
+  const phone = text(formData, "phone");
+  const leadDate = dateOrNull(formData, "lead_date");
+  if (!leadName) return { error: "Enter a name." };
+  const phoneE164 = toE164(phone);
+  if (!phoneE164) return { error: "Enter a full phone number." };
+  if (!leadDate) return { error: "Enter the date." };
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("leads")
+    .select("id, lead_name")
+    .eq("phone_e164", phoneE164)
+    .eq("test", false)
+    .limit(1);
+  if (existingError) return { error: existingError.message };
+  const existing = existingRows?.[0];
+  if (existing) {
+    return { error: `${existing.lead_name || "A lead"} already uses this phone. Open that lead instead of adding another.` };
+  }
+
+  const { data, error } = await supabase
+    .from("leads")
+    .insert({
+      lead_date: leadDate,
+      lead_name: leadName,
+      phone,
+      phone_e164: phoneE164,
+      lead_status: "New",
+      kind: "pursue",
+      arrival: "manual",
+      follow_up: true,
+      needs_verification: false,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Could not create the lead" };
+
+  await supabase.from("lead_events").insert({
+    lead_id: data.id,
+    event_type: "created",
+    actor: email,
+    payload: { lead_name: leadName, lead_status: "New" },
+  });
+  await enrollFollowUp(supabase, {
+    id: data.id,
+    kind: "pursue",
+    follow_up: true,
+    lead_name: leadName,
+    case_type: null,
+    signed_case: false,
+    case_id: null,
+    lead_status: "New",
+    arrival: "manual",
+    owner_name: null,
+    created_at: new Date().toISOString(),
+  });
+
+  revalidatePath("/");
+  revalidatePath("/work");
+  redirect(`/work?lead=${data.id}`);
+}
+
 export async function updateLead(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const { data: existing, error: loadError } = await supabase

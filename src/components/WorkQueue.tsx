@@ -14,7 +14,7 @@ import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSource
 import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, markReferralSent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -315,7 +315,10 @@ export function WorkQueue({
     if (target instanceof Element && target.closest("a, button, input, select, textarea, label")) return;
     pick(id);
   }
-  const selected = rows.find((row) => row.id === selectedId) ?? null;
+  const openRow = useRef<QueueRow | null>(null);
+  const selectedFromList = rows.find((row) => row.id === selectedId) ?? null;
+  if (selectedFromList) openRow.current = selectedFromList;
+  const selected = selectedFromList ?? (selectedId && openRow.current?.id === selectedId ? openRow.current : null);
   const phoneSearch = phoneTail(filtersNow.q).length >= 7;
   const shown = rows
     .filter((row) => phoneSearch || inArrivedRange(row.age, filtersNow.range))
@@ -1179,7 +1182,14 @@ function LeadFacts({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        <form id={formId} action={onSubmit} className="space-y-4">
+        <form
+          id={formId}
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onSubmit(new FormData(event.currentTarget));
+          }}
+        >
           <input type="hidden" name="lead_id" value={row.id} />
           {notLeadReason ? <input type="hidden" name="non_lead_reason" value={notLeadReason} /> : null}
           {row.signed ? null : (
@@ -1333,7 +1343,6 @@ function LeadFacts({
                   type="date"
                   name="consultation_date"
                   value={consultDate}
-                  required={!notALead && consulted === "yes"}
                   disabled={consulted !== "yes"}
                   onChange={(event) => {
                     mark("consult");
@@ -1386,7 +1395,6 @@ function LeadFacts({
             <FieldLabel label="Size">
               <select
                 value={sizeValue}
-                required={!notALead && desiredValue === "yes"}
                 disabled={desiredValue !== "yes"}
                 onChange={(event) => {
                   mark("desired");
@@ -1405,7 +1413,6 @@ function LeadFacts({
             <FieldLabel label="Decline reason">
               <select
                 value={declineValue}
-                required={!notALead && desiredValue === "no"}
                 disabled={desiredValue !== "no" || nonPi}
                 onChange={(event) => {
                   mark("desired");
@@ -1447,7 +1454,6 @@ function LeadFacts({
                   type="date"
                   name="date_signed"
                   value={signedDate}
-                  required={admin && signedChoice === "yes"}
                   disabled={!admin}
                   onChange={(event) => {
                     mark("signed");
@@ -1515,7 +1521,6 @@ function LeadFacts({
               field={
                 <select
                   value={lostValue === "yes" ? lostReason : ""}
-                  required={lostValue === "yes"}
                   disabled={lostLocked || lostValue !== "yes"}
                   onChange={(event) => {
                     mark("lost");
@@ -1547,6 +1552,7 @@ function LeadFacts({
       <div className="border-t border-slate-200 bg-white px-4 py-3">
         {error ? <p className="mb-2 text-sm text-red-700">{error}</p> : null}
         <button
+          type="submit"
           form={formId}
           disabled={pending}
           className={`${buttonPrimary} w-full ${saved && !pending ? "!bg-emerald-600 hover:!bg-emerald-700" : ""}`}
@@ -1581,7 +1587,8 @@ function QueueReferral({
   const [firmId, setFirmId] = useState("");
   const [language, setLanguage] = useState<"en" | "es">("en");
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<"send" | "sent" | "declined" | null>(null);
+  const [recorded, setRecorded] = useState<"sent" | "declined" | null>(null);
   const notify = useContext(DrawerNoticeContext);
   const partners = area
     ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
@@ -1608,7 +1615,7 @@ function QueueReferral({
       setError("Choose a referral type and a partner.");
       return;
     }
-    setPending(true);
+    setPending("send");
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
     const data = new FormData();
@@ -1623,12 +1630,35 @@ function QueueReferral({
         setError(result.error);
         return;
       }
-      notify({ tone: "saved", text: "Saved" });
+      setRecorded("sent");
+      notify({ tone: "saved", text: "Referral sent" });
     } catch (err) {
       notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the referral" });
       setError(err instanceof Error ? err.message : "Could not record the referral");
     } finally {
-      setPending(false);
+      setPending(null);
+    }
+  }
+
+  async function record(outcome: "sent" | "declined") {
+    setPending(outcome);
+    setError(null);
+    notify({ tone: "saving", text: "Saving…" });
+    try {
+      if (prepare) await prepare();
+      const result = outcome === "sent" ? await markReferralSent(row.id) : await markReferralDeclined(row.id);
+      if (result.error) {
+        notify({ tone: "error", text: result.error });
+        setError(result.error);
+        return;
+      }
+      setRecorded(outcome);
+      notify({ tone: "saved", text: outcome === "sent" ? "Referral sent" : "Referral declined" });
+    } catch (err) {
+      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the referral" });
+      setError(err instanceof Error ? err.message : "Could not record the referral");
+    } finally {
+      setPending(null);
     }
   }
 
@@ -1636,18 +1666,40 @@ function QueueReferral({
 
   return (
     <section ref={sectionRef}>
-      {row.referralSent ? (
+      {row.referralSent || recorded === "sent" ? (
         <p className="mt-2 text-sm font-medium text-emerald-800">
           Referral sent{row.referralFirm ? ` · ${row.referralFirm}` : ""}
         </p>
+      ) : recorded === "declined" ? (
+        <p className="mt-2 text-sm font-medium text-slate-700">Referral declined</p>
       ) : !open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="mt-2 cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]"
-        >
-          Send referral
-        </button>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={pending !== null}
+            onClick={() => setOpen(true)}
+            className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
+          >
+            Referral Requested
+          </button>
+          <button
+            type="button"
+            disabled={pending !== null}
+            onClick={() => void record("declined")}
+            className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
+          >
+            {pending === "declined" ? "Saving…" : "Referral Declined"}
+          </button>
+          <button
+            type="button"
+            disabled={pending !== null}
+            onClick={() => void record("sent")}
+            className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
+          >
+            {pending === "sent" ? "Saving…" : "Referral Sent"}
+          </button>
+          {error ? <p className="w-full text-sm text-red-700">{error}</p> : null}
+        </div>
       ) : firms.length === 0 ? (
         <p className="mt-2 text-sm text-slate-600">Add a firm on the Referrals page first.</p>
       ) : (
@@ -1703,19 +1755,11 @@ function QueueReferral({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={pending || !firm || !area}
+              disabled={pending !== null || !firm || !area}
               onClick={() => void submit("send")}
               className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
             >
-              {pending ? "Saving…" : "Send referral"}
-            </button>
-            <button
-              type="button"
-              disabled={pending || !firm || !area}
-              onClick={() => void submit("already")}
-              className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
-            >
-              Already sent
+              {pending === "send" ? "Saving…" : "Send referral"}
             </button>
           </div>
         </div>

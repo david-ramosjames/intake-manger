@@ -930,8 +930,7 @@ export async function loadSpeedDetail(
     const live = matches.filter((item) => item.test !== true);
     if (linked?.test === true || (matches.length > 0 && live.length === 0)) continue;
     const phoneLead = live.find((item) => isWorkLead(item)) ?? live[0] ?? null;
-    const lead = linked && linked.test !== true ? linked : phoneLead;
-    if (lead?.test === true) continue;
+    const lead = linked ?? phoneLead;
     if (row.lead_id) coveredCalls.add(row.lead_id);
     if (lead) coveredCalls.add(lead.id);
     if (!intakeCaller(lead, row.content)) continue;

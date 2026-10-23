@@ -9,7 +9,7 @@ export default async function NewLeadPage() {
     <main className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-2xl font-semibold tracking-tight text-navy">Add a lead</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Enter the name, phone, and date. The lead opens in the work queue, and the rest of the fields are filled in there.
+        Same details as the work queue. A name and phone are enough to save, and the lead opens in the queue.
       </p>
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <AddLeadForm action={createQuickLead} defaultDate={chicagoDay(new Date())} />

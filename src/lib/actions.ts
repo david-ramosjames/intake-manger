@@ -5,9 +5,11 @@ import { redirect } from "next/navigation";
 import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
 import { contractSent } from "./desired";
-import { canonicalLeadSource, displayContact, isSourceType } from "./leads";
-import { MANAGED_CALLRAIL_TAGS, injuryTagForCaseType, tagsFromSelection } from "./tags";
+import { canonicalLeadSource, displayContact, isSourceType, officialCaseType, standardLeadEmail } from "./leads";
+import { isSourceCategory } from "./source-options";
+import { MANAGED_CALLRAIL_TAGS, QUALIFIED_NO, QUALIFIED_YES, injuryTagForCaseType, tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
+import { chicagoDay } from "./time";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
 import { requireStaff } from "./session";
 
@@ -264,11 +266,54 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
   const { supabase, email } = await requireStaff();
   const leadName = text(formData, "lead_name");
   const phone = text(formData, "phone");
-  const leadDate = dateOrNull(formData, "lead_date");
   if (!leadName) return { error: "Enter a name." };
   const phoneE164 = toE164(phone);
   if (!phoneE164) return { error: "Enter a full phone number." };
-  if (!leadDate) return { error: "Enter the date." };
+  const leadDate = dateOrNull(formData, "lead_date") ?? chicagoDay(new Date());
+
+  const consulted = text(formData, "consulted");
+  const consultationDate = dateOrNull(formData, "consultation_date");
+  if (consulted === "yes" && !consultationDate) return { error: "Enter the consultation date." };
+  const signedDecision = text(formData, "signed_decision");
+  const signedDate = dateOrNull(formData, "date_signed");
+  if (signedDecision === "yes" && !signedDate) return { error: "Enter the signed date." };
+
+  const caseTypeRaw = text(formData, "case_type");
+  const officialType = officialCaseType(caseTypeRaw);
+  const caseType = officialType && officialType !== "Unknown / No Response" ? officialType : caseTypeRaw;
+  const nonPi = caseType === "Non-PI Legal Matter";
+  let qualifiedDecision = text(formData, "qualified_decision");
+  let desiredDecision = text(formData, "desired_decision");
+  let declineTag = text(formData, "decline_tag") ?? "";
+  let sizeTag = text(formData, "size_tag") ?? "";
+  if (nonPi) {
+    qualifiedDecision = "no";
+    desiredDecision = "no";
+    declineTag = "DEC: Non-PI Legal Matter";
+    sizeTag = "";
+  } else if (qualifiedDecision === "no") {
+    desiredDecision = "no";
+    sizeTag = "";
+  }
+  if (desiredDecision === "yes") declineTag = "";
+  if (desiredDecision !== "yes") sizeTag = "";
+
+  const chosenType = text(formData, "source_type");
+  const sourceType = isSourceType(chosenType) && chosenType !== "Unknown" ? chosenType : null;
+  const chosenCategory = text(formData, "source_category");
+  const sourceCategory = isSourceCategory(chosenCategory) ? chosenCategory : null;
+  const writtenSource = canonicalLeadSource(text(formData, "lead_source"));
+  const tagged = tagsFromSelection({
+    qualified: qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "",
+    coverage: [],
+    decline: desiredDecision === "no" ? declineTag : "",
+    desired: desiredDecision === "yes",
+    signed: signedDecision === "yes",
+    nonPi,
+    size: sizeTag,
+    injuryType: injuryTagForCaseType(caseType),
+    requireQualified: false,
+  });
 
   const { data: existingRows, error: existingError } = await supabase
     .from("leads")
@@ -282,6 +327,7 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
     return { error: `${existing.lead_name || "A lead"} already uses this phone. Open that lead instead of adding another.` };
   }
 
+  const signed = signedDecision === "yes";
   const { data, error } = await supabase
     .from("leads")
     .insert({
@@ -289,11 +335,28 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
       lead_name: leadName,
       phone,
       phone_e164: phoneE164,
+      email: standardLeadEmail(text(formData, "email")),
+      lead_source: writtenSource.source || null,
+      source_type: sourceType,
+      source_category: sourceCategory,
+      case_type: caseType,
       lead_status: "New",
       kind: "pursue",
       arrival: "manual",
-      follow_up: true,
+      follow_up: !signed,
       needs_verification: false,
+      identity_status: "confirmed",
+      consultation: consulted === "yes" ? "staff" : consulted === "no" ? "no" : null,
+      consultation_date: consulted === "yes" ? consultationDate : null,
+      qualified: tagged.qualified,
+      desired_case: desiredDecision === "yes" ? true : desiredDecision === "no" ? false : null,
+      desired_source: desiredDecision === "yes" || desiredDecision === "no" ? "staff" : null,
+      signed_case: signed,
+      date_signed: signed ? signedDate : null,
+      signed_at: signed ? new Date().toISOString() : null,
+      callrail_tags: tagged.tags,
+      decline_reason: tagged.decline_reason,
+      caller_class: nonPi ? "non_pi" : null,
     })
     .select("id")
     .single();
@@ -308,10 +371,10 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
   await enrollFollowUp(supabase, {
     id: data.id,
     kind: "pursue",
-    follow_up: true,
+    follow_up: !signed,
     lead_name: leadName,
-    case_type: null,
-    signed_case: false,
+    case_type: caseType,
+    signed_case: signed,
     case_id: null,
     lead_status: "New",
     arrival: "manual",

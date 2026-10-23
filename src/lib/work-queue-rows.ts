@@ -171,6 +171,7 @@ function toQueueRow(
     nextCall: { id: string; dueAt: string; tag: string | null; position: number } | undefined;
     nextTextId: string | null;
     sentFirm: string | null;
+    sentStatus: string | null;
     outside: { quo: string | null; slack: string | null };
     callSteps: (CallStep & { sequence: string })[];
     docket: string;
@@ -257,6 +258,7 @@ function toQueueRow(
     practiceArea: lead.practice_area,
     referralSent: Boolean(input.sentFirm) || lead.lead_status === "Referred" || lead.close_reason === "referred",
     referralFirm: input.sentFirm,
+    referralStatus: input.sentStatus || null,
     callerClass: lead.caller_class,
     confirmSigned: signatureNeedsConfirm(lead),
     lastLabel: lastContacted(outreach),
@@ -407,10 +409,12 @@ export async function loadWorkQueueRows(
   };
   const firmName = new Map(destinations.map((destination) => [destination.id, destination.name]));
   const sentFirm = new Map<string, string>();
-  for (const send of [...((sendRows ?? []) as { lead_id: string; destination_id: string; created_at: string }[])].sort((a, b) =>
+  const sentStatus = new Map<string, string>();
+  for (const send of [...((sendRows ?? []) as { lead_id: string; destination_id: string; status: string; created_at: string }[])].sort((a, b) =>
     a.created_at.localeCompare(b.created_at),
   )) {
     sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+    sentStatus.set(send.lead_id, send.status || "sent");
   }
 
   const idSet = new Set(ids);
@@ -479,6 +483,7 @@ export async function loadWorkQueueRows(
       nextCall: nextCall.get(lead.id),
       nextTextId: nextText.get(lead.id)?.id ?? null,
       sentFirm: sentFirm.get(lead.id) || null,
+      sentStatus: sentStatus.get(lead.id) || null,
       outside: outsideLinks.get(lead.id) ?? { quo: null, slack: null },
       callSteps,
       docket,

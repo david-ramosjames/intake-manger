@@ -266,6 +266,7 @@ function fallbackRow(job: OpenCallCard): QueueRow {
     practiceArea: null,
     referralSent: false,
     referralFirm: null,
+    referralStatus: null,
     callerClass: null,
     confirmSigned: false,
     lastLabel: "Never",

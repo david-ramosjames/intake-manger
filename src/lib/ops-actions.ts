@@ -1246,6 +1246,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     note: "Already sent outside Intake Manager",
     language,
     message: null,
+    status: "already_sent",
   });
   if (error) return { error: error.message };
   await supabase.from("lead_events").insert({
@@ -1253,6 +1254,89 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     event_type: "referred",
     actor: email,
     payload: { destination: destination.name, language, recorded: true },
+  });
+  revalidatePath("/");
+  revalidatePath("/review");
+  revalidatePath(`/leads/${leadId}`);
+  return {};
+}
+
+export async function markReferralDeclined(leadId: string, formData: FormData): Promise<{ error?: string }> {
+  const { supabase, email } = await requireStaff();
+  const area = text(formData, "practice_area") || "miscellaneous";
+  if (!isPracticeArea(area)) return { error: "Choose the legal practice area." };
+  
+  const { data: lead, error: leadError } = await supabase
+    .from("leads")
+    .select(CLOSE_READY_COLUMNS)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  
+  // Before validation, update desired_case and decline reason if provided in form
+  // This allows users to set these fields and decline referral in one click
+  const desiredCase = text(formData, "desired_case");
+  const declineTag = text(formData, "decline_tag");
+  if (desiredCase === "no" || declineTag) {
+    const updateData: { desired_case?: boolean; callrail_tags?: string[] } = {};
+    if (desiredCase === "no") {
+      updateData.desired_case = false;
+      lead.desired_case = false;
+    }
+    if (declineTag && lead.callrail_tags) {
+      // Remove any existing decline tags and add the new one
+      const withoutDecline = lead.callrail_tags.filter((tag: string) => !tag.startsWith("DEC:"));
+      updateData.callrail_tags = [...withoutDecline, declineTag];
+      lead.callrail_tags = updateData.callrail_tags;
+    } else if (declineTag) {
+      updateData.callrail_tags = [declineTag];
+      lead.callrail_tags = [declineTag];
+    }
+    const { error: preUpdateError } = await supabase
+      .from("leads")
+      .update(updateData)
+      .eq("id", leadId);
+    if (preUpdateError) return { error: preUpdateError.message };
+  }
+  
+  try {
+    assertCloseReady(lead, "declined");
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Finish the lead before closing it." };
+  }
+  const outside = area !== "personal_injury";
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      lead_status: "Referred",
+      follow_up: false,
+      sequence: "stop",
+      close_reason: "referred",
+      close_suggestion: null,
+      practice_area: area,
+      referral_opportunity: true,
+      caller_class: outside ? "non_pi" : null,
+    })
+    .eq("id", leadId);
+  if (updateError) return { error: updateError.message };
+  await stopFollowUp(supabase, leadId, "Lead declined referral.");
+  
+  // For declined referrals, destination_id is now nullable
+  const { error } = await supabase.from("referral_sends").insert({
+    lead_id: leadId,
+    destination_id: null,
+    actor: email,
+    note: "Lead declined referral offer",
+    language: "en",
+    message: null,
+    status: "declined",
+  });
+  if (error) return { error: error.message };
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "referred",
+    actor: email,
+    payload: { declined: true },
   });
   revalidatePath("/");
   revalidatePath("/review");

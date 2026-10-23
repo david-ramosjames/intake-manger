@@ -14,7 +14,7 @@ import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSource
 import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -83,6 +83,7 @@ export type QueueRow = {
   practiceArea: string | null;
   referralSent: boolean;
   referralFirm: string | null;
+  referralStatus: string | null;
   callerClass: string | null;
   confirmSigned: boolean;
   lastLabel: string;
@@ -1632,22 +1633,58 @@ function QueueReferral({
     }
   }
 
+  async function submitDeclined() {
+    setPending(true);
+    setError(null);
+    notify({ tone: "saving", text: "Saving…" });
+    const data = new FormData();
+    data.set("practice_area", row.practiceArea || "miscellaneous");
+    try {
+      if (prepare) await prepare();
+      const result = await markReferralDeclined(row.id, data);
+      if (result.error) {
+        notify({ tone: "error", text: result.error });
+        setError(result.error);
+        return;
+      }
+      notify({ tone: "saved", text: "Saved" });
+    } catch (err) {
+      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the declined referral" });
+      setError(err instanceof Error ? err.message : "Could not record the declined referral");
+    } finally {
+      setPending(false);
+    }
+  }
+
   const fieldClass = "mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900 disabled:cursor-default disabled:bg-slate-100 disabled:text-slate-400";
 
   return (
     <section ref={sectionRef}>
       {row.referralSent ? (
         <p className="mt-2 text-sm font-medium text-emerald-800">
-          Referral sent{row.referralFirm ? ` · ${row.referralFirm}` : ""}
+          {row.referralStatus === "declined"
+            ? "Referral declined"
+            : `Referral ${row.referralStatus === "already_sent" ? "already sent" : "sent"}`}
+          {row.referralFirm ? ` · ${row.referralFirm}` : ""}
         </p>
       ) : !open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="mt-2 cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]"
-        >
-          Send referral
-        </button>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]"
+          >
+            Referral Requested
+          </button>
+          <button
+            type="button"
+            onClick={() => void submitDeclined()}
+            disabled={pending}
+            className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
+          >
+            Referral Declined
+          </button>
+        </div>
       ) : firms.length === 0 ? (
         <p className="mt-2 text-sm text-slate-600">Add a firm on the Referrals page first.</p>
       ) : (

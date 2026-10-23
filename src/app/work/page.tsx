@@ -531,19 +531,23 @@ export default async function LeadListPage({
       ? eachSlice(leadIds, 100, async (slice) => {
           const { data } = await supabase
             .from("referral_sends")
-            .select("lead_id, destination_id, created_at")
+            .select("lead_id, destination_id, status, created_at")
             .in("lead_id", slice);
-          return (data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
+          return (data ?? []) as { lead_id: string; destination_id: string; status: string; created_at: string }[];
         }).then((rows) => ({ data: rows, error: null }))
-      : Promise.resolve({ data: [] as { lead_id: string; destination_id: string; created_at: string }[], error: null }),
+      : Promise.resolve({ data: [] as { lead_id: string; destination_id: string; status: string; created_at: string }[], error: null }),
     leadIds.length ? supabase.rpc("work_queue_activity", { lead_ids: leadIds }) : Promise.resolve({ data: [] as QueueActivity[], error: null }),
     loadPendingJobs(supabase, idSet),
     loadLeadCallJobs(supabase, leadIds),
     loadStaffTouchedIds(supabase, leadIds),
   ]);
-  const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
+  const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string; status: string; created_at: string }[];
   sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
-  for (const send of sendRows) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+  const sentStatus = new Map<string, string>();
+  for (const send of sendRows) {
+    sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+    sentStatus.set(send.lead_id, send.status || "sent");
+  }
 
   if (leadIds.length && !activity.error) {
     const activityRows = (activity.data ?? []) as QueueActivity[];
@@ -785,6 +789,7 @@ export default async function LeadListPage({
       practiceArea: row.lead.practice_area,
       referralSent: sentFirm.has(row.lead.id) || row.lead.lead_status === "Referred" || row.lead.close_reason === "referred",
       referralFirm: sentFirm.get(row.lead.id) || null,
+      referralStatus: sentStatus.get(row.lead.id) || null,
       callerClass: row.lead.caller_class,
       confirmSigned: signatureNeedsConfirm(row.lead),
       lastLabel: lastContacted(row.outreach),

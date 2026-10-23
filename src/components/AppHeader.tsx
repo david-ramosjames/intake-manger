@@ -23,6 +23,7 @@ const ADMIN_LINKS = [
   { href: "/outreach-timeline", label: "Timeline" },
   { href: "/how-it-fits", label: "How it fits" },
   { href: "/staff", label: "Staff" },
+  { href: "/export", label: "Export" },
 ];
 
 function isActive(pathname: string, href: string): boolean {

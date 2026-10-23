@@ -1070,6 +1070,33 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  
+  // Before validation, update desired_case and decline reason if provided in form
+  // This allows users to set these fields and send referral in one click
+  const desiredCase = text(formData, "desired_case");
+  const declineTag = text(formData, "decline_tag");
+  if (desiredCase === "no" || declineTag) {
+    const updateData: { desired_case?: boolean; callrail_tags?: string[] } = {};
+    if (desiredCase === "no") {
+      updateData.desired_case = false;
+      lead.desired_case = false;
+    }
+    if (declineTag && lead.callrail_tags) {
+      // Remove any existing decline tags and add the new one
+      const withoutDecline = lead.callrail_tags.filter((tag: string) => !tag.startsWith("DEC:"));
+      updateData.callrail_tags = [...withoutDecline, declineTag];
+      lead.callrail_tags = updateData.callrail_tags;
+    } else if (declineTag) {
+      updateData.callrail_tags = [declineTag];
+      lead.callrail_tags = [declineTag];
+    }
+    const { error: preUpdateError } = await supabase
+      .from("leads")
+      .update(updateData)
+      .eq("id", leadId);
+    if (preUpdateError) return { error: preUpdateError.message };
+  }
+  
   try {
     assertCloseReady(lead, "declined");
   } catch (err) {
@@ -1164,6 +1191,33 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  
+  // Before validation, update desired_case and decline reason if provided in form
+  // This allows users to set these fields and send referral in one click
+  const desiredCase = text(formData, "desired_case");
+  const declineTag = text(formData, "decline_tag");
+  if (desiredCase === "no" || declineTag) {
+    const updateData: { desired_case?: boolean; callrail_tags?: string[] } = {};
+    if (desiredCase === "no") {
+      updateData.desired_case = false;
+      lead.desired_case = false;
+    }
+    if (declineTag && lead.callrail_tags) {
+      // Remove any existing decline tags and add the new one
+      const withoutDecline = lead.callrail_tags.filter((tag: string) => !tag.startsWith("DEC:"));
+      updateData.callrail_tags = [...withoutDecline, declineTag];
+      lead.callrail_tags = updateData.callrail_tags;
+    } else if (declineTag) {
+      updateData.callrail_tags = [declineTag];
+      lead.callrail_tags = [declineTag];
+    }
+    const { error: preUpdateError } = await supabase
+      .from("leads")
+      .update(updateData)
+      .eq("id", leadId);
+    if (preUpdateError) return { error: preUpdateError.message };
+  }
+  
   try {
     assertCloseReady(lead, "declined");
   } catch (err) {

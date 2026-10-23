@@ -79,6 +79,7 @@ export async function loadNavTiles(supabase: SupabaseClient): Promise<NavTiles> 
       const { data, error } = await supabase
         .from("leads")
         .select(OPEN_COLUMNS)
+        .eq("test", false)
         .or("caller_class.is.null,caller_class.eq.non_pi")
         .not("lead_status", "in", "(Signed,Promoted,Lost,Referred)")
         .eq("signed_case", false)
@@ -439,6 +440,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
   const { data, error } = await supabase
     .from("leads")
     .select(COHORT_COLUMNS)
+    .eq("test", false)
     .or(`and(created_at.gte."${period.fromIso}",created_at.lt."${period.toIso}"),and(lead_date.gte.${period.start},lead_date.lte.${period.end})`)
     .limit(2000);
   if (error) throw new Error(error.message);
@@ -631,6 +633,7 @@ async function countConsults(supabase: SupabaseClient, period: ResolvedPeriod): 
   const { data, error } = await supabase
     .from("leads")
     .select("id, caller_class, phone, phone_e164")
+    .eq("test", false)
     .gte("consultation_date", period.start)
     .lte("consultation_date", period.end)
     .limit(2000);
@@ -642,6 +645,7 @@ async function countSigned(supabase: SupabaseClient, period: ResolvedPeriod): Pr
   const { data, error } = await supabase
     .from("leads")
     .select("id, caller_class, phone, phone_e164, date_signed, signed_at")
+    .eq("test", false)
     .or(`and(date_signed.gte.${period.start},date_signed.lte.${period.end}),and(signed_at.gte."${period.fromIso}",signed_at.lt."${period.toIso}")`)
     .limit(2000);
   if (error) throw new Error(error.message);
@@ -855,6 +859,7 @@ export async function loadSpeedDetail(
       const { data, error } = await supabase
         .from("leads")
         .select("id, lead_name, phone, phone_e164, created_at, lead_date, arrival, lead_source, summary, caller_class, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts")
+        .eq("test", false)
         .or(`and(created_at.gte."${period.fromIso}",created_at.lt."${period.toIso}"),and(lead_date.gte.${period.start},lead_date.lte.${period.end})`)
         .range(from, to);
       if (error) throw new Error(error.message);

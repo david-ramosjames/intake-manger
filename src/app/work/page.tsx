@@ -319,6 +319,7 @@ async function loadOpenWorkLeads(
     const { data, error } = await supabase
       .from("leads")
       .select(LIST_COLUMNS)
+      .eq("test", false)
       .or("caller_class.is.null,caller_class.eq.non_pi")
       .not("lead_status", "in", "(Signed,Promoted,Lost,Referred)")
       .eq("signed_case", false)
@@ -344,6 +345,7 @@ async function searchLeads(
     const { data: matches } = await supabase
       .from("leads")
       .select(LIST_COLUMNS)
+      .eq("test", false)
       .or(`phone_e164.ilike.%${digits}%,phone.ilike.%${digits}%,phone.ilike.%${pattern}%`)
       .limit(40);
     return (matches ?? []) as ListLead[];
@@ -352,6 +354,7 @@ async function searchLeads(
     const { data: matches } = await supabase
       .from("leads")
       .select(LIST_COLUMNS)
+      .eq("test", false)
       .or(`lead_name.ilike.%${safe}%,email.ilike.%${safe}%,case_number.ilike.%${safe}%`)
       .limit(40);
     return (matches ?? []) as ListLead[];
@@ -419,6 +422,7 @@ export default async function LeadListPage({
   const closedQuery = supabase
     .from("leads")
     .select(LIST_COLUMNS)
+    .eq("test", false)
     .or("caller_class.is.null,caller_class.eq.non_pi")
     .or("lead_status.in.(Signed,Promoted,Lost,Referred),signed_case.eq.true,case_id.not.is.null")
     .order("lead_date", { ascending: false, nullsFirst: false })
@@ -430,6 +434,7 @@ export default async function LeadListPage({
       ? supabase
           .from("leads")
           .select(LIST_COLUMNS)
+          .eq("test", false)
           .in("caller_class", ["spam", "vendor", "employment", "existing_client", "insurance", "other_law_office", "wrong_number", "return_call"])
           .order("lead_date", { ascending: false, nullsFirst: false })
           .limit(300)
@@ -437,16 +442,19 @@ export default async function LeadListPage({
     supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
+      .eq("test", false)
       .in("caller_class", ["spam", "vendor", "employment", "existing_client", "insurance", "other_law_office", "wrong_number", "return_call"]),
     supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
+      .eq("test", false)
       .or("caller_class.is.null,caller_class.eq.non_pi")
       .or("signed_case.eq.true,lead_status.eq.Signed")
       .gte("lead_date", since),
     supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
+      .eq("test", false)
       .or("caller_class.is.null,caller_class.eq.non_pi")
       .in("lead_status", ["Lost", "Referred", "Promoted"])
       .eq("signed_case", false)
@@ -454,6 +462,7 @@ export default async function LeadListPage({
     supabase
       .from("leads")
       .select("id", { count: "exact", head: true })
+      .eq("test", false)
       .or("caller_class.is.null,caller_class.eq.non_pi")
       .gte("lead_date", since)
       .or('desired_case.eq.true,agreement_sent_at.not.is.null,agreement_status.in.(sent,viewed,signed,completed),signed_case.eq.true,lead_status.eq.Signed,callrail_tags.cs.{"CVR DESIRED"}'),
@@ -470,7 +479,7 @@ export default async function LeadListPage({
   const needsPractice = funnel !== "closed" && !workLeads.some((lead) => isPracticeTestPhone(lead.phone_e164 || lead.phone));
   const [practiceRows, searched, selectedRows] = await Promise.all([
     needsPractice
-      ? supabase.from("leads").select(LIST_COLUMNS).eq("phone_e164", "+17654183805").limit(1)
+      ? supabase.from("leads").select(LIST_COLUMNS).eq("test", false).eq("phone_e164", "+17654183805").limit(1)
       : Promise.resolve({ data: [] as ListLead[] }),
     searchLeads(supabase, q),
     selectedId

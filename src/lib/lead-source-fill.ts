@@ -111,11 +111,12 @@ export async function fillLeadSources(supabase: SupabaseClient, leads: SourceLea
 export async function fillOutstandingLeadSources(supabase: SupabaseClient): Promise<number> {
   const columns = "id, lead_source, source_type, summary, case_detail, source_note, lead_date, created_at, callrail_call_id";
   const [{ data: blank }, { data: messy }, { data: typeless }, { data: callrail }] = await Promise.all([
-    supabase.from("leads").select(columns).is("lead_source", null).order("lead_date", { ascending: false, nullsFirst: false }).limit(80),
-    supabase.from("leads").select(columns).ilike("lead_source", "%/%").limit(40),
+    supabase.from("leads").select(columns).eq("test", false).is("lead_source", null).order("lead_date", { ascending: false, nullsFirst: false }).limit(80),
+    supabase.from("leads").select(columns).eq("test", false).ilike("lead_source", "%/%").limit(40),
     supabase
       .from("leads")
       .select(columns)
+      .eq("test", false)
       .not("lead_source", "is", null)
       .is("source_type", null)
       .order("lead_date", { ascending: false, nullsFirst: false })
@@ -123,6 +124,7 @@ export async function fillOutstandingLeadSources(supabase: SupabaseClient): Prom
     supabase
       .from("leads")
       .select(columns)
+      .eq("test", false)
       .is("lead_source", null)
       .or("callrail_call_id.not.is.null,case_detail.ilike.%callrail.com%")
       .order("lead_date", { ascending: false, nullsFirst: false })

@@ -185,6 +185,7 @@ export async function fillOutstandingTalkedWith(supabase: SupabaseClient): Promi
   const { data, error } = await supabase
     .from("leads")
     .select("id, owner_name, lead_name, consultation_date, summary, case_detail")
+    .eq("test", false)
     .not("consultation_date", "is", null)
     .order("consultation_date", { ascending: false })
     .limit(120);

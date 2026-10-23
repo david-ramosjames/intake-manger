@@ -130,6 +130,7 @@ export type ExportQuery = {
   signed: ExportSigned;
   owner: string;
   includeTest: boolean;
+  includeMarkedTest: boolean;
 };
 
 const CLOSE_REASON_LABEL: Record<string, string> = {
@@ -271,6 +272,7 @@ export function parseExportForm(form: FormData): ExportQuery {
     signed: oneOf(form.get("signed"), EXPORT_SIGNED, "any"),
     owner: String(form.get("owner") ?? "").trim(),
     includeTest: form.get("include_test") === "yes",
+    includeMarkedTest: form.get("include_marked_test") === "yes",
   };
 }
 

@@ -66,6 +66,7 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     .is("agreement_next_reminder_at", null)
     .gte("agreement_reminder_count", SIGN_SERIES_LENGTH)
     .eq("signed_case", false)
+    .eq("test", false)
     .is("case_id", null)
     .not("lead_status", "in", CLOSED_LIST);
   if (error) throw new Error(error.message);
@@ -142,6 +143,7 @@ async function mergeDuplicatePhones(supabase: SupabaseClient): Promise<number> {
   const { data: recent, error } = await supabase
     .from("leads")
     .select("phone_e164")
+    .eq("test", false)
     .gte("created_at", since)
     .not("phone_e164", "is", null)
     .limit(1000);
@@ -152,6 +154,7 @@ async function mergeDuplicatePhones(supabase: SupabaseClient): Promise<number> {
   const { data, error: rowsError } = await supabase
     .from("leads")
     .select("id, phone_e164, signed_case, case_id, lead_status, agreement_signing_url, case_type, case_detail, lead_name, email, summary, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, created_at")
+    .eq("test", false)
     .in("phone_e164", phones);
   if (rowsError) throw new Error(rowsError.message);
 
@@ -268,6 +271,7 @@ async function closeSignedLeads(supabase: SupabaseClient): Promise<number> {
     .from("leads")
     .select(`id, ${CLOSE_READY_COLUMNS}`)
     .eq("signed_case", true)
+    .eq("test", false)
     .not("lead_status", "in", CLOSED_LIST)
     .not("phone_e164", "eq", "+17654183805");
   if (error) throw new Error(error.message);
@@ -301,6 +305,7 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
     .select(`id, ${CLOSE_READY_COLUMNS}`)
     .not("lead_status", "in", CLOSED_LIST)
     .eq("signed_case", false)
+    .eq("test", false)
     .is("case_id", null)
     .is("close_suggestion", null)
     .order("created_at", { ascending: true })

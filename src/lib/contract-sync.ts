@@ -55,7 +55,8 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
 
   const { data: leads, error: leadError } = await supabase
     .from("leads")
-    .select("id, lead_name, phone_e164, signed_case, agreement_status, agreement_signing_url, agreement_reminder_count, created_at")
+    .select("id, lead_name, phone_e164, signed_case, agreement_status, agreement_signing_url, agreement_reminder_count, created_at, test")
+    .eq("test", false)
     .in("phone_e164", [...latest.keys()])
     .order("created_at", { ascending: false });
   if (leadError) throw new Error(leadError.message);

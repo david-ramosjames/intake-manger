@@ -407,6 +407,7 @@ export type Lead = {
   form_fill_closed_at: string | null;
   created_at: string;
   updated_at: string;
+  test?: boolean;
 };
 
 export type LeadEvent = {

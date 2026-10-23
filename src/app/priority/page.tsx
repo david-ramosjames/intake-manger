@@ -143,6 +143,7 @@ export default async function PriorityPage() {
       .select(COLUMNS)
       .not("lead_status", "in", "(Lost,Referred)")
       .eq("signed_case", false)
+      .eq("test", false)
       .or("and(case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed,signed,completed)")
       .order("lead_date", { ascending: false, nullsFirst: false })
       .limit(300),

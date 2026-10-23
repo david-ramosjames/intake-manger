@@ -18,16 +18,18 @@ type Row = {
 export default async function VerifyPage() {
   const { supabase } = await requireStaff();
   const [{ count }, { data, error }, identityResult] = await Promise.all([
-    supabase.from("leads").select("id", { count: "exact", head: true }).eq("needs_verification", true),
+    supabase.from("leads").select("id", { count: "exact", head: true }).eq("needs_verification", true).eq("test", false),
     supabase
       .from("leads")
       .select("id, lead_name, phone, phone_e164, lead_status, case_type, lead_date, identity_status")
+      .eq("test", false)
       .not("phone_e164", "is", null)
       .order("lead_date", { ascending: true, nullsFirst: false })
       .limit(1000),
     supabase
       .from("leads")
       .select("id, lead_name, phone, identity_status, identity_evidence, lead_status")
+      .eq("test", false)
       .eq("identity_status", "needs_review")
       .order("updated_at", { ascending: false })
       .limit(100),

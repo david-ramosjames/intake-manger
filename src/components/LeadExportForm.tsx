@@ -151,6 +151,10 @@ export function LeadExportForm({ owners }: { owners: string[] }) {
           <input type="checkbox" name="include_test" value="yes" className="accent-navy" />
           Include practice test numbers
         </label>
+        <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" name="include_marked_test" value="yes" className="accent-navy" />
+          Include pre-launch test leads
+        </label>
       </section>
 
       <button type="submit" disabled={fields.size === 0} className={buttonPrimary}>

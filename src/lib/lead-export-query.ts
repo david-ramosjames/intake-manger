@@ -63,6 +63,7 @@ function applyFilters(request: LeadQuery, query: ExportQuery): LeadQuery {
   request = applyChoice(request, "desired_case", query.desired);
   if (query.signed === "yes") request = request.eq("signed_case", true);
   if (query.signed === "no") request = request.eq("signed_case", false);
+  if (!query.includeMarkedTest) request = request.eq("test", false);
   if (query.owner === "__none__") request = request.is("owner_name", null);
   else if (query.owner) request = request.eq("owner_name", query.owner);
   return request;

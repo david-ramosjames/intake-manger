@@ -45,6 +45,7 @@ type LeadRow = {
   priority: boolean;
   owner_name: string | null;
   consultation_date: string | null;
+  test?: boolean | null;
 };
 
 function textSendingLive(): boolean {
@@ -89,7 +90,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
   // Newly due jobs open in this half hour. Older pending calls are still checked
   // against the call log so Open calls can clear ones that already got a return.
   const slackFloor = new Date(Date.now() - 30 * 60_000).toISOString();
-  const dueSelect = "id, lead_id, queue, body, due_at, notified_at, mention, assigned_name";
+  const dueSelect = "id, lead_id, queue, body, due_at, notified_at, mention, assigned_name, leads!inner(test)";
 
   let freshJobs = supabase
     .from("lead_jobs")
@@ -119,6 +120,9 @@ export async function dispatchDue(supabase: SupabaseClient) {
     // would fill this run before the test number is reached.
     freshJobs = testIds.length ? freshJobs.in("lead_id", testIds) : freshJobs.limit(0);
     waitingJobs = testIds.length ? waitingJobs.in("lead_id", testIds) : waitingJobs.limit(0);
+  } else {
+    freshJobs = freshJobs.eq("leads.test", false);
+    waitingJobs = waitingJobs.eq("leads.test", false);
   }
   const [{ data: fresh, error }, { data: waiting, error: waitingError }] = await Promise.all([freshJobs, waitingJobs]);
   if (error) throw new Error(error.message);
@@ -129,7 +133,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
   const { data: leads } = leadIds.length
     ? await supabase
         .from("leads")
-        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind, agreement_status, agreement_sent_at, priority, owner_name, consultation_date")
+        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind, agreement_status, agreement_sent_at, priority, owner_name, consultation_date, test")
         .in("id", leadIds)
     : { data: [] };
   const byId = new Map((leads ?? []).map((lead) => [lead.id as string, lead as LeadRow]));
@@ -137,6 +141,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
 
   for (const job of (jobs ?? []) as Job[]) {
     const lead = byId.get(job.lead_id);
+    if (lead?.test && !slackTestMatch(lead, slack.testPhone)) continue;
     if (!lead || closed(lead) || (job.queue === "text" && lead.kind === "needs_info")) {
       await supabase
         .from("lead_jobs")

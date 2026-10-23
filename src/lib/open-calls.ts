@@ -18,9 +18,10 @@ export async function collapseDuplicateOpenCalls(supabase: SupabaseClient): Prom
   for (let from = 0; ; from += page) {
     const { data, error } = await supabase
       .from("lead_jobs")
-      .select("id, lead_id, due_at, created_at")
+      .select("id, lead_id, due_at, created_at, leads!inner(test)")
       .eq("queue", "call")
       .eq("status", "pending")
+      .eq("leads.test", false)
       .lte("due_at", now)
       .order("due_at", { ascending: false })
       .range(from, from + page - 1);

@@ -97,6 +97,7 @@ export async function countCurrentPriority(
       "id, phone, signed_case, lead_status, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, case_id, priority, priority_suggestion",
     )
     .eq("signed_case", false)
+    .eq("test", false)
     .not("lead_status", "in", "(Lost,Referred)")
     .or("and(case_id.is.null,lead_status.not.in.(Promoted,Signed)),agreement_status.in.(sent,viewed,signed,completed)")
     .order("lead_date", { ascending: false, nullsFirst: false })

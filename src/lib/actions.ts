@@ -213,6 +213,7 @@ export async function createLead(formData: FormData) {
       .from("leads")
       .select("id, lead_name")
       .eq("phone_e164", fields.phone_e164)
+      .eq("test", false)
       .limit(1);
     if (existingError) throw new Error(existingError.message);
     const existing = existingRows?.[0];

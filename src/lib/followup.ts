@@ -185,6 +185,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
       .from("leads")
       .select(FOLLOW_UP_COLUMNS)
       .eq("follow_up", true)
+      .eq("test", false)
       .or("and(signed_case.eq.false,case_id.is.null,lead_status.not.in.(Lost,Referred,Promoted,Signed)),phone_e164.eq.+17654183805")
       .order("created_at", { ascending: false })
       .limit(80),
@@ -192,6 +193,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
       .from("leads")
       .select(FOLLOW_UP_COLUMNS)
       .eq("follow_up", true)
+      .eq("test", false)
       .eq("signed_case", false)
       .is("case_id", null)
       .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")

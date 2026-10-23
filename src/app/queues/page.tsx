@@ -73,6 +73,7 @@ export default async function QueuesPage({
       )
       .eq("queue", "call")
       .in("status", ["pending", "failed"])
+      .eq("leads.test", false)
       .order("due_at")
       .limit(400),
     supabase

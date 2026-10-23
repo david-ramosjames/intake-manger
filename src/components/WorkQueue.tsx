@@ -1676,6 +1676,8 @@ function QueueReferral({
   }
 
   const fieldClass = "mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-900 disabled:cursor-default disabled:bg-slate-100 disabled:text-slate-400";
+  const ready = desiredNo && Boolean(declineTag);
+  const lockedButton = "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-default disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:opacity-100";
 
   return (
     <section ref={sectionRef}>
@@ -1685,29 +1687,29 @@ function QueueReferral({
         </p>
       ) : recorded === "declined" ? (
         <p className="mt-2 text-sm font-medium text-slate-700">Referral declined</p>
-      ) : !open ? (
+      ) : !open || !ready ? (
         <div className="mt-2 flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={pending !== null}
+            disabled={pending !== null || !ready}
             onClick={() => setOpen(true)}
-            className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
+            className={`${lockedButton} bg-navy text-white hover:bg-[#16366e]`}
           >
             Referral Requested
           </button>
           <button
             type="button"
-            disabled={pending !== null}
+            disabled={pending !== null || !ready}
             onClick={() => void record("declined")}
-            className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
+            className={`${lockedButton} border border-slate-300 bg-white text-slate-900 hover:border-navy hover:bg-slate-100 hover:text-navy`}
           >
             {pending === "declined" ? "Saving…" : "Referral Declined"}
           </button>
           <button
             type="button"
-            disabled={pending !== null}
+            disabled={pending !== null || !ready}
             onClick={() => void record("sent")}
-            className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
+            className={`${lockedButton} border border-slate-300 bg-white text-slate-900 hover:border-navy hover:bg-slate-100 hover:text-navy`}
           >
             {pending === "sent" ? "Saving…" : "Referral Sent"}
           </button>
@@ -1778,7 +1780,7 @@ function QueueReferral({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={pending !== null || !firm || !area}
+              disabled={pending !== null || !ready || !firm || !area}
               onClick={() => void submit("send")}
               className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
             >
@@ -1786,7 +1788,7 @@ function QueueReferral({
             </button>
             <button
               type="button"
-              disabled={pending !== null || !firm || !area}
+              disabled={pending !== null || !ready || !firm || !area}
               onClick={() => void submit("already")}
               className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
             >

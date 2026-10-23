@@ -182,7 +182,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         </form>
       ) : null}
 
-      {lead.signed_case || lead.case_id || lead.lead_status === "Signed" || lead.lead_status === "Promoted" ? null : lead.close_reason === "not_a_lead" ? (
+      {lead.signed_case || lead.case_id || lead.lead_status === "Signed" || lead.lead_status === "Promoted" ? null : lead.close_reason === "data_error" ? (
+        <p className="mt-4 text-sm text-slate-600">Data error. Calls and texts are off.</p>
+      ) : lead.close_reason === "not_a_lead" ? (
         <p className="mt-4 text-sm text-slate-600">Not a lead. Calls and texts are off.</p>
       ) : (
         <form action={markNotALead.bind(null, lead.id)} className="mt-4">

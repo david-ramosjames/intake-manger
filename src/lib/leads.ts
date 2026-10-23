@@ -378,6 +378,7 @@ export type Lead = {
     | "no_response"
     | "not_a_lead"
     | "outside_practice"
+    | "data_error"
     | null;
   close_suggestion: "decline" | "not_interested" | "not_a_lead" | null;
   caller_class: string | null;

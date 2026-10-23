@@ -10,7 +10,12 @@ export const EXCLUDED_CALLER_CLASSES = [
 ] as const;
 
 export type ExcludedCallerClass = (typeof EXCLUDED_CALLER_CLASSES)[number];
-export type CallerClass = ExcludedCallerClass | "non_pi";
+
+/** A bad record, not a bad call. Kept out of the work queue and out of the non-lead counts. */
+export const DATA_ERROR_CLASS = "data_error" as const;
+export const DATA_ERROR_TAG = "NL: Data Error";
+
+export type CallerClass = ExcludedCallerClass | "non_pi" | typeof DATA_ERROR_CLASS;
 
 const EXCLUDED = new Set<string>(EXCLUDED_CALLER_CLASSES);
 
@@ -24,6 +29,7 @@ export const CALLER_CLASS_LABEL: Record<CallerClass, string> = {
   wrong_number: "Wrong number",
   return_call: "Return call",
   non_pi: "Non-PI legal matter",
+  data_error: "Data error",
 };
 
 export const NON_LEAD_TAG: Record<ExcludedCallerClass, string> = {
@@ -38,6 +44,7 @@ export const NON_LEAD_TAG: Record<ExcludedCallerClass, string> = {
 };
 
 export function isWorkLead(lead: { caller_class?: string | null }): boolean {
+  if (lead.caller_class === DATA_ERROR_CLASS) return false;
   if (lead.caller_class && EXCLUDED.has(lead.caller_class)) return false;
   return true;
 }

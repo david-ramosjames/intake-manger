@@ -5,7 +5,7 @@ import {
   closedStatusList,
   exportColumns,
   exportWindow,
-  nonLeadFilter,
+  outsideWorkFilter,
   type ExportLead,
   type ExportQuery,
 } from "@/lib/lead-export";
@@ -52,7 +52,7 @@ export async function loadExportLeads(supabase: SupabaseClient, query: ExportQue
 function applyFilters(request: LeadQuery, query: ExportQuery): LeadQuery {
   const window = exportWindow(query);
   if (window) request = request.gte("created_at", window.start).lt("created_at", window.end);
-  if (query.set === "leads") request = request.or(`caller_class.is.null,caller_class.not.in.(${nonLeadFilter()})`);
+  if (query.set === "leads") request = request.or(`caller_class.is.null,caller_class.not.in.(${outsideWorkFilter()})`);
   if (query.set === "nonleads") request = request.in("caller_class", EXCLUDED_CALLER_CLASSES);
   if (query.status === "open") request = request.not("lead_status", "in", closedStatusList());
   else if (query.status === "closed") request = request.in("lead_status", ["Signed", "Promoted", "Lost", "Referred"]);

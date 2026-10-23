@@ -1,4 +1,4 @@
-import { callerClassLabel, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
+import { callerClassLabel, DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
 import { CLOSED_LEAD_STATUSES } from "@/lib/funnel";
 import { PI_CASE_TYPES, SOURCE_TYPES, priorityReasonText, slackMessageUrl } from "@/lib/leads";
 import { textSequenceLabel } from "@/lib/queue";
@@ -142,6 +142,7 @@ const CLOSE_REASON_LABEL: Record<string, string> = {
   no_response: "Unresponsive",
   not_a_lead: "Not a lead",
   outside_practice: "Outside practice",
+  data_error: "Data error",
 };
 
 const IDENTITY_LABEL: Record<string, string> = {
@@ -291,6 +292,11 @@ export function exportWindow(query: Pick<ExportQuery, "range" | "from" | "to">, 
 
 export function nonLeadFilter(): string {
   return EXCLUDED_CALLER_CLASSES.join(",");
+}
+
+/** Bad calls plus data errors. Both stay out of a lead export, and only bad calls are non-leads. */
+export function outsideWorkFilter(): string {
+  return [...EXCLUDED_CALLER_CLASSES, DATA_ERROR_CLASS].join(",");
 }
 
 export function closedStatusList(): string {

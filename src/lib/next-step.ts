@@ -34,6 +34,7 @@ export function leadStatusLabel(
   if (lead.close_reason === "not_interested") return "Not interested";
   if (lead.close_reason === "no_response") return "No response";
   if (lead.close_reason === "not_a_lead") return "Not a lead";
+  if (lead.close_reason === "data_error") return "Data error";
   return CYCLE_LABEL[cycle];
 }
 

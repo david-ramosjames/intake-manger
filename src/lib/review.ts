@@ -1,4 +1,4 @@
-import { callerClassLabel, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
+import { callerClassLabel, DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES } from "@/lib/caller-class";
 import { isSourceType, slackMessageUrl, standardLeadEmail } from "@/lib/leads";
 import { contractSent, milestoneDesired, milestoneQualified, milestoneSigned } from "@/lib/desired";
 import { toE164 } from "@/lib/phone";
@@ -128,7 +128,7 @@ export function toReviewLead(lead: ReviewSource): ReviewLead {
     callrail_tags: tags,
   });
   const signed = milestoneSigned({ signed_case: lead.signed_case, lead_status: lead.lead_status });
-  const excluded = Boolean(lead.caller_class && EXCLUDED.has(lead.caller_class));
+  const excluded = Boolean(lead.caller_class && (lead.caller_class === DATA_ERROR_CLASS || EXCLUDED.has(lead.caller_class)));
   const status = lead.lead_status || "New";
   const consult = clean(lead.consultation_date).slice(0, 10);
   const consultation = /^\d{4}-\d{2}-\d{2}$/.test(consult) ? consult : "";

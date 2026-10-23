@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callrailConfigured, fetchCallrailTags, pushCallrailTags } from "./callrail";
-import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG, type ExcludedCallerClass } from "./caller-class";
-import { MANAGED_CALLRAIL_TAGS, NOT_A_LEAD_TAGS, QUALIFIED_NO, QUALIFIED_YES, injuryTagForCaseType, tagsFromSelection } from "./tags";
+import { DATA_ERROR_CLASS, DATA_ERROR_TAG, EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG, type ExcludedCallerClass } from "./caller-class";
+import { DECLINE_TAGS, MANAGED_CALLRAIL_TAGS, NOT_A_LEAD_TAGS, QUALIFIED_NO, QUALIFIED_YES, declineReasonFromTag, injuryTagForCaseType, selectedDecline, tagsFromSelection } from "./tags";
 import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
@@ -430,7 +430,8 @@ export async function saveLeadDetails(formData: FormData) {
   const phoneE164 = phone ? toE164(phone) : null;
   const keepPhone = formData.get("keep_phone") === "1";
   if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
-  const markingNonLead = EXCLUDED_CALLER_CLASSES.includes(text(formData, "non_lead_reason") as ExcludedCallerClass);
+  const chosenClass = text(formData, "non_lead_reason");
+  const markingNonLead = chosenClass === DATA_ERROR_CLASS || EXCLUDED_CALLER_CLASSES.includes(chosenClass as ExcludedCallerClass);
   const consulted = text(formData, "consulted");
   const consultationDate = text(formData, "consultation_date");
   if (!markingNonLead && consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {
@@ -925,10 +926,10 @@ export async function classifyNonLead(formData: FormData) {
   const leadId = text(formData, "lead_id");
   const callerClass = text(formData, "caller_class");
   if (!leadId) throw new Error("Missing the lead.");
-  if (!callerClass || !EXCLUDED_CALLER_CLASSES.includes(callerClass as ExcludedCallerClass)) {
+  const dataError = callerClass === DATA_ERROR_CLASS;
+  if (!dataError && !EXCLUDED_CALLER_CLASSES.includes(callerClass as ExcludedCallerClass)) {
     throw new Error("Choose why this is not a lead.");
   }
-  const reason = callerClass as ExcludedCallerClass;
   const { data, error } = await supabase
     .from("leads")
     .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags, identity_status")
@@ -939,7 +940,39 @@ export async function classifyNonLead(formData: FormData) {
     throw new Error("A signed or promoted matter stays a lead.");
   }
   assertCloseReady(data, "nonlead");
-  const drop = new Set<string>([...NOT_A_LEAD_TAGS, "NQ: Spam / Robo Call", "NQ: Outside Service Area", "NQ: Non-PI Legal Matter", "QUALIFIED YES", "CVR DESIRED"]);
+  const stopped = data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status;
+  if (dataError) {
+    const badCallTags = new Set<string>(NOT_A_LEAD_TAGS);
+    const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !badCallTags.has(tag));
+    if (!tags.includes(DATA_ERROR_TAG)) tags.push(DATA_ERROR_TAG);
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({
+        lead_status: "Lost",
+        follow_up: false,
+        sequence: "stop",
+        close_reason: DATA_ERROR_CLASS,
+        close_suggestion: null,
+        caller_class: DATA_ERROR_CLASS,
+        callrail_tags: tags,
+        text_sequence_status: stopped,
+      })
+      .eq("id", leadId);
+    if (updateError) throw new Error(updateError.message);
+    await stopFollowUp(supabase, leadId, "Data error");
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "data_error",
+      actor: email,
+      payload: { caller_class: DATA_ERROR_CLASS, tag: DATA_ERROR_TAG },
+    });
+    revalidatePath("/");
+    revalidatePath("/priority");
+    revalidatePath(`/leads/${leadId}`);
+    return;
+  }
+  const reason = callerClass as ExcludedCallerClass;
+  const drop = new Set<string>([...NOT_A_LEAD_TAGS, DATA_ERROR_TAG, "NQ: Spam / Robo Call", "NQ: Outside Service Area", "NQ: Non-PI Legal Matter", "QUALIFIED YES", "CVR DESIRED"]);
   const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !drop.has(tag));
   if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
   const reasonTag = NON_LEAD_TAG[reason];
@@ -957,7 +990,7 @@ export async function classifyNonLead(formData: FormData) {
       desired_case: false,
       desired_source: "staff",
       callrail_tags: tags,
-      text_sequence_status: data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status,
+      text_sequence_status: stopped,
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);
@@ -1049,6 +1082,57 @@ export async function markReferralOpportunity(leadId: string, formData: FormData
   revalidatePath("/");
 }
 
+const DECLINE_TAG_SET = new Set<string>(DECLINE_TAGS);
+
+function referralBlockMessage(gaps: string[]): string {
+  const parts = gaps.map((gap) => {
+    if (gap === "Desired") return "Desired has to be No";
+    if (gap === "Decline reason") return "choose a decline reason under Desired";
+    return gap;
+  });
+  return `Still needed before the referral can close: ${parts.join(", ")}.`;
+}
+
+function referralDeclineTag(
+  formData: FormData | undefined,
+  lead: { callrail_tags?: string[] | null },
+  area: string | null,
+  infer: boolean,
+): string {
+  const chosen = formData ? text(formData, "decline_tag") : null;
+  if (chosen && DECLINE_TAG_SET.has(chosen)) return chosen;
+  const existing = selectedDecline(lead.callrail_tags ?? []);
+  if (existing) return existing;
+  if (!infer) return "";
+  if (area === "workers_comp") return "DEC: Workers Comp";
+  if (area === "medmal") return "DEC: Medmal";
+  return "DEC: Referred";
+}
+
+async function stampReferralDecision(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+  lead: { desired_case?: boolean | null; callrail_tags?: string[] | null },
+  input: { desiredNo: boolean; declineTag: string },
+): Promise<string | null> {
+  const update: { desired_case?: boolean; desired_source?: string; callrail_tags?: string[]; decline_reason?: string | null } = {};
+  if (input.desiredNo) {
+    update.desired_case = false;
+    update.desired_source = "staff";
+    lead.desired_case = false;
+  }
+  if (input.declineTag) {
+    const tags = (lead.callrail_tags ?? []).filter((tag) => !tag.startsWith("DEC:"));
+    tags.push(input.declineTag);
+    update.callrail_tags = tags;
+    update.decline_reason = declineReasonFromTag(input.declineTag);
+    lead.callrail_tags = tags;
+  }
+  if (!("desired_case" in update) && !update.callrail_tags) return null;
+  const { error } = await supabase.from("leads").update(update).eq("id", leadId);
+  return error?.message ?? null;
+}
+
 export async function sendReferral(leadId: string, formData: FormData): Promise<{ error?: string }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
@@ -1070,38 +1154,13 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
-  
-  // Before validation, update desired_case and decline reason if provided in form
-  // This allows users to set these fields and send referral in one click
-  const desiredCase = text(formData, "desired_case");
-  const declineTag = text(formData, "decline_tag");
-  if (desiredCase === "no" || declineTag) {
-    const updateData: { desired_case?: boolean; callrail_tags?: string[] } = {};
-    if (desiredCase === "no") {
-      updateData.desired_case = false;
-      lead.desired_case = false;
-    }
-    if (declineTag && lead.callrail_tags) {
-      // Remove any existing decline tags and add the new one
-      const withoutDecline = lead.callrail_tags.filter((tag: string) => !tag.startsWith("DEC:"));
-      updateData.callrail_tags = [...withoutDecline, declineTag];
-      lead.callrail_tags = updateData.callrail_tags;
-    } else if (declineTag) {
-      updateData.callrail_tags = [declineTag];
-      lead.callrail_tags = [declineTag];
-    }
-    const { error: preUpdateError } = await supabase
-      .from("leads")
-      .update(updateData)
-      .eq("id", leadId);
-    if (preUpdateError) return { error: preUpdateError.message };
-  }
-  
-  try {
-    assertCloseReady(lead, "declined");
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Finish the lead before sending the referral." };
-  }
+  const stampError = await stampReferralDecision(supabase, leadId, lead, {
+    desiredNo: true,
+    declineTag: referralDeclineTag(formData, lead, area, true),
+  });
+  if (stampError) return { error: stampError };
+  const gaps = closeGaps(lead, "declined");
+  if (gaps.length) return { error: referralBlockMessage(gaps) };
   const to = lead.phone_e164 || toE164(lead.phone);
   if (!to) return { error: "This lead needs a phone number before the text can go out." };
 
@@ -1171,15 +1230,15 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   return {};
 }
 
-export async function markReferralSent(leadId: string): Promise<{ error?: string }> {
-  return recordReferralOutcome(leadId, "sent");
+export async function markReferralSent(leadId: string, formData?: FormData): Promise<{ error?: string }> {
+  return recordReferralOutcome(leadId, "sent", formData);
 }
 
-export async function markReferralDeclined(leadId: string): Promise<{ error?: string }> {
-  return recordReferralOutcome(leadId, "declined");
+export async function markReferralDeclined(leadId: string, formData?: FormData): Promise<{ error?: string }> {
+  return recordReferralOutcome(leadId, "declined", formData);
 }
 
-async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined"): Promise<{ error?: string }> {
+async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined", formData?: FormData): Promise<{ error?: string }> {
   const { supabase, email } = await requireStaff();
   const { data: lead, error: leadError } = await supabase
     .from("leads")
@@ -1188,12 +1247,18 @@ async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
   const sent = outcome === "sent";
+  const stampError = await stampReferralDecision(supabase, leadId, lead, {
+    desiredNo: true,
+    declineTag: referralDeclineTag(formData, lead, formData ? text(formData, "practice_area") : null, sent),
+  });
+  if (stampError) return { error: stampError };
   try {
     await closeLead(supabase, leadId, email, sent
       ? { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" }
       : { lead_status: "Lost", close_reason: "declined", event: "referral_declined", path: "declined" });
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not record the referral." };
+    const gaps = closeGaps(lead, "declined");
+    return { error: gaps.length ? referralBlockMessage(gaps) : err instanceof Error ? err.message : "Could not record the referral." };
   }
   await stopFollowUp(supabase, leadId, sent ? "Referred out." : "Referral declined.");
   if (lead.text_sequence_status === "active") {
@@ -1225,38 +1290,13 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
-  
-  // Before validation, update desired_case and decline reason if provided in form
-  // This allows users to set these fields and send referral in one click
-  const desiredCase = text(formData, "desired_case");
-  const declineTag = text(formData, "decline_tag");
-  if (desiredCase === "no" || declineTag) {
-    const updateData: { desired_case?: boolean; callrail_tags?: string[] } = {};
-    if (desiredCase === "no") {
-      updateData.desired_case = false;
-      lead.desired_case = false;
-    }
-    if (declineTag && lead.callrail_tags) {
-      // Remove any existing decline tags and add the new one
-      const withoutDecline = lead.callrail_tags.filter((tag: string) => !tag.startsWith("DEC:"));
-      updateData.callrail_tags = [...withoutDecline, declineTag];
-      lead.callrail_tags = updateData.callrail_tags;
-    } else if (declineTag) {
-      updateData.callrail_tags = [declineTag];
-      lead.callrail_tags = [declineTag];
-    }
-    const { error: preUpdateError } = await supabase
-      .from("leads")
-      .update(updateData)
-      .eq("id", leadId);
-    if (preUpdateError) return { error: preUpdateError.message };
-  }
-  
-  try {
-    assertCloseReady(lead, "declined");
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "Finish the lead before closing it." };
-  }
+  const stampError = await stampReferralDecision(supabase, leadId, lead, {
+    desiredNo: true,
+    declineTag: referralDeclineTag(formData, lead, area, true),
+  });
+  if (stampError) return { error: stampError };
+  const gaps = closeGaps(lead, "declined");
+  if (gaps.length) return { error: referralBlockMessage(gaps) };
   const outside = area !== "personal_injury";
   const { error: updateError } = await supabase
     .from("leads")

@@ -43,7 +43,7 @@ export function nameFromSummary(summary: string | null | undefined): string | nu
 }
 
 function field(text: string, label: string): string | null {
-  const match = text.match(new RegExp(`^${label}:\\s*(.+)$`, "im"));
+  const match = text.match(new RegExp(`(?:^|\\n)\\s*>?\\s*\\*?${label}:\\s*\\*?(.+)$`, "im"));
   const labeled = match?.[1]?.replace(/\*/g, "").trim();
   if (labeled) return labeled;
   const stacked = text.match(new RegExp(`(?:^|\\n)${label}\\s*\\n([^\\n]+)`, "i"));
@@ -59,7 +59,11 @@ function sectionAfter(text: string, label: string): string | null {
 }
 
 function phonesIn(text: string): string | null {
-  const matches = text.match(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/g) ?? [];
+  const clean = text
+    .replace(/<https?:\/\/[^>|]+(?:\|[^>]+)?>/gi, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/(?:^|\n)\s*>?\s*\*?\s*To:\s*[^\n]*/gi, "\n");
+  const matches = clean.match(/(?:^|[^\d])(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}(?!\d)/g) ?? [];
   for (const match of matches) {
     if (toE164(match)) return match.trim();
   }
@@ -98,7 +102,7 @@ export function parseSlackLead(text: string): ParsedSlackLead {
     if (!/qualified/i.test(body)) kind = "needs_info";
   }
 
-  const nameFrom = from?.replace(/\(.*\)/, "").replace(/<[^>]+>/g, "").trim() || null;
+  const nameFrom = from?.replace(/\(.*\)/, "").replace(/<[^>]+>/g, "").replace(/(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/, "").replace(/[,*]/g, " ").trim() || null;
   const stackedName = [field(body, "First Name"), field(body, "Last Name")].filter(Boolean).join(" ");
   const phone = field(body, "Phone") ?? phonesIn(from ?? "") ?? phonesIn(body);
   const email = field(body, "Email") ?? body.match(EMAIL)?.[0] ?? null;

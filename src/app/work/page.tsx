@@ -10,7 +10,7 @@ import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
 import { CYCLE_LABEL, leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
-import { callerClassLabel, isWorkLead } from "@/lib/caller-class";
+import { callerClassLabel, DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
 import { isLostLeadReason } from "@/lib/funnel";
 import { automationLine, isQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
@@ -689,8 +689,11 @@ export default async function LeadListPage({
     };
   });
 
+  const badCall = new Set<string>(EXCLUDED_CALLER_CLASSES);
   const workRows = rows.filter((row) => isWorkLead(row.lead));
-  const listed = queue === "nonleads" ? rows.filter((row) => !isWorkLead(row.lead)) : workRows;
+  const listed = queue === "nonleads"
+    ? rows.filter((row) => badCall.has(row.lead.caller_class ?? ""))
+    : rows.filter((row) => isWorkLead(row.lead) || (q.length > 0 && row.lead.caller_class === DATA_ERROR_CLASS));
   const combined = combineByPhone(listed);
   const windowRows = combineByPhone(workRows).filter((group) => group.row.inWindow);
   const metrics = {

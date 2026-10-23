@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { IdentityMark } from "@/components/IdentityMark";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
-import { EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
+import { DATA_ERROR_CLASS, DATA_ERROR_TAG, EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
 import type { LeadEntry } from "@/lib/lead-entry";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
@@ -935,6 +935,7 @@ function ControlPair({
 }
 
 function notLeadReasonFor(row: QueueRow): string {
+  if (row.callerClass === DATA_ERROR_CLASS || row.tags.includes(DATA_ERROR_TAG)) return DATA_ERROR_CLASS;
   const taggedSpam = row.tags.includes("NQ: Spam / Robo Call") || row.tags.includes("NL: Spam / Robo Call");
   return EXCLUDED_CALLER_CLASSES.find((item) => item === row.callerClass) ?? (taggedSpam ? "spam" : "");
 }
@@ -1485,19 +1486,19 @@ function LeadFacts({
               </button>
             ) : null}
           </PanelSection>
-          {desiredValue === "no" || startReferral ? (
-            <PanelSection title="Referral">
-              <div className="col-span-2">
-                <QueueReferral
-                  row={row}
-                  destinations={destinations}
-                  templates={templates}
-                  startOpen={startReferral}
-                  prepare={() => persistDetails().then(() => undefined)}
-                />
-              </div>
-            </PanelSection>
-          ) : null}
+          <PanelSection title="Referral">
+            <div className="col-span-2">
+              <QueueReferral
+                row={row}
+                destinations={destinations}
+                templates={templates}
+                startOpen={startReferral}
+                desiredNo={desiredValue === "no"}
+                declineTag={declineValue}
+                prepare={() => persistDetails().then(() => undefined)}
+              />
+            </div>
+          </PanelSection>
           <PanelSection title="Lost lead">
             <ControlPair
               label="Lost reason"
@@ -1569,12 +1570,16 @@ function QueueReferral({
   destinations,
   templates,
   startOpen = false,
+  desiredNo,
+  declineTag,
   prepare,
 }: {
   row: QueueRow;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
   startOpen?: boolean;
+  desiredNo: boolean;
+  declineTag: string;
   prepare?: () => Promise<void>;
 }) {
   const firms = referralFirms(destinations);
@@ -1610,6 +1615,14 @@ function QueueReferral({
         })
       : "";
 
+  function referralFields() {
+    const data = new FormData();
+    data.set("desired_case", "no");
+    data.set("practice_area", area);
+    if (declineTag) data.set("decline_tag", declineTag);
+    return data;
+  }
+
   async function submit(kind: "send" | "already") {
     if (!firm || !area) {
       setError("Choose a referral type and a partner.");
@@ -1618,10 +1631,9 @@ function QueueReferral({
     setPending("send");
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
-    const data = new FormData();
+    const data = referralFields();
     data.set("destination_id", firm.id);
     data.set("language", language);
-    data.set("practice_area", area);
     try {
       if (prepare) await prepare();
       const result = kind === "send" ? await sendReferral(row.id, data) : await markReferralAlreadySent(row.id, data);
@@ -1646,7 +1658,8 @@ function QueueReferral({
     notify({ tone: "saving", text: "Saving…" });
     try {
       if (prepare) await prepare();
-      const result = outcome === "sent" ? await markReferralSent(row.id) : await markReferralDeclined(row.id);
+      const fields = referralFields();
+      const result = outcome === "sent" ? await markReferralSent(row.id, fields) : await markReferralDeclined(row.id, fields);
       if (result.error) {
         notify({ tone: "error", text: result.error });
         setError(result.error);
@@ -1698,6 +1711,11 @@ function QueueReferral({
           >
             {pending === "sent" ? "Saving…" : "Referral Sent"}
           </button>
+          {declineTag ? null : (
+            <p className="w-full text-sm text-slate-600">
+              {desiredNo ? "Choose a decline reason under Desired." : "Set Desired to No and choose a decline reason under Desired."}
+            </p>
+          )}
           {error ? <p className="w-full text-sm text-red-700">{error}</p> : null}
         </div>
       ) : firms.length === 0 ? (
@@ -1751,6 +1769,11 @@ function QueueReferral({
             </select>
           </label>
           {preview ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p> : null}
+          {declineTag ? null : (
+            <p className="text-sm text-slate-600">
+              {desiredNo ? "Choose a decline reason under Desired." : "Set Desired to No and choose a decline reason under Desired."} Workers compensation and medical malpractice fill that reason from the referral type.
+            </p>
+          )}
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
           <div className="flex flex-wrap gap-2">
             <button
@@ -1760,6 +1783,14 @@ function QueueReferral({
               className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
             >
               {pending === "send" ? "Saving…" : "Send referral"}
+            </button>
+            <button
+              type="button"
+              disabled={pending !== null || !firm || !area}
+              onClick={() => void submit("already")}
+              className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
+            >
+              {pending === "send" ? "Saving…" : "Already sent"}
             </button>
           </div>
         </div>
@@ -2408,11 +2439,14 @@ function NonLeadChoice({
           className={fieldClass()}
         >
           <option value="">Choose a reason</option>
-          {[...EXCLUDED_CALLER_CLASSES]
-            .sort((a, b) => NON_LEAD_TAG[a].localeCompare(NON_LEAD_TAG[b]))
+          {[
+            ...EXCLUDED_CALLER_CLASSES.map((item) => ({ value: item, label: NON_LEAD_TAG[item] })),
+            { value: DATA_ERROR_CLASS, label: DATA_ERROR_TAG },
+          ]
+            .sort((a, b) => a.label.localeCompare(b.label))
             .map((item) => (
-              <option key={item} value={item}>
-                {NON_LEAD_TAG[item]}
+              <option key={item.value} value={item.value}>
+                {item.label}
               </option>
             ))}
         </select>
@@ -2428,7 +2462,10 @@ function NonLeadChoice({
         }}
         className="mt-3 cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium normal-case tracking-normal text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
       >
-        <ButtonLabel value={pending ? "Saving…" : "Move to non-leads"} reserve={["Saving…", "Move to non-leads"]} />
+        <ButtonLabel
+          value={pending ? "Saving…" : reason === DATA_ERROR_CLASS ? "Move out" : "Move to non-leads"}
+          reserve={["Saving…", "Move to non-leads", "Move out"]}
+        />
       </button>
     </section>
   );

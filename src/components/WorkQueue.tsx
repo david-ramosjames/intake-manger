@@ -14,7 +14,7 @@ import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSource
 import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, markReferralSent, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
@@ -22,7 +22,7 @@ import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary, buttonSecondary } from "@/lib/ui";
 import { inArrivedRange, useWorkFilters } from "@/components/WorkFilters";
 import { phoneMatches, phoneTail } from "@/lib/phone";
-import { matchesQueue } from "@/lib/queue";
+import { DEFAULT_TEXT_SEQUENCE, matchesQueue, TEXT_SEQUENCES } from "@/lib/queue";
 
 type DrawerNotice = { tone: "saving" | "saved" | "error"; text: string };
 const DrawerNoticeContext = createContext<(notice: DrawerNotice | null) => void>(() => {});
@@ -771,11 +771,21 @@ function TextStartButtons({ leadId, compact = false }: { leadId: string; compact
   }, [notify, pending, state]);
   const button = compact
     ? "cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
-    : "";
+    : buttonPrimary;
+  const select = compact
+    ? "h-6 max-w-[7.5rem] rounded-md border border-slate-300 bg-white px-1 text-[11px] text-slate-800"
+    : "h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900";
   return (
-    <form action={action} className={compact ? "flex flex-col items-center gap-1" : "flex flex-wrap gap-2"}>
+    <form action={action} className={compact ? "flex flex-col items-center gap-1" : "flex flex-wrap items-center gap-2"}>
       <input type="hidden" name="lead_id" value={leadId} />
-      <button name="sequence" value="more-info" disabled={pending} className={compact ? button : buttonPrimary}>
+      <select name="sequence" defaultValue={DEFAULT_TEXT_SEQUENCE} disabled={pending} aria-label="Text sequence" className={select}>
+        {TEXT_SEQUENCES.map((item) => (
+          <option key={item.slug} value={item.slug}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+      <button type="submit" disabled={pending} className={button}>
         Start SMS
       </button>
       {state?.error ? <p className="w-full text-[11px] font-medium text-red-700">{state.error}</p> : null}
@@ -1587,12 +1597,12 @@ function QueueReferral({
     a.label.localeCompare(b.label),
   );
   const sectionRef = useRef<HTMLElement>(null);
-  const [open, setOpen] = useState(startOpen);
+  const [mode, setMode] = useState<"send" | "record" | null>(startOpen ? "send" : null);
   const [area, setArea] = useState(types.some((item) => item.id === row.practiceArea) ? (row.practiceArea ?? "") : "");
   const [firmId, setFirmId] = useState("");
   const [language, setLanguage] = useState<"en" | "es">("en");
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<"send" | "sent" | "declined" | null>(null);
+  const [pending, setPending] = useState<"send" | "already" | "declined" | null>(null);
   const [recorded, setRecorded] = useState<"sent" | "declined" | null>(null);
   const notify = useContext(DrawerNoticeContext);
   const partners = area
@@ -1601,7 +1611,7 @@ function QueueReferral({
   const firm = partners.find((item) => item.id === firmId) ?? null;
   useEffect(() => {
     if (!startOpen) return;
-    setOpen(true);
+    setMode("send");
     sectionRef.current?.scrollIntoView({ block: "nearest" });
   }, [startOpen]);
   const preview =
@@ -1628,12 +1638,12 @@ function QueueReferral({
       setError("Choose a referral type and a partner.");
       return;
     }
-    setPending("send");
+    setPending(kind);
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
     const data = referralFields();
     data.set("destination_id", firm.id);
-    data.set("language", language);
+    if (kind === "send") data.set("language", language);
     try {
       if (prepare) await prepare();
       const result = kind === "send" ? await sendReferral(row.id, data) : await markReferralAlreadySent(row.id, data);
@@ -1652,21 +1662,20 @@ function QueueReferral({
     }
   }
 
-  async function record(outcome: "sent" | "declined") {
-    setPending(outcome);
+  async function recordDeclined() {
+    setPending("declined");
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
     try {
       if (prepare) await prepare();
-      const fields = referralFields();
-      const result = outcome === "sent" ? await markReferralSent(row.id, fields) : await markReferralDeclined(row.id, fields);
+      const result = await markReferralDeclined(row.id, referralFields());
       if (result.error) {
         notify({ tone: "error", text: result.error });
         setError(result.error);
         return;
       }
-      setRecorded(outcome);
-      notify({ tone: "saved", text: outcome === "sent" ? "Referral sent" : "Referral declined" });
+      setRecorded("declined");
+      notify({ tone: "saved", text: "Referral declined" });
     } catch (err) {
       notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the referral" });
       setError(err instanceof Error ? err.message : "Could not record the referral");
@@ -1687,12 +1696,12 @@ function QueueReferral({
         </p>
       ) : recorded === "declined" ? (
         <p className="mt-2 text-sm font-medium text-slate-700">Referral declined</p>
-      ) : !open || !ready ? (
+      ) : !mode || !ready ? (
         <div className="mt-2 flex flex-wrap gap-2">
           <button
             type="button"
             disabled={pending !== null || !ready}
-            onClick={() => setOpen(true)}
+            onClick={() => setMode("send")}
             className={`${lockedButton} bg-navy text-white hover:bg-[#16366e]`}
           >
             Referral Requested
@@ -1700,7 +1709,7 @@ function QueueReferral({
           <button
             type="button"
             disabled={pending !== null || !ready}
-            onClick={() => void record("declined")}
+            onClick={() => void recordDeclined()}
             className={`${lockedButton} border border-slate-300 bg-white text-slate-900 hover:border-navy hover:bg-slate-100 hover:text-navy`}
           >
             {pending === "declined" ? "Saving…" : "Referral Declined"}
@@ -1708,10 +1717,10 @@ function QueueReferral({
           <button
             type="button"
             disabled={pending !== null || !ready}
-            onClick={() => void record("sent")}
+            onClick={() => setMode("record")}
             className={`${lockedButton} border border-slate-300 bg-white text-slate-900 hover:border-navy hover:bg-slate-100 hover:text-navy`}
           >
-            {pending === "sent" ? "Saving…" : "Referral Sent"}
+            Referral Sent
           </button>
           {declineTag ? null : (
             <p className="w-full text-sm text-slate-600">
@@ -1759,18 +1768,20 @@ function QueueReferral({
               ))}
             </select>
           </label>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Language
-            <select
-              value={language}
-              onChange={(event) => setLanguage(event.target.value === "es" ? "es" : "en")}
-              className={fieldClass}
-            >
-              <option value="en">English</option>
-              <option value="es">Spanish</option>
-            </select>
-          </label>
-          {preview ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p> : null}
+          {mode === "send" ? (
+            <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+              Language
+              <select
+                value={language}
+                onChange={(event) => setLanguage(event.target.value === "es" ? "es" : "en")}
+                className={fieldClass}
+              >
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+              </select>
+            </label>
+          ) : null}
+          {mode === "send" && preview ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p> : null}
           {declineTag ? null : (
             <p className="text-sm text-slate-600">
               {desiredNo ? "Choose a decline reason under Desired." : "Set Desired to No and choose a decline reason under Desired."} Workers compensation and medical malpractice fill that reason from the referral type.
@@ -1778,22 +1789,25 @@ function QueueReferral({
           )}
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={pending !== null || !ready || !firm || !area}
-              onClick={() => void submit("send")}
-              className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
-            >
-              {pending === "send" ? "Saving…" : "Send referral"}
-            </button>
-            <button
-              type="button"
-              disabled={pending !== null || !ready || !firm || !area}
-              onClick={() => void submit("already")}
-              className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:cursor-default disabled:opacity-60"
-            >
-              {pending === "send" ? "Saving…" : "Already sent"}
-            </button>
+            {mode === "record" ? (
+              <button
+                type="button"
+                disabled={pending !== null || !ready || !firm || !area}
+                onClick={() => void submit("already")}
+                className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
+              >
+                {pending === "already" ? "Saving…" : "Already sent"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={pending !== null || !ready || !firm || !area}
+                onClick={() => void submit("send")}
+                className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
+              >
+                {pending === "send" ? "Saving…" : "Send referral"}
+              </button>
+            )}
           </div>
         </div>
       )}

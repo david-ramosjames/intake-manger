@@ -137,6 +137,8 @@ export async function loadNavTiles(supabase: SupabaseClient): Promise<NavTiles> 
   };
 }
 
+export const DASHBOARD_RELEASE_DAY = "2026-10-23";
+
 export const PERIODS = [
   { id: "today", label: "Current day", hint: "Today" },
   { id: "yesterday", label: "Yesterday", hint: "The previous day" },
@@ -212,6 +214,29 @@ export function resolvePeriod(search: { period?: string; from?: string; to?: str
   const fromIso = chicagoLocalToIso(`${start}T00:00`);
   const toIso = chicagoLocalToIso(`${addDays(end, 1)}T00:00`);
   return { id, start, end, fromIso, toIso, label: formatPeriod(start, end) };
+}
+
+export function dashboardPeriod(period: ResolvedPeriod): ResolvedPeriod {
+  if (period.start >= DASHBOARD_RELEASE_DAY) return period;
+  const label = period.label;
+  if (period.end < DASHBOARD_RELEASE_DAY) {
+    const fromIso = chicagoLocalToIso(`${DASHBOARD_RELEASE_DAY}T00:00`);
+    return {
+      ...period,
+      start: DASHBOARD_RELEASE_DAY,
+      end: addDays(DASHBOARD_RELEASE_DAY, -1),
+      fromIso,
+      toIso: fromIso,
+      label,
+    };
+  }
+  const start = DASHBOARD_RELEASE_DAY;
+  return {
+    ...period,
+    start,
+    fromIso: chicagoLocalToIso(`${start}T00:00`),
+    label: formatPeriod(start, period.end),
+  };
 }
 
 type CohortLead = {

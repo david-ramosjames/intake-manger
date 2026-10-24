@@ -84,10 +84,20 @@ export function stageStripe(label: string): string {
   return "shadow-[inset_3px_0_0_0_#cbd5e1]";
 }
 
+export const TEXT_SEQUENCES = [
+  { slug: "more-info", label: "More Info" },
+  { slug: "new-lead", label: "Missed Call" },
+  { slug: "qualified-lead", label: "Web Qualified" },
+  { slug: "referral", label: "Web Referral" },
+  { slug: "contract-follow-up", label: "Contract" },
+] as const;
+
+export const DEFAULT_TEXT_SEQUENCE = "more-info";
+
 const TEXT_SEQUENCE_LABEL: Record<string, string> = {
   "new-lead": "Missed Call",
   "more-info": "More Info",
-  "more_info": "More Info",
+  more_info: "More Info",
   "qualified-lead": "Web Qualified",
   "qualified-lead-copy": "Web Referral",
   referral: "Web Referral",
@@ -95,6 +105,20 @@ const TEXT_SEQUENCE_LABEL: Record<string, string> = {
   "contract-followup": "Contract",
   contract: "Contract",
 };
+
+const TEXT_SEQUENCE_CANONICAL: Record<string, string> = {
+  more_info: "more-info",
+  "qualified-lead-copy": "referral",
+  "contract-followup": "contract-follow-up",
+  contract: "contract-follow-up",
+};
+
+export function canonicalTextSequence(slug: string | null | undefined): string | null {
+  const key = (slug || "").trim().toLowerCase();
+  if (!key) return null;
+  const canonical = TEXT_SEQUENCE_CANONICAL[key] ?? key;
+  return TEXT_SEQUENCES.some((item) => item.slug === canonical) ? canonical : null;
+}
 
 export function textSequenceLabel(slug: string | null | undefined): string | null {
   const key = (slug || "").trim().toLowerCase();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ButtonLabel } from "@/components/ButtonLabel";
 import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
@@ -27,9 +27,9 @@ function YesNo({
   disabled?: boolean;
   onChange: (value: "yes" | "no") => void;
 }) {
-  const side = "flex h-9 min-w-0 flex-1 items-center justify-center text-sm font-medium disabled:cursor-not-allowed disabled:text-slate-400";
+  const side = "flex h-8 cursor-pointer items-center justify-center px-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:text-slate-400";
   return (
-    <div className="flex overflow-hidden rounded-lg border border-slate-300 bg-white" role="group" aria-label={label}>
+    <div className={`inline-flex h-8 w-fit overflow-hidden rounded-md border border-slate-300 bg-white ${disabled ? "bg-slate-100" : ""}`} role="group" aria-label={label}>
       <button type="button" disabled={disabled} onClick={() => onChange("yes")} className={`${side} border-r border-slate-300 ${value === "yes" ? "bg-emerald-50 text-emerald-900" : "text-slate-600"}`}>
         {value === "yes" ? "✓ Yes" : "Yes"}
       </button>
@@ -40,7 +40,33 @@ function YesNo({
   );
 }
 
-const fieldClass = "mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-400";
+const fieldClass = "h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400";
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
+      <div className="mt-2 flex flex-col gap-2">{children}</div>
+    </section>
+  );
+}
+
+function Fields({ children }: { children: ReactNode }) {
+  return <div className="grid grid-cols-2 items-end gap-x-3 gap-y-2">{children}</div>;
+}
+
+function Pair({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap items-end gap-3">{children}</div>;
+}
+
+function Label({ label, children, wide = false, className = "" }: { label: string; children: ReactNode; wide?: boolean; className?: string }) {
+  return (
+    <label className={`flex min-w-0 flex-col gap-1 text-xs font-medium uppercase tracking-wide text-slate-500 ${wide ? "col-span-2" : ""} ${className}`}>
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
 
 export function AddLeadForm({
   action,
@@ -70,7 +96,7 @@ export function AddLeadForm({
 
   return (
     <form
-      className="space-y-6"
+      className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -98,34 +124,31 @@ export function AddLeadForm({
           .finally(() => setPending(false));
       }}
     >
-      <section className="grid gap-4 sm:grid-cols-2">
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Name</span>
+      <Section title="Contact">
+        <Fields>
+        <Label label="Name">
           <input name="lead_name" required className={fieldClass} />
-        </label>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Phone</span>
+        </Label>
+        <Label label="Phone">
           <input name="phone" required inputMode="tel" className={fieldClass} />
-        </label>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Email</span>
+        </Label>
+        <Label label="Email">
           <input value={email} autoComplete="off" onChange={(event) => setEmail(event.target.value)} placeholder="Optional" className={fieldClass} />
           {emailIsUnavailable(email) ? null : (
-            <button type="button" onClick={() => setEmail(EMAIL_NOT_AVAILABLE)} className="mt-1 text-xs font-medium text-navy underline">
+            <button type="button" onClick={() => setEmail(EMAIL_NOT_AVAILABLE)} className="w-fit text-[11px] font-medium normal-case tracking-normal text-navy underline">
               N/A
             </button>
           )}
-        </label>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Date</span>
+        </Label>
+        <Label label="Date">
           <input name="lead_date" type="date" defaultValue={defaultDate} className={fieldClass} />
-        </label>
-      </section>
+        </Label>
+        </Fields>
+      </Section>
 
-      <section className="grid gap-4 sm:grid-cols-2">
-        <h2 className="sm:col-span-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Marketing</h2>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Source type</span>
+      <Section title="Marketing">
+        <Fields>
+        <Label label="Source type">
           <select
             value={sourceType}
             onChange={(event) => {
@@ -141,9 +164,8 @@ export function AddLeadForm({
               <option key={item} value={item}>{item}</option>
             ))}
           </select>
-        </label>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Source category</span>
+        </Label>
+        <Label label="Source category">
           <select
             value={sourceCategory}
             disabled={!sourceType}
@@ -159,52 +181,49 @@ export function AddLeadForm({
               <option key={item} value={item}>{item}</option>
             )) : null}
           </select>
-        </label>
-        <label className="block text-sm sm:col-span-2">
-          <span className="font-medium text-slate-700">Lead source</span>
+        </Label>
+        <Label label="Lead source" wide>
           <select value={leadSource} disabled={!sourceCategory} onChange={(event) => setLeadSource(event.target.value)} className={fieldClass}>
             <option value="">{sourceCategory ? "Not set" : "Pick category first"}</option>
             {sourceType && sourceCategory ? getSourcesForCategory(sourceType, sourceCategory).map((item) => (
               <option key={item} value={item}>{item}</option>
             )) : null}
           </select>
-        </label>
-      </section>
+        </Label>
+        <Label label="Case type" wide>
+          <select
+            value={caseType}
+            onChange={(event) => {
+              const next = event.target.value;
+              setCaseType(next);
+              if (next !== "Non-PI Legal Matter") return;
+              setConsulted("no");
+              setQualified("no");
+              setDesired("no");
+              setSize("");
+              setDecline("DEC: Non-PI Legal Matter");
+            }}
+            className={fieldClass}
+          >
+            <option value="">Not set</option>
+            {caseTypeChoices().map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </Label>
+        </Fields>
+      </Section>
 
-      <section>
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Case type</h2>
-        <select
-          value={caseType}
-          onChange={(event) => {
-            const next = event.target.value;
-            setCaseType(next);
-            if (next !== "Non-PI Legal Matter") return;
-            setConsulted("no");
-            setQualified("no");
-            setDesired("no");
-            setSize("");
-            setDecline("DEC: Non-PI Legal Matter");
-          }}
-          className={fieldClass}
-        >
-          <option value="">Not set</option>
-          {caseTypeChoices().map((item) => (
-            <option key={item} value={item}>{item}</option>
-          ))}
-        </select>
-      </section>
+      <Section title="Consultation">
+        <Pair>
+          <YesNo label="Consultation" value={consulted} onChange={(value) => setConsulted(value)} />
+          <Label label="Consultation date" className="w-36">
+            <input name="consultation_date" type="date" disabled={consulted !== "yes"} className={fieldClass} />
+          </Label>
+        </Pair>
+      </Section>
 
-      <section className="grid gap-4 sm:grid-cols-2">
-        <h2 className="sm:col-span-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Consultation</h2>
-        <YesNo label="Consultation" value={consulted} onChange={(value) => setConsulted(value)} />
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Consultation date</span>
-          <input name="consultation_date" type="date" disabled={consulted !== "yes"} className={fieldClass} />
-        </label>
-      </section>
-
-      <section className="grid gap-4 sm:grid-cols-2">
-        <h2 className="sm:col-span-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Qualified</h2>
+      <Section title="Qualified">
         <YesNo label="Qualified" value={qualifiedValue} disabled={nonPi} onChange={(value) => {
           setQualified(value);
           if (value === "no") {
@@ -212,48 +231,47 @@ export function AddLeadForm({
             setSize("");
           }
         }} />
-      </section>
+      </Section>
 
-      <section className="grid gap-4 sm:grid-cols-2">
-        <h2 className="sm:col-span-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Desired</h2>
-        <YesNo
-          label="Desired"
-          value={desiredValue}
-          disabled={nonPi || qualifiedValue === "no"}
-          onChange={(value) => {
-            setDesired(value);
-            if (value === "yes") setDecline("");
-            if (value === "no") setSize("");
-          }}
-        />
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Size</span>
-          <select value={sizeValue} disabled={desiredValue !== "yes"} onChange={(event) => setSize(event.target.value)} className={fieldClass}>
-            <option value="">{desiredValue === "yes" ? "Choose a size" : "Locked"}</option>
-            {SIZE_TAGS.map((tag) => (
-              <option key={tag} value={tag}>{tag.slice("S: ".length)}</option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Decline reason</span>
+      <Section title="Desired">
+        <Pair>
+          <YesNo
+            label="Desired"
+            value={desiredValue}
+            disabled={nonPi || qualifiedValue === "no"}
+            onChange={(value) => {
+              setDesired(value);
+              if (value === "yes") setDecline("");
+              if (value === "no") setSize("");
+            }}
+          />
+          <Label label="Size" className="w-36">
+            <select value={sizeValue} disabled={desiredValue !== "yes"} onChange={(event) => setSize(event.target.value)} className={fieldClass}>
+              <option value="">{desiredValue === "yes" ? "Choose a size" : "Locked"}</option>
+              {SIZE_TAGS.map((tag) => (
+                <option key={tag} value={tag}>{tag.slice("S: ".length)}</option>
+              ))}
+            </select>
+          </Label>
+        </Pair>
+        <Label label="Decline reason" className="max-w-xs">
           <select value={declineValue} disabled={desiredValue !== "no" || nonPi} onChange={(event) => setDecline(event.target.value)} className={fieldClass}>
             <option value="">{desiredValue === "no" ? "Choose a reason" : "Locked"}</option>
             {DECLINE_TAGS.map((tag) => (
               <option key={tag} value={tag}>{tag.slice("DEC: ".length)}</option>
             ))}
           </select>
-        </label>
-      </section>
+        </Label>
+      </Section>
 
-      <section className="grid gap-4 sm:grid-cols-2">
-        <h2 className="sm:col-span-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Signed</h2>
-        <YesNo label="Signed" value={signed} onChange={setSigned} />
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">Signed date</span>
-          <input name="date_signed" type="date" disabled={signed !== "yes"} className={fieldClass} />
-        </label>
-      </section>
+      <Section title="Signed">
+        <Pair>
+          <YesNo label="Signed" value={signed} onChange={setSigned} />
+          <Label label="Signed date" className="w-36">
+            <input name="date_signed" type="date" disabled={signed !== "yes"} className={fieldClass} />
+          </Label>
+        </Pair>
+      </Section>
 
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}
       <button type="submit" disabled={pending} className={buttonPrimary}>

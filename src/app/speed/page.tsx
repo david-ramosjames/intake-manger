@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { loadSpeedDetail, resolvePeriod, type PeriodId, type ResolvedPeriod, type SpeedEvent } from "@/lib/dashboard";
+import { dashboardPeriod, loadSpeedDetail, resolvePeriod, type PeriodId, type ResolvedPeriod, type SpeedEvent } from "@/lib/dashboard";
 import { requireStaff } from "@/lib/session";
 import { formatChicago } from "@/lib/time";
 
@@ -11,7 +11,7 @@ export default async function SpeedPage({
   searchParams: Promise<{ period?: string; from?: string; to?: string; view?: string }>;
 }) {
   const params = await searchParams;
-  const period = resolvePeriod(params);
+  const period = dashboardPeriod(resolvePeriod(params));
   const view = params.view === "met" || params.view === "late" ? params.view : "all";
   const { supabase } = await requireStaff();
   const detail = await loadSpeedDetail(supabase, period, { log: true });

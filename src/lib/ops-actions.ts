@@ -9,7 +9,7 @@ import { dispatchDue } from "./dispatch";
 import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
 import { firmUserId } from "./staff";
-import { textSequenceLabel } from "./queue";
+import { canonicalTextSequence, textSequenceLabel } from "./queue";
 import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
@@ -95,9 +95,9 @@ export async function startTextSequence(
   try {
     const { supabase, email } = await requireStaff();
     const leadId = text(formData, "lead_id");
-    const sequence = text(formData, "sequence");
+    const sequence = canonicalTextSequence(text(formData, "sequence")) ?? "more-info";
     if (!leadId) return { error: "Missing the lead." };
-    if (sequence !== "more-info") return { error: "Start SMS runs the More Info sequence." };
+    if (!canonicalTextSequence(sequence)) return { error: "Choose a text sequence." };
     const { data: lead, error } = await supabase
       .from("leads")
       .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email")
@@ -127,13 +127,14 @@ export async function startTextSequence(
       lead_detail: { email: lead.email, started_by: email },
     });
     if (!result.ok) return { error: textSequenceError(result.reason) };
-    const slug = result.sequence?.slug || sequence;
-    if (slug !== "more-info") {
+    const slug = canonicalTextSequence(result.sequence?.slug) || sequence;
+    if (slug !== sequence) {
+      const started = textSequenceLabel(result.sequence?.slug) ?? "a different sequence";
       const stopped = await askSmsFollowUpStop(phone, email);
       if (stopped.ok || stopped.reason === "no_active_enrollment") {
-        return { error: "That started a different text sequence, so it was stopped. Use Start SMS again." };
+        return { error: `That started ${started} instead of ${textSequenceLabel(sequence)}. It was stopped.` };
       }
-      return { error: "SMS Follow-Up started Web Qualified instead of More Info." };
+      return { error: `SMS Follow-Up started ${started} instead of ${textSequenceLabel(sequence)}.` };
     }
     const { error: updateError } = await supabase
       .from("leads")
@@ -1273,7 +1274,8 @@ async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined
 export async function markReferralAlreadySent(leadId: string, formData: FormData): Promise<{ error?: string }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
-  const language = text(formData, "language") === "es" ? "es" : "en";
+  const chosenLanguage = text(formData, "language");
+  const language = chosenLanguage === "es" || chosenLanguage === "en" ? chosenLanguage : null;
   const area = text(formData, "practice_area");
   if (!destinationId) return { error: "Pick the firm." };
   if (!isPracticeArea(area)) return { error: "That firm has no practice area for this referral." };

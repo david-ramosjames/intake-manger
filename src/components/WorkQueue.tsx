@@ -770,13 +770,13 @@ function TextStartButtons({ leadId, compact = false }: { leadId: string; compact
     notify(state?.error ? { tone: "error", text: state.error } : { tone: "saved", text: "Saved" });
   }, [notify, pending, state]);
   const button = compact
-    ? "cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
+    ? "w-full cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
     : buttonPrimary;
   const select = compact
-    ? "h-6 max-w-[7.5rem] rounded-md border border-slate-300 bg-white px-1 text-[11px] text-slate-800"
+    ? "h-6 w-full rounded-md border border-slate-300 bg-white px-1 text-[11px] text-slate-800"
     : "h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900";
   return (
-    <form action={action} className={compact ? "flex flex-col items-center gap-1" : "flex flex-wrap items-center gap-2"}>
+    <form action={action} className={compact ? "mx-auto flex w-full max-w-[7.5rem] flex-col items-stretch gap-1" : "flex flex-wrap items-center gap-2"}>
       <input type="hidden" name="lead_id" value={leadId} />
       <select name="sequence" defaultValue={DEFAULT_TEXT_SEQUENCE} disabled={pending} aria-label="Text sequence" className={select}>
         {TEXT_SEQUENCES.map((item) => (
@@ -808,10 +808,10 @@ function TextStopButton({ leadId, compact = false }: { leadId: string; compact?:
     notify(state?.error ? { tone: "error", text: state.error } : { tone: "saved", text: "Texts stopped" });
   }, [notify, pending, state]);
   const button = compact
-    ? "cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
+    ? "w-full cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
     : buttonSecondary;
   return (
-    <form action={action}>
+    <form action={action} className={compact ? "w-full" : undefined}>
       <input type="hidden" name="lead_id" value={leadId} />
       <button type="submit" disabled={pending} className={button}>
         Stop SMS
@@ -824,14 +824,14 @@ function TextStopButton({ leadId, compact = false }: { leadId: string; compact?:
 function TextAutomation({ row }: { row: QueueRow }) {
   if (row.textsLive) {
     return (
-      <span className="flex flex-col items-start gap-1">
-        <span className={row.automationBad ? "font-medium text-red-700" : "font-medium text-slate-800"}>{row.automationLabel}</span>
+      <span className="mx-auto flex w-full max-w-[7.5rem] flex-col items-stretch gap-1">
+        <span className={`text-center ${row.automationBad ? "font-medium text-red-700" : "font-medium text-slate-800"}`}>{row.automationLabel}</span>
         <TextStopButton leadId={row.id} compact />
       </span>
     );
   }
   if (!row.canStartText) {
-    return <span className={row.automationBad ? "font-medium text-red-700" : "text-slate-400"}>{row.automationLabel}</span>;
+    return <span className={`block text-center ${row.automationBad ? "font-medium text-red-700" : "text-slate-400"}`}>{row.automationLabel}</span>;
   }
   return <TextStartButtons leadId={row.id} compact />;
 }

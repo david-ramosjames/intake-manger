@@ -1,5 +1,7 @@
+import { callerClassLabel } from "./caller-class";
+import { closeGaps, type CloseReadyLead } from "./close-ready";
 import { contractOutstanding, contractSent, milestoneSigned, signatureNeedsConfirm } from "./desired";
-import type { Lead } from "./leads";
+import { isPiCaseType, officialCaseType, suggestedCaseType, type Lead } from "./leads";
 import { phoneTail } from "./phone";
 
 export type ClientTouch = {
@@ -36,6 +38,30 @@ export function leadStatusLabel(
   if (lead.close_reason === "not_a_lead") return "Not a lead";
   if (lead.close_reason === "data_error") return "Data error";
   return CYCLE_LABEL[cycle];
+}
+
+type StageLead = CloseReadyLead & {
+  case_detail?: string | null;
+  summary?: string | null;
+  lead_status?: string | null;
+  close_reason?: string | null;
+};
+
+function referralChecklist(lead: StageLead): CloseReadyLead {
+  const nonPi = lead.caller_class === "non_pi" || officialCaseType(lead.case_type) === "Non-PI Legal Matter";
+  if (!nonPi) return lead;
+  const tags = [...(lead.callrail_tags ?? [])];
+  if (!tags.some((tag) => tag.startsWith("DEC:"))) tags.push("DEC: Non-PI Legal Matter");
+  return { ...lead, desired_case: false, callrail_tags: tags };
+}
+
+export function queueStageLabel(lead: StageLead, fallback: string): string {
+  const referred = lead.lead_status === "Referred" || lead.close_reason === "referred";
+  const nonPi = lead.caller_class === "non_pi" || officialCaseType(lead.case_type) === "Non-PI Legal Matter";
+  const declineReferred = (lead.callrail_tags ?? []).includes("DEC: Referred");
+  if (!referred && (nonPi || declineReferred) && closeGaps(referralChecklist(lead), "declined").length === 0) return "Send Referral";
+  if (lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType({ ...lead, case_type: lead.case_type ?? null }))) return fallback;
+  return callerClassLabel(lead.caller_class) ?? fallback;
 }
 
 type CycleLead = {

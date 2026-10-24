@@ -8,9 +8,9 @@ import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
-import { daysSince, isLeadView, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
-import { CYCLE_LABEL, leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
-import { callerClassLabel, DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
+import { daysSince, isLeadView, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
+import { CYCLE_LABEL, leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel } from "@/lib/next-step";
+import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
 import { isLostLeadReason } from "@/lib/funnel";
 import { automationLine, isQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
@@ -681,7 +681,7 @@ export default async function LeadListPage({
       waiting,
       attention,
       inWindow: age != null && age <= 30,
-      label: leadStatusLabel(lead, cycle),
+      label: queueStageLabel(lead, leadStatusLabel(lead, cycle)),
       step: nextStepLabel(nextCallPurpose(cycle, tally.calls)),
       actionTitle: openLeadAction(lead, cycle, tally.calls),
       accident: listAccident(lead),
@@ -776,7 +776,7 @@ export default async function LeadListPage({
       signedDate: (row.lead.date_signed || row.lead.signed_at || "").slice(0, 10),
       prioritySuggestion: row.lead.priority_suggestion,
       actionTitle: row.actionTitle,
-      label: (row.lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType(row.lead)) ? null : callerClassLabel(row.lead.caller_class)) ?? row.label,
+      label: row.label,
       caseType: suggestedCaseType(row.lead),
       leadSource: row.lead.lead_source?.trim() || (listDetail(row.lead) === "—" ? "" : listDetail(row.lead)),
       sourceType: isSourceType(row.lead.source_type) ? row.lead.source_type : "",

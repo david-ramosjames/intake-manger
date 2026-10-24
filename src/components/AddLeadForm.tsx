@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { ButtonLabel } from "@/components/ButtonLabel";
-import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
+import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, nameIsUnavailable, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
 import { DECLINE_TAGS, SIZE_TAGS } from "@/lib/tags";
 import { buttonPrimary } from "@/lib/ui";
@@ -77,6 +77,7 @@ export function AddLeadForm({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [sourceType, setSourceType] = useState<SourceType | "">("");
   const [sourceCategory, setSourceCategory] = useState<SourceCategory | "">("");
@@ -127,7 +128,12 @@ export function AddLeadForm({
       <Section title="Contact">
         <Fields>
         <Label label="Name">
-          <input name="lead_name" required className={fieldClass} />
+          <input name="lead_name" required value={name} onChange={(event) => setName(event.target.value)} className={fieldClass} />
+          {nameIsUnavailable(name) ? null : (
+            <button type="button" onClick={() => setName(EMAIL_NOT_AVAILABLE)} className="w-fit text-[11px] font-medium normal-case tracking-normal text-navy underline">
+              N/A
+            </button>
+          )}
         </Label>
         <Label label="Phone">
           <input name="phone" required inputMode="tel" className={fieldClass} />

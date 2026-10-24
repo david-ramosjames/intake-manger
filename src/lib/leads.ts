@@ -669,6 +669,12 @@ function displayName(raw: string, phone: string | null): string {
   return name.replace(/\s*[-–—]\s*$/, "").trim();
 }
 
+const NAME_UNAVAILABLE = /^(n\/a|n\.a\.?|na|none|unknown|no name)$/i;
+
+export function nameIsUnavailable(value: string | null | undefined): boolean {
+  return NAME_UNAVAILABLE.test((value ?? "").trim());
+}
+
 export function leadTitle(lead: {
   lead_name: string | null;
   phone: string | null;
@@ -676,6 +682,7 @@ export function leadTitle(lead: {
   case_detail?: string | null;
 }): string {
   const stored = lead.lead_name?.trim() ? displayName(lead.lead_name, lead.phone) : "";
+  if (nameIsUnavailable(stored)) return "N/A";
   const name = usableFact(stored) ?? webLeadFacts(lead.case_detail).name;
   if (name) return name;
   return "Not captured";

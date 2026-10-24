@@ -71,7 +71,7 @@ export function stageClass(label: string): string {
   if (label === "Finish signing" || label === "Confirm signature") return "bg-violet-50 text-violet-800";
   if (label === "Follow up Contact") return "bg-sky-50 text-sky-800";
   if (label === "Initial Contact") return "bg-amber-50 text-amber-900";
-  if (label === "Outside practice") return "bg-orange-50 text-orange-900";
+  if (label === "Outside practice" || label === "Send Referral") return "bg-orange-50 text-orange-900";
   return "bg-slate-100 text-slate-600";
 }
 
@@ -80,7 +80,7 @@ export function stageStripe(label: string): string {
   if (label === "Finish signing" || label === "Confirm signature") return "shadow-[inset_3px_0_0_0_#8b5cf6]";
   if (label === "Follow up Contact") return "shadow-[inset_3px_0_0_0_#0ea5e9]";
   if (label === "Initial Contact") return "shadow-[inset_3px_0_0_0_#f59e0b]";
-  if (label === "Outside practice") return "shadow-[inset_3px_0_0_0_#f97316]";
+  if (label === "Outside practice" || label === "Send Referral") return "shadow-[inset_3px_0_0_0_#f97316]";
   return "shadow-[inset_3px_0_0_0_#cbd5e1]";
 }
 

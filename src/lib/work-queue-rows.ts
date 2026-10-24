@@ -1,16 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
 import { loadLeadCallJobs } from "@/lib/call-grade";
-import { callerClassLabel } from "@/lib/caller-class";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { isLostLeadReason } from "@/lib/funnel";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { fillLeadSources } from "@/lib/lead-source-fill";
-import { daysSince, isPiCaseType, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
+import { daysSince, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
-import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
+import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { automationLine, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong } from "@/lib/queue";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
@@ -191,7 +190,7 @@ function toQueueRow(
     identityStatus: lead.identity_status,
     agreementStatus: lead.agreement_status,
   });
-  const label = (lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType(lead)) ? null : callerClassLabel(lead.caller_class)) ?? leadStatusLabel(lead, cycle);
+  const label = queueStageLabel(lead, leadStatusLabel(lead, cycle));
   const priority = priorityPlace(lead);
   const closed = !isPracticeTestPhone(lead.phone_e164 || lead.phone) && (cycle === "signed" || cycle === "closed");
   const sequenceInput = {

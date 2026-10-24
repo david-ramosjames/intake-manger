@@ -9,7 +9,7 @@ import { heardClientName } from "@/lib/identity";
 import { DATA_ERROR_CLASS, DATA_ERROR_TAG, EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
 import { DECLINE_TAGS, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
 import type { LeadEntry } from "@/lib/lead-entry";
-import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
+import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, nameIsUnavailable, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
 import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
@@ -1209,6 +1209,11 @@ function LeadFacts({
           <PanelSection title="Contact">
             <FieldLabel label="Name" className="col-span-2">
               <input name="lead_name" value={contactName} onChange={(event) => setContactName(event.target.value)} className={fieldClass()} />
+              {nameIsUnavailable(contactName) ? null : (
+                <button type="button" onClick={() => setContactName(EMAIL_NOT_AVAILABLE)} className="mt-1 text-[11px] font-medium text-navy underline">
+                  N/A
+                </button>
+              )}
             </FieldLabel>
             <FieldLabel label="Phone">
               <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />

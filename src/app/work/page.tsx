@@ -9,8 +9,9 @@ import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
-import { CYCLE_LABEL, leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel } from "@/lib/next-step";
+import { CYCLE_LABEL, leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
 import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
+import { signedFileReady } from "@/lib/close-ready";
 import { isLostLeadReason } from "@/lib/funnel";
 import { automationLine, isQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
@@ -311,6 +312,15 @@ function listHref(input: {
   return query ? `/work?${query}` : "/work";
 }
 
+const SIGNED_FILE_FLOOR = "2026-10-23T05:00:00.000Z";
+
+function signedFileStillOpen(lead: ListLead): boolean {
+  if (lead.case_id || lead.lead_status === "Promoted" || lead.lead_status === "Lost" || lead.lead_status === "Referred") return false;
+  if (!lead.signed_case && lead.lead_status !== "Signed") return false;
+  if ((lead.created_at || "") < SIGNED_FILE_FLOOR) return false;
+  return !signedFileReady(lead);
+}
+
 async function loadOpenWorkLeads(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
 ): Promise<{ data: ListLead[]; error: null }> {
@@ -330,6 +340,23 @@ async function loadOpenWorkLeads(
     const batch = (data ?? []) as ListLead[];
     rows.push(...batch);
     if (batch.length < 1000) break;
+  }
+  const { data: signedRows, error: signedError } = await supabase
+    .from("leads")
+    .select(LIST_COLUMNS)
+    .eq("test", false)
+    .or("caller_class.is.null,caller_class.eq.non_pi")
+    .or("signed_case.eq.true,lead_status.eq.Signed")
+    .is("case_id", null)
+    .not("lead_status", "in", "(Promoted,Lost,Referred)")
+    .gte("created_at", SIGNED_FILE_FLOOR)
+    .order("lead_date", { ascending: false, nullsFirst: false })
+    .limit(200);
+  if (signedError) throw new Error(signedError.message);
+  const seen = new Set(rows.map((lead) => lead.id));
+  for (const lead of (signedRows ?? []) as ListLead[]) {
+    if (seen.has(lead.id) || !signedFileStillOpen(lead)) continue;
+    rows.push(lead);
   }
   return { data: rows, error: null };
 }
@@ -475,6 +502,7 @@ export default async function LeadListPage({
     supabase.from("referral_templates").select("language, body"),
   ]);
   let workLeads = focusIds ? focusedLeads : ((data ?? []) as ListLead[]);
+  if (funnel === "closed") workLeads = workLeads.filter((lead) => !signedFileStillOpen(lead));
   const reviewLeads = (reviewResult.data ?? []) as ListLead[];
   const needsPractice = funnel !== "closed" && !workLeads.some((lead) => isPracticeTestPhone(lead.phone_e164 || lead.phone));
   const [practiceRows, searched, selectedRows] = await Promise.all([
@@ -682,7 +710,7 @@ export default async function LeadListPage({
       attention,
       inWindow: age != null && age <= 30,
       label: queueStageLabel(lead, leadStatusLabel(lead, cycle)),
-      step: nextStepLabel(nextCallPurpose(cycle, tally.calls)),
+      step: queueStep(lead, cycle, tally.calls),
       actionTitle: openLeadAction(lead, cycle, tally.calls),
       accident: listAccident(lead),
       priority: priorityPlace(lead),

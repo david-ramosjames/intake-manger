@@ -9,7 +9,7 @@ import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { daysSince, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
-import { leadCycle, leadStatusLabel, nextCallPurpose, nextStepLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel } from "@/lib/next-step";
+import { leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { automationLine, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong } from "@/lib/queue";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
@@ -242,7 +242,7 @@ function toQueueRow(
     sourceCategory: lead.source_category?.trim() || "",
     stageClassName: stageClass(label),
     stageStripe: stageStripe(label),
-    step: nextStepLabel(nextCallPurpose(cycle, input.tally.calls)),
+    step: queueStep(lead, cycle, input.tally.calls),
     tags: lead.callrail_tags ?? [],
     callrail: Boolean(lead.callrail_call_id),
     declineReason: lead.decline_reason,

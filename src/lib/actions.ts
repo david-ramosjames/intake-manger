@@ -11,6 +11,7 @@ import { MANAGED_CALLRAIL_TAGS, QUALIFIED_NO, QUALIFIED_YES, injuryTagForCaseTyp
 import { toE164 } from "./phone";
 import { chicagoDay } from "./time";
 import type { Lead, LeadArrival, LeadGrade, LeadKind, LeadSentiment } from "./leads";
+import { signedFileReady } from "./close-ready";
 import { requireStaff } from "./session";
 
 const EDITABLE = [
@@ -201,12 +202,13 @@ export async function createLead(formData: FormData) {
   const fields = fieldsFromForm(formData);
   applyMilestones(fields, null);
   const now = new Date().toISOString();
+  const signedReady = fields.signed_case && signedFileReady({ ...fields, date_signed: fields.date_signed ?? now.slice(0, 10) });
   const signedExtras = fields.signed_case
     ? {
         signed_at: now,
         form_fill_closed_at: now,
         date_signed: fields.date_signed ?? now.slice(0, 10),
-        lead_status: fields.lead_status === "New" ? "Signed" : fields.lead_status,
+        lead_status: signedReady && fields.lead_status === "New" ? "Signed" : fields.lead_status,
       }
     : {};
 
@@ -446,8 +448,10 @@ export async function updateLead(leadId: string, formData: FormData) {
     const now = new Date().toISOString();
     patch.signed_at = before.signed_at ?? now;
     patch.form_fill_closed_at = before.form_fill_closed_at ?? now;
-    if (!fields.date_signed) patch.date_signed = now.slice(0, 10);
-    if (fields.lead_status === "New" || fields.lead_status === "Working") {
+    const dateSigned = fields.date_signed || now.slice(0, 10);
+    if (!fields.date_signed) patch.date_signed = dateSigned;
+    const signedReady = signedFileReady({ ...before, ...fields, date_signed: dateSigned });
+    if (signedReady && (fields.lead_status === "New" || fields.lead_status === "Working")) {
       patch.lead_status = "Signed";
     }
   }

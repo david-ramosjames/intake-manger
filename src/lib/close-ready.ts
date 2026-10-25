@@ -42,6 +42,8 @@ export function closeGaps(lead: CloseReadyLead, path: ClosePath = "base"): strin
     return gaps;
   }
   if (path === "signed") {
+    if (qualifiedValue(lead) !== true) gaps.push("Qualified");
+    if (desiredValue(lead) !== true) gaps.push("Desired");
     if (!selectedOne(lead.callrail_tags ?? [], SIZE_TAGS)) gaps.push("Size");
     if (!/^\d{4}-\d{2}-\d{2}/.test(lead.date_signed ?? "")) gaps.push("Signed date");
     return gaps;
@@ -82,6 +84,11 @@ function desiredValue(lead: CloseReadyLead): boolean | null {
   if (lead.desired_case === true || lead.desired_case === false) return lead.desired_case;
   if ((lead.callrail_tags ?? []).includes("CVR DESIRED")) return true;
   return null;
+}
+
+/** The contract is signed and every field a signed file needs is filled in. */
+export function signedFileReady(lead: CloseReadyLead): boolean {
+  return closeGaps(lead, "signed").length === 0;
 }
 
 export function closeIncompleteMessage(gaps: string[]): string {

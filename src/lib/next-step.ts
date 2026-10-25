@@ -1,5 +1,5 @@
 import { callerClassLabel } from "./caller-class";
-import { closeGaps, type CloseReadyLead } from "./close-ready";
+import { closeGaps, signedFileReady, type CloseReadyLead } from "./close-ready";
 import { contractOutstanding, contractSent, milestoneSigned, signatureNeedsConfirm } from "./desired";
 import { isPiCaseType, officialCaseType, suggestedCaseType, type Lead } from "./leads";
 import { phoneTail } from "./phone";
@@ -28,7 +28,7 @@ export function leadStatusLabel(
   },
   cycle: LeadCycle,
 ): string {
-  if (cycle === "signed" || lead.close_reason === "signed") return "Signed";
+  if (lead.signed_case || lead.lead_status === "Signed" || cycle === "signed" || lead.close_reason === "signed") return "Signed";
   if (signatureNeedsConfirm(lead)) return "Confirm signature";
   if (lead.close_reason === "declined") return "Declined";
   if (lead.close_reason === "referred" || lead.close_reason === "outside_practice") return "Referred";
@@ -87,9 +87,9 @@ function reachedClient(lead: CycleLead, touches: ClientTouch[]): boolean {
   return lead.arrival === "human_call" || lead.arrival === "qualified_call" || lead.arrival === "sona";
 }
 
-export function leadCycle(lead: CycleLead, touches: ClientTouch[] = []): LeadCycle {
+export function leadCycle(lead: CycleLead & CloseReadyLead, touches: ClientTouch[] = []): LeadCycle {
   if (contractOutstanding(lead)) return "signing";
-  if (lead.signed_case || lead.lead_status === "Signed") return "signed";
+  if ((lead.signed_case || lead.lead_status === "Signed") && signedFileReady(lead)) return "signed";
   if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.lead_status === "Promoted") return "closed";
   if (contractIsOut(lead) || signatureNeedsConfirm(lead)) return "signing";
   if (!reachedClient(lead, touches)) return "contact";
@@ -167,10 +167,14 @@ export function priorityPlace(lead: {
 }
 
 export function openLeadAction(
-  lead: { next_action?: string | null; agreement_status?: string | null; agreement_sent_at?: string | null; signed_case?: boolean | null; lead_status?: string | null; referral_opportunity?: boolean | null },
+  lead: CloseReadyLead & { next_action?: string | null; agreement_status?: string | null; agreement_sent_at?: string | null; signed_case?: boolean | null; lead_status?: string | null; referral_opportunity?: boolean | null },
   cycle: LeadCycle,
   calls: number,
 ): string | null {
+  if (lead.signed_case || lead.lead_status === "Signed") {
+    const gaps = closeGaps(lead, "signed");
+    if (gaps.length) return `Finish the file: ${gaps.join(", ")}`;
+  }
   if (cycle === "signed" || cycle === "closed") return null;
   const note = lead.next_action?.trim();
   if (note) return note;
@@ -204,6 +208,11 @@ const NEXT_STEP_LABEL: Record<string, string> = {
   "Call to establish the contract": "Establish contract",
   "Call again to establish the contract": "Establish contract",
 };
+
+export function queueStep(lead: CloseReadyLead & { signed_case?: boolean | null; lead_status?: string | null }, cycle: LeadCycle, calls: number): string {
+  if ((lead.signed_case || lead.lead_status === "Signed") && !signedFileReady(lead)) return "Finish the file";
+  return nextStepLabel(nextCallPurpose(cycle, calls));
+}
 
 export function nextStepLabel(purpose: string | null): string {
   if (!purpose) return "—";

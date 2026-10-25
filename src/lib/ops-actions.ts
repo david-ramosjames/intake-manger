@@ -1336,6 +1336,28 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
   return {};
 }
 
+export async function saveReferralFromNumber(formData: FormData) {
+  const { email } = await requireStaff();
+  const supabase = createSupabaseServiceClient();
+  const chosen = toE164(String(formData.get("quo_from_number") ?? ""));
+  if (!chosen) throw new Error("Choose the number referral texts send from.");
+  const { data: current } = await supabase.from("intake_settings").select("quo_api_key").eq("id", "default").maybeSingle();
+  const key = (typeof current?.quo_api_key === "string" ? current.quo_api_key.trim() : "") || process.env.QUO_API_KEY?.trim() || null;
+  const { lines } = await listQuoLines(key);
+  if (!lines.some((line) => line.number === chosen)) throw new Error("That number is not one of the Quo lines.");
+  const { error } = await supabase
+    .from("intake_settings")
+    .update({
+      quo_from_number: chosen,
+      updated_at: new Date().toISOString(),
+      updated_by: email,
+    })
+    .eq("id", "default");
+  if (error) throw new Error(error.message);
+  revalidatePath("/referrals");
+  revalidatePath("/how-it-fits");
+}
+
 export async function saveReferralTemplate(formData: FormData) {
   const { supabase } = await requireStaff();
   const language = text(formData, "language");

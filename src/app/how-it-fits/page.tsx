@@ -578,7 +578,7 @@ export default async function HowItFitsPage() {
 
       <h2 className="mt-10 text-lg font-semibold tracking-tight">Referral texts</h2>
       <p className="mt-2 text-sm leading-6 text-slate-600">
-        A referral text is sent from the Quo number you pick here. The follow-up queue stays off, so this does not start the other text sequences.
+        A referral text is sent from the Quo number you pick here. The same choice is on the Referrals page, and it starts on the Leads line. The follow-up queue stays off, so this does not start the other text sequences.
       </p>
       <form action={saveQuoSettings} className="mt-4 max-w-xl space-y-4 rounded-lg border border-slate-200 bg-white p-4">
         <label className="block text-sm">

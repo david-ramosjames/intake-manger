@@ -773,7 +773,7 @@ function TextStartButtons({ leadId, compact = false }: { leadId: string; compact
     ? "w-full cursor-pointer rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium leading-tight text-slate-700 transition-colors hover:border-navy hover:bg-slate-100 hover:text-navy disabled:opacity-60"
     : buttonPrimary;
   const select = compact
-    ? "h-6 w-full rounded-md border border-slate-300 bg-white px-1 text-[11px] text-slate-800"
+    ? "h-6 w-full rounded-md border border-slate-300 bg-white px-1 text-center text-[11px] text-slate-800 [text-align-last:center]"
     : "h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900";
   return (
     <form action={action} className={compact ? "mx-auto flex w-full max-w-[7.5rem] flex-col items-stretch gap-1" : "flex flex-wrap items-center gap-2"}>
@@ -1786,7 +1786,7 @@ function QueueReferral({
               </select>
             </label>
           ) : null}
-          {mode === "send" && preview ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p> : null}
+          {mode === "send" && preview ? <p className="whitespace-pre-line rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p> : null}
           {declineTag ? null : (
             <p className="text-sm text-slate-600">
               {desiredNo ? "Choose a decline reason under Desired." : "Set Desired to No and choose a decline reason under Desired."} Workers compensation and medical malpractice fill that reason from the referral type.

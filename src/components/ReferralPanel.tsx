@@ -123,7 +123,7 @@ export function ReferralPanel({
         </label>
         {destination?.notes ? <p className="text-sm text-slate-600">{destination.notes}</p> : null}
         {preview ? (
-          <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p>
+          <p className="whitespace-pre-line rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p>
         ) : null}
         {error ? <p className="text-sm text-red-700">{error}</p> : null}
         <button type="submit" disabled={pending} className="w-fit rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-navy disabled:opacity-60">

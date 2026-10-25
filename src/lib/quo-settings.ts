@@ -10,10 +10,14 @@ export type QuoLine = {
 const FIRM_LINES: QuoLine[] = [
   { number: "+15125373369", label: "RJL Main Line" },
   { number: "+19563137771", label: "RGV Number" },
+  { number: "+15127643037", label: "Leads" },
   { number: "+15126010647", label: "Intake" },
   { number: "+15125005266", label: "RJL Outbound" },
   { number: "+15126300907", label: "RJL Transfers" },
 ];
+
+/** Referral texts start on the Leads line unless staff pick another number. */
+export const DEFAULT_REFERRAL_FROM = "+15127643037";
 
 export type QuoSettings = {
   apiKey: string | null;

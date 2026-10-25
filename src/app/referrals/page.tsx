@@ -1,5 +1,6 @@
-import { saveDestination, saveReferralTemplate } from "@/lib/ops-actions";
+import { saveDestination, saveReferralFromNumber, saveReferralTemplate } from "@/lib/ops-actions";
 import { PRACTICE_AREAS, practiceAreaLabel, DEFAULT_REFERRAL_SMS } from "@/lib/referrals";
+import { DEFAULT_REFERRAL_FROM, listQuoLines, loadQuoSettings, quoLineLabel } from "@/lib/quo-settings";
 import { requireStaff } from "@/lib/session";
 
 type Destination = {
@@ -18,18 +19,25 @@ type Destination = {
 
 export default async function ReferralsPage() {
   const { supabase, admin } = await requireStaff();
-  const [{ data, error }, { data: templateRows }] = await Promise.all([
+  const [{ data, error }, { data: templateRows }, quo] = await Promise.all([
     supabase
       .from("referral_destinations")
       .select("id, name, phone, practice_areas, address, email, website, spanish, matters, notes, active")
       .eq("active", true)
       .order("name"),
     supabase.from("referral_templates").select("language, body"),
+    loadQuoSettings(),
   ]);
   const destinations = (data ?? []) as Destination[];
   const stored = (templateRows ?? []) as { language: string; body: string }[];
   const english = stored.find((row) => row.language === "en")?.body || DEFAULT_REFERRAL_SMS.en;
   const spanish = stored.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es;
+  const numbers = await listQuoLines(quo.apiKey);
+  const lines = quo.fromNumber && !numbers.lines.some((line) => line.number === quo.fromNumber)
+    ? [{ number: quo.fromNumber, label: "Saved number" }, ...numbers.lines]
+    : numbers.lines;
+  const fromNumber = quo.fromNumber && lines.some((line) => line.number === quo.fromNumber) ? quo.fromNumber : DEFAULT_REFERRAL_FROM;
+  const sendingFrom = lines.find((line) => line.number === fromNumber);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
@@ -39,6 +47,32 @@ export default async function ReferralsPage() {
         Placeholders: {"{{greeting}}"}, {"{{area}}"}, {"{{attorney}}"}, {"{{phone}}"}, {"{{details}}"}.
       </p>
       {error ? <p className="mt-4 text-sm text-red-700">{error.message}</p> : null}
+
+      <form action={saveReferralFromNumber} className="mt-6 grid max-w-md gap-2 rounded-lg border border-slate-200 bg-white p-4">
+        <label className="text-sm font-medium text-slate-700" htmlFor="referral-from">
+          Send referral texts from
+        </label>
+        <select
+          id="referral-from"
+          name="quo_from_number"
+          defaultValue={fromNumber}
+          required
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+        >
+          {lines.map((line) => (
+            <option key={line.number} value={line.number}>
+              {quoLineLabel(line)}
+            </option>
+          ))}
+        </select>
+        <p className="text-sm text-slate-500">
+          {sendingFrom ? `Texts currently send from ${quoLineLabel(sendingFrom)}.` : "Choose a Quo number."} The usual number is Leads.
+          {numbers.warning ? ` ${numbers.warning}` : ""}
+        </p>
+        <button type="submit" className="w-fit rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
+          Save number
+        </button>
+      </form>
 
       <div className="mt-6 grid gap-4">
         <TemplateForm language="en" label="English text" body={english} />
@@ -117,7 +151,7 @@ function TemplateForm({ language, label, body }: { language: "en" | "es"; label:
       <textarea
         id={`template-${language}`}
         name="body"
-        rows={3}
+        rows={6}
         defaultValue={body}
         className="rounded-md border border-slate-300 px-3 py-2 text-sm"
       />

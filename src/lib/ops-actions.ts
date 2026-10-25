@@ -26,7 +26,7 @@ import { createSupabaseServiceClient } from "./supabase/service";
 import { sendQuoText } from "./quo";
 import { listQuoLines } from "./quo-settings";
 import { DEFAULT_REFERRAL_SMS, isPracticeArea, renderReferralSms } from "./referrals";
-import { LEAD_CHANNEL_ID, postToSlack } from "./slack";
+import { LEAD_CHANNEL_ID, postToSlack, slackThreadParent } from "./slack";
 import { loadSlackSettings } from "./slack-settings";
 
 function text(formData: FormData, key: string): string | null {
@@ -1151,7 +1151,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
 
   const { data: lead, error: leadError } = await supabase
     .from("leads")
-    .select(`summary, slack_channel_id, slack_thread_ts, ${CLOSE_READY_COLUMNS}`)
+    .select(`summary, slack_channel_id, slack_thread_ts, slack_message_ts, slack_permalink, ${CLOSE_READY_COLUMNS}`)
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
@@ -1179,6 +1179,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
 
   const note = text(formData, "note");
   const outside = area !== "personal_injury";
+  const threadTs = slackThreadParent(lead);
   const { error: updateError } = await supabase
     .from("leads")
     .update({
@@ -1190,6 +1191,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
       practice_area: area,
       referral_opportunity: true,
       caller_class: outside ? "non_pi" : null,
+      ...(lead.slack_thread_ts || !threadTs ? {} : { slack_thread_ts: threadTs }),
     })
     .eq("id", leadId);
   if (updateError) return { error: `The text was sent. The lead did not close: ${updateError.message}` };
@@ -1216,7 +1218,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     await postToSlack({
       token: slack.token,
       channel: lead.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID,
-      threadTs: lead.slack_thread_ts,
+      threadTs,
       text: [
         `Referral sent: ${who}${lead.phone ? ` ${lead.phone}` : ""}`,
         `${language === "es" ? "Spanish" : "English"} text to the lead with ${destination.name}${destination.phone ? ` ${destination.phone}` : ""}.`,

@@ -295,6 +295,16 @@ function slackTsToIso(ts: string): string {
   return new Date(seconds * 1000).toISOString();
 }
 
+/** Parent of the lead's Slack thread. A permalink's thread_ts is the original post. */
+export function slackThreadParent(lead: {
+  slack_permalink?: string | null;
+  slack_thread_ts?: string | null;
+  slack_message_ts?: string | null;
+}): string | null {
+  const fromLink = lead.slack_permalink?.match(/[?&]thread_ts=(\d{10,}(?:\.\d+)?)/)?.[1] ?? null;
+  return lead.slack_thread_ts || fromLink || lead.slack_message_ts || parseSlackPermalink(lead.slack_permalink)?.ts || null;
+}
+
 export function parseSlackPermalink(url: string | null | undefined): { channel: string; ts: string } | null {
   const match = (url || "").match(/\/archives\/([CGD][A-Z0-9]+)\/p(\d{16,})/i);
   if (!match) return null;

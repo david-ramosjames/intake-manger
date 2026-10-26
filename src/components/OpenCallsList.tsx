@@ -15,6 +15,7 @@ export type OpenCallCard = {
   phone: string | null;
   sequenceLabel: string;
   dueLabel: string;
+  dayLabel: string;
   overdue: boolean;
   placeLabel: string;
   placeHref: string | null;
@@ -146,9 +147,12 @@ export function OpenCallsList({
 
       <div className={`mt-6 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
         <ul className="min-w-0 space-y-3">
-          {jobs.map((job) => (
-            <li
-              key={job.id}
+          {jobs.map((job, index) => (
+            <li key={job.id} className="space-y-3">
+              {view === "upcoming" && job.dayLabel && jobs[index - 1]?.dayLabel !== job.dayLabel ? (
+                <h2 className="pt-1 text-sm font-semibold text-navy">{job.dayLabel}</h2>
+              ) : null}
+            <div
               className={`rounded-lg border border-slate-200 bg-white p-4 text-sm ${
                 job.leadId === selectedId ? "bg-brand/10" : ""
               }`}
@@ -191,6 +195,7 @@ export function OpenCallsList({
                 consulted={job.consulted}
                 staff={staff}
               />
+            </div>
             </li>
           ))}
           {jobs.length === 0 ? (

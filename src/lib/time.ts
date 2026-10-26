@@ -94,6 +94,21 @@ export function formatCallWindow(value: string | null | undefined): string {
   return window ? `${day} ${window}` : formatCallWhen(value);
 }
 
+/** Today, Tomorrow, or a full weekday and date. Used to group upcoming calls. */
+export function formatCallDayHeading(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const relative = callDayLabel(date);
+  if (relative === "Today" || relative === "Tomorrow") return relative;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: ZONE,
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
 /** Calendar day for the next-action filter. Today and Tomorrow stay words. */
 export function formatCallDay(value: string | null | undefined): string {
   if (!value) return "";

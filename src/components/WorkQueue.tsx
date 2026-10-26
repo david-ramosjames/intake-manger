@@ -1640,6 +1640,7 @@ function QueueReferral({
   const [attorneyPhone, setAttorneyPhone] = useState("");
   const [textTouched, setTextTouched] = useState(false);
   const [recordedAttorney, setRecordedAttorney] = useState("");
+  const [hideRecorded, setHideRecorded] = useState(false);
   const notify = useContext(DrawerNoticeContext);
   const partners = area
     ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
@@ -1663,6 +1664,9 @@ function QueueReferral({
         })
       : "";
   useEffect(() => {
+    setHideRecorded(false);
+  }, [row.id]);
+  useEffect(() => {
     if (!startOpen) return;
     setMode("send");
     sectionRef.current?.scrollIntoView({ block: "nearest" });
@@ -1676,6 +1680,22 @@ function QueueReferral({
     setEditingText(true);
     if (!textTouched) setDraft(preview);
   }, [handwritten, preview, textTouched]);
+
+  function backToChoices() {
+    setHideRecorded(true);
+    setMode(null);
+    setArea("");
+    setFirmId("");
+    setLanguage("en");
+    setError(null);
+    setEditingText(false);
+    setDraft("");
+    setAttorneyName("");
+    setAttorneyPhone("");
+    setTextTouched(false);
+    setRecorded(null);
+    setRecordedAttorney("");
+  }
 
   function referralFields() {
     const data = new FormData();
@@ -1757,12 +1777,22 @@ function QueueReferral({
 
   return (
     <section ref={sectionRef}>
-      {row.referralSent || recorded === "sent" ? (
-        <p className="mt-2 text-sm font-medium text-emerald-800">
-          Referral sent{(recordedAttorney || row.referralFirm) ? ` · ${recordedAttorney || row.referralFirm}` : ""}
-        </p>
-      ) : recorded === "declined" ? (
-        <p className="mt-2 text-sm font-medium text-slate-700">Referral declined</p>
+      {!hideRecorded && (row.referralSent || recorded === "sent") ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p className="text-sm font-medium text-emerald-800">
+            Referral sent{(recordedAttorney || row.referralFirm) ? ` · ${recordedAttorney || row.referralFirm}` : ""}
+          </p>
+          <button type="button" onClick={backToChoices} className="text-sm font-medium text-navy underline">
+            Back
+          </button>
+        </div>
+      ) : !hideRecorded && recorded === "declined" ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p className="text-sm font-medium text-slate-700">Referral declined</p>
+          <button type="button" onClick={backToChoices} className="text-sm font-medium text-navy underline">
+            Back
+          </button>
+        </div>
       ) : !mode || !ready ? (
         <div className="mt-2 flex flex-wrap gap-2">
           <button
@@ -1797,7 +1827,12 @@ function QueueReferral({
           {error ? <p className="w-full text-sm text-red-700">{error}</p> : null}
         </div>
       ) : firms.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-600">Add a firm on the Referrals page first.</p>
+        <div className="mt-2 space-y-2">
+          <p className="text-sm text-slate-600">Add a firm on the Referrals page first.</p>
+          <button type="button" onClick={backToChoices} className="text-sm font-medium text-navy underline">
+            Back
+          </button>
+        </div>
       ) : (
         <div className="mt-2 space-y-2">
           <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -1920,7 +1955,10 @@ function QueueReferral({
             </p>
           )}
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={backToChoices} disabled={pending !== null} className="text-sm font-medium text-navy underline disabled:opacity-60">
+              Back
+            </button>
             {mode === "record" ? (
               <button
                 type="button"

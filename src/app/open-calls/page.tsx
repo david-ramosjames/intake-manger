@@ -6,7 +6,7 @@ import { requireStaff } from "@/lib/session";
 import { LEAD_CHANNEL_ID } from "@/lib/slack";
 import { loadSlackSettings } from "@/lib/slack-settings";
 import { isPlaceholderOwner } from "@/lib/talked-with";
-import { formatChicago } from "@/lib/time";
+import { formatCallDayHeading, formatChicago } from "@/lib/time";
 import { callFinishCounts, collapseDuplicateOpenCalls } from "@/lib/open-calls";
 import { loadWorkQueueRows, loadWorkQueueShelfContext } from "@/lib/work-queue-rows";
 
@@ -29,6 +29,7 @@ type LeadBits = {
   lead_status: string | null;
   signed_case: boolean | null;
   case_id: string | null;
+  caller_class: string | null;
 };
 
 type JobRow = {
@@ -46,12 +47,28 @@ type JobRow = {
 
 const CLOSED_STATUSES = "(Signed,Promoted,Lost,Referred)";
 const JOB_SELECT =
-  "id, lead_id, sequence, position, due_at, status, mention, assigned_name, notified_at, leads!inner(id, lead_name, phone, owner_name, consultation_date, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, identity_status, lead_status, signed_case, case_id)";
+  "id, lead_id, sequence, position, due_at, status, mention, assigned_name, notified_at, leads!inner(id, lead_name, phone, owner_name, consultation_date, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, identity_status, lead_status, signed_case, case_id, caller_class)";
 
 function leadStillOpen(lead: LeadBits | null): boolean {
   if (!lead) return false;
+  if (lead.caller_class && lead.caller_class !== "non_pi") return false;
   if (lead.signed_case === true || lead.case_id) return false;
   return !["Signed", "Promoted", "Lost", "Referred"].includes(lead.lead_status || "");
+}
+
+function nextCallPerLead(jobs: JobRow[]): JobRow[] {
+  const next = new Map<string, JobRow>();
+  for (const job of jobs) {
+    const current = next.get(job.lead_id);
+    if (
+      !current ||
+      job.due_at < current.due_at ||
+      (job.due_at === current.due_at && job.position < current.position)
+    ) {
+      next.set(job.lead_id, job);
+    }
+  }
+  return [...next.values()].sort((a, b) => a.due_at.localeCompare(b.due_at) || a.position - b.position);
 }
 
 function leadOf(job: JobRow): LeadBits | null {
@@ -96,6 +113,7 @@ function toCard(job: JobRow, channelId: string, now: number, totals: Map<string,
     phone: lead?.phone ?? null,
     sequenceLabel: sequenceLabel(job, totals),
     dueLabel: formatChicago(job.due_at),
+    dayLabel: formatCallDayHeading(job.due_at),
     overdue: new Date(job.due_at).getTime() < now,
     placeLabel: place.label,
     placeHref: place.href,
@@ -137,11 +155,12 @@ export default async function OpenCallsPage({
         .eq("status", "pending")
         .lte("due_at", nowIso)
         .eq("leads.test", false)
+        .or("caller_class.is.null,caller_class.eq.non_pi", { referencedTable: "leads" })
         .or("signed_case.is.null,signed_case.eq.false", { referencedTable: "leads" })
         .is("leads.case_id", null)
         .not("leads.lead_status", "in", CLOSED_STATUSES)
         .order("due_at")
-        .limit(200),
+        .limit(1000),
       supabase
         .from("lead_jobs")
         .select(JOB_SELECT)
@@ -149,11 +168,12 @@ export default async function OpenCallsPage({
         .eq("status", "pending")
         .gt("due_at", nowIso)
         .eq("leads.test", false)
+        .or("caller_class.is.null,caller_class.eq.non_pi", { referencedTable: "leads" })
         .or("signed_case.is.null,signed_case.eq.false", { referencedTable: "leads" })
         .is("leads.case_id", null)
         .not("leads.lead_status", "in", CLOSED_STATUSES)
         .order("due_at")
-        .limit(200),
+        .limit(1000),
       supabase.from("sequence_steps").select("sequence, position").eq("queue", "call"),
       loadStaff(supabase),
       loadSlackSettings(),
@@ -165,12 +185,12 @@ export default async function OpenCallsPage({
     const position = Number((row as { position?: number }).position || 0);
     totals.set(sequence, Math.max(totals.get(sequence) ?? 0, position));
   }
-  const waiting = ((waitingRows ?? []) as JobRow[])
-    .filter((job) => leadStillOpen(leadOf(job)))
-    .map((job) => toCard(job, slack.channelId, now, totals));
-  const upcoming = ((upcomingRows ?? []) as JobRow[])
-    .filter((job) => leadStillOpen(leadOf(job)))
-    .map((job) => toCard(job, slack.channelId, now, totals));
+  const waiting = nextCallPerLead(((waitingRows ?? []) as JobRow[]).filter((job) => leadStillOpen(leadOf(job)))).map((job) =>
+    toCard(job, slack.channelId, now, totals),
+  );
+  const upcoming = nextCallPerLead(((upcomingRows ?? []) as JobRow[]).filter((job) => leadStillOpen(leadOf(job)))).map((job) =>
+    toCard(job, slack.channelId, now, totals),
+  );
   const people = tagOptions(["Outbound", ...staff.map((person) => person.name), ...waiting.map((job) => job.tagName), ...upcoming.map((job) => job.tagName)]);
   const matches = (job: OpenCallCard) => !tag || job.tagName === tag;
   const waitingShown = waiting.filter(matches);

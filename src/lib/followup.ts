@@ -28,6 +28,7 @@ type LeadBits = {
   lead_date?: string | null;
   phone?: string | null;
   phone_e164?: string | null;
+  caller_class?: string | null;
 };
 
 /** Day 1 of a sequence. A later sequence starts over from its own day 1. */
@@ -64,6 +65,7 @@ export function renderStep(body: string, lead: { lead_name: string | null; case_
 
 function closedLead(lead: LeadBits): boolean {
   if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) return false;
+  if (lead.caller_class && lead.caller_class !== "non_pi") return true;
   return lead.signed_case || Boolean(lead.case_id) || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status);
 }
 
@@ -178,7 +180,7 @@ export async function enrollFollowUp(
 }
 
 const FOLLOW_UP_COLUMNS =
-  "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, priority, created_at, consultation_date, lead_date, phone, phone_e164";
+  "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, caller_class, arrival, owner_name, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, priority, created_at, consultation_date, lead_date, phone, phone_e164";
 
 export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   const [{ data, error }, { data: contractLeads, error: contractError }] = await Promise.all([
@@ -187,6 +189,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
       .select(FOLLOW_UP_COLUMNS)
       .eq("follow_up", true)
       .eq("test", false)
+      .or("caller_class.is.null,caller_class.eq.non_pi")
       .or("and(signed_case.eq.false,case_id.is.null,lead_status.not.in.(Lost,Referred,Promoted,Signed)),phone_e164.eq.+17654183805")
       .order("created_at", { ascending: false })
       .limit(80),
@@ -195,6 +198,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
       .select(FOLLOW_UP_COLUMNS)
       .eq("follow_up", true)
       .eq("test", false)
+      .or("caller_class.is.null,caller_class.eq.non_pi")
       .eq("signed_case", false)
       .is("case_id", null)
       .not("lead_status", "in", "(Lost,Referred,Promoted,Signed)")

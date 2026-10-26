@@ -3,7 +3,7 @@ import { weekendCallAllowed } from "./callbacks";
 import { leadSequenceId, loadWorkHours } from "./sequences";
 import { loadSlackSettings } from "./slack-settings";
 import { loadStaff } from "./identity";
-import { channelOutboundMention, LEAD_CHANNEL_ID, mentionForName, postToSlack } from "./slack";
+import { channelOutboundMention, LEAD_CHANNEL_ID, mentionForName, postToSlack, slackThreadParent } from "./slack";
 import { isPlaceholderOwner, slackMentionFor } from "./talked-with";
 import { sendQuoText } from "./quo";
 import { phoneTail } from "./phone";
@@ -186,6 +186,21 @@ export async function dispatchDue(supabase: SupabaseClient) {
       if (!weekend && sequence && !withinWorkHours(nowDate, hoursBySequence[sequence])) continue;
       const topicChannel = slack.channelId || LEAD_CHANNEL_ID;
       const mention = await resolveCallMention(job, lead, staff, slack.token, topicChannel);
+      if (slack.posting && postThisLead) {
+        const who = lead.lead_name?.trim() || "A lead";
+        const phone = lead.phone || lead.phone_e164 || "";
+        const posted = await postToSlack({
+          token: slack.token,
+          channel: lead.slack_channel_id || topicChannel,
+          threadTs: slackThreadParent(lead),
+          text: [`${mention ? `${mention} ` : ""}Call due: ${who}${phone ? ` ${phone}` : ""}`.trim(), job.body].filter(Boolean).join("\n"),
+        });
+        if (!posted.ok) {
+          await supabase.from("lead_jobs").update({ detail: `Slack did not post the call reminder. ${posted.error}` }).eq("id", job.id);
+          result.failed += 1;
+          continue;
+        }
+      }
       await supabase
         .from("lead_jobs")
         .update({

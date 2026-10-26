@@ -1147,9 +1147,12 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const language = text(formData, "language") === "es" ? "es" : "en";
   const area = text(formData, "practice_area");
   const edited = text(formData, "message");
+  const attorneyName = text(formData, "attorney_name");
+  const attorneyPhone = text(formData, "attorney_phone");
   if (edited && edited.length > 2000) return { error: "Shorten the text before sending." };
   if (edited && edited.includes("{{")) return { error: "Fill in the attorney and phone in the text." };
-  if (!destinationId && !edited) return { error: "Pick the attorney to refer, or write the text." };
+  if (!destinationId && !attorneyName) return { error: "Enter the attorney." };
+  if (!destinationId && !edited) return { error: "Write the text before sending." };
   if (!isPracticeArea(area)) return { error: "Choose the legal practice area." };
   let destination: {
     id: string;
@@ -1226,6 +1229,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
     destination_id: destination?.id ?? null,
+    attorney_name: destination ? null : attorneyName,
     actor: email,
     note,
     language,
@@ -1236,14 +1240,16 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     lead_id: leadId,
     event_type: "referred",
     actor: email,
-    payload: { destination: destination?.name ?? null, phone: destination?.phone ?? null, language, message },
+    payload: { destination: destination?.name ?? attorneyName ?? null, phone: destination?.phone ?? attorneyPhone ?? null, language, message },
   });
 
   const who = lead.lead_name || "Unnamed lead";
   const slack = await loadSlackSettings();
-  const attorneyLine = destination
-    ? `${language === "es" ? "Spanish" : "English"} text to the lead with ${destination.name}${destination.phone ? ` ${destination.phone}` : ""}.`
-    : `${language === "es" ? "Spanish" : "English"} text to the lead. The attorney was written into the text.`;
+  const namedAttorney = destination?.name || attorneyName;
+  const namedPhone = destination?.phone || attorneyPhone;
+  const attorneyLine = namedAttorney
+    ? `${language === "es" ? "Spanish" : "English"} text to the lead with ${namedAttorney}${namedPhone ? ` ${namedPhone}` : ""}.`
+    : `${language === "es" ? "Spanish" : "English"} text to the lead.`;
   if (slack.posting) {
     await postToSlack({
       token: slack.token,
@@ -1302,18 +1308,23 @@ async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined
 export async function markReferralAlreadySent(leadId: string, formData: FormData): Promise<{ error?: string }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
+  const attorneyName = text(formData, "attorney_name");
   const chosenLanguage = text(formData, "language");
   const language = chosenLanguage === "es" || chosenLanguage === "en" ? chosenLanguage : null;
   const area = text(formData, "practice_area");
-  if (!destinationId) return { error: "Pick the firm." };
-  if (!isPracticeArea(area)) return { error: "That firm has no practice area for this referral." };
-  const { data: destination, error: loadError } = await supabase
-    .from("referral_destinations")
-    .select("id, name, phone, practice_areas")
-    .eq("id", destinationId)
-    .maybeSingle();
-  if (loadError || !destination) return { error: loadError?.message ?? "That firm is missing." };
-  if (!(destination.practice_areas ?? []).includes(area)) return { error: "That firm is not listed for this practice area." };
+  if (!destinationId && !attorneyName) return { error: "Enter the attorney." };
+  if (!isPracticeArea(area)) return { error: "Choose the referral type." };
+  let destination: { id: string; name: string; phone: string | null; practice_areas: string[] | null } | null = null;
+  if (destinationId) {
+    const { data, error: loadError } = await supabase
+      .from("referral_destinations")
+      .select("id, name, phone, practice_areas")
+      .eq("id", destinationId)
+      .maybeSingle();
+    if (loadError || !data) return { error: loadError?.message ?? "That firm is missing." };
+    if (!(data.practice_areas ?? []).includes(area)) return { error: "That firm is not listed for this practice area." };
+    destination = data;
+  }
   const { data: lead, error: leadError } = await supabase
     .from("leads")
     .select(CLOSE_READY_COLUMNS)
@@ -1345,7 +1356,8 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
   await stopFollowUp(supabase, leadId, "Referred out.");
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
-    destination_id: destination.id,
+    destination_id: destination?.id ?? null,
+    attorney_name: destination ? null : attorneyName,
     actor: email,
     note: "Already sent outside Intake Manager",
     language,
@@ -1356,7 +1368,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     lead_id: leadId,
     event_type: "referred",
     actor: email,
-    payload: { destination: destination.name, language, recorded: true },
+    payload: { destination: destination?.name ?? attorneyName ?? null, language, recorded: true },
   });
   revalidatePath("/");
   revalidatePath("/review");

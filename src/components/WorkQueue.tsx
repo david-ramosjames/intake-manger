@@ -1629,6 +1629,10 @@ function QueueReferral({
   const [recorded, setRecorded] = useState<"sent" | "declined" | null>(null);
   const [editingText, setEditingText] = useState(false);
   const [draft, setDraft] = useState("");
+  const [attorneyName, setAttorneyName] = useState("");
+  const [attorneyPhone, setAttorneyPhone] = useState("");
+  const [textTouched, setTextTouched] = useState(false);
+  const [recordedAttorney, setRecordedAttorney] = useState("");
   const notify = useContext(DrawerNoticeContext);
   const partners = area
     ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
@@ -1642,7 +1646,13 @@ function QueueReferral({
           template: templates[language],
           leadName: row.leadName || row.title,
           area,
-          destination: firm ?? { name: "{{attorney}}", phone: "{{phone}}", address: null, email: null, website: null },
+          destination: firm ?? {
+            name: attorneyName.trim() || "{{attorney}}",
+            phone: attorneyPhone.trim() || "{{phone}}",
+            address: null,
+            email: null,
+            website: null,
+          },
         })
       : "";
   useEffect(() => {
@@ -1651,14 +1661,14 @@ function QueueReferral({
     sectionRef.current?.scrollIntoView({ block: "nearest" });
   }, [startOpen]);
   useEffect(() => {
-    if (handwritten) {
-      setEditingText(true);
-      setDraft(preview);
+    if (!handwritten) {
+      setEditingText(false);
+      setDraft("");
       return;
     }
-    setEditingText(false);
-    setDraft("");
-  }, [area, firmId, language, handwritten, preview]);
+    setEditingText(true);
+    if (!textTouched) setDraft(preview);
+  }, [handwritten, preview, textTouched]);
 
   function referralFields() {
     const data = new FormData();
@@ -1669,8 +1679,8 @@ function QueueReferral({
   }
 
   async function submit(kind: "send" | "already") {
-    if (!area || (!handwritten && !firm)) {
-      setError(handwritten ? "Choose a referral type." : "Choose a referral type and a partner.");
+    if (!area || (handwritten ? !attorneyName.trim() : !firm)) {
+      setError(handwritten ? "Enter the attorney." : "Choose a referral type and a partner.");
       return;
     }
     setPending(kind);
@@ -1678,6 +1688,10 @@ function QueueReferral({
     notify({ tone: "saving", text: "Saving…" });
     const data = referralFields();
     if (firm) data.set("destination_id", firm.id);
+    if (handwritten) {
+      data.set("attorney_name", attorneyName.trim());
+      if (attorneyPhone.trim()) data.set("attorney_phone", attorneyPhone.trim());
+    }
     if (kind === "send") {
       data.set("language", language);
       const message = (editingText ? draft : preview).trim();
@@ -1697,6 +1711,7 @@ function QueueReferral({
         setError(result.error);
         return;
       }
+      setRecordedAttorney(handwritten ? attorneyName.trim() : firm?.name || "");
       setRecorded("sent");
       notify({ tone: "saved", text: "Referral sent" });
     } catch (err) {
@@ -1737,7 +1752,7 @@ function QueueReferral({
     <section ref={sectionRef}>
       {row.referralSent || recorded === "sent" ? (
         <p className="mt-2 text-sm font-medium text-emerald-800">
-          Referral sent{row.referralFirm ? ` · ${row.referralFirm}` : ""}
+          Referral sent{(recordedAttorney || row.referralFirm) ? ` · ${recordedAttorney || row.referralFirm}` : ""}
         </p>
       ) : recorded === "declined" ? (
         <p className="mt-2 text-sm font-medium text-slate-700">Referral declined</p>
@@ -1785,6 +1800,9 @@ function QueueReferral({
               onChange={(event) => {
                 setArea(event.target.value);
                 setFirmId("");
+                setAttorneyName("");
+                setAttorneyPhone("");
+                setTextTouched(false);
               }}
               className={fieldClass}
             >
@@ -1797,7 +1815,26 @@ function QueueReferral({
             </select>
           </label>
           {handwritten ? (
-            <p className="text-sm text-slate-600">No attorney is listed for this type. The text starts from the template so you can write in the name and number.</p>
+            <>
+              <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Attorney
+                <input
+                  value={attorneyName}
+                  onChange={(event) => setAttorneyName(event.target.value)}
+                  placeholder="Name"
+                  className={fieldClass}
+                />
+              </label>
+              <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Phone
+                <input
+                  value={attorneyPhone}
+                  onChange={(event) => setAttorneyPhone(event.target.value)}
+                  placeholder="Phone"
+                  className={fieldClass}
+                />
+              </label>
+            </>
           ) : (
             <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
               Referral partner
@@ -1822,7 +1859,10 @@ function QueueReferral({
               Language
               <select
                 value={language}
-                onChange={(event) => setLanguage(event.target.value === "es" ? "es" : "en")}
+                onChange={(event) => {
+                  setLanguage(event.target.value === "es" ? "es" : "en");
+                  setTextTouched(false);
+                }}
                 className={fieldClass}
               >
                 <option value="en">English</option>
@@ -1842,6 +1882,7 @@ function QueueReferral({
                       setDraft("");
                       return;
                     }
+                    setTextTouched(false);
                     setDraft(preview);
                     setEditingText(true);
                   }}
@@ -1853,7 +1894,10 @@ function QueueReferral({
               {editingText ? (
                 <textarea
                   value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
+                  onChange={(event) => {
+                    setTextTouched(true);
+                    setDraft(event.target.value);
+                  }}
                   rows={8}
                   aria-label="Referral text"
                   className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
@@ -1873,7 +1917,7 @@ function QueueReferral({
             {mode === "record" ? (
               <button
                 type="button"
-                disabled={pending !== null || !ready || !firm || !area}
+                disabled={pending !== null || !ready || !area || (handwritten ? !attorneyName.trim() : !firm)}
                 onClick={() => void submit("already")}
                 className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
               >
@@ -1882,7 +1926,7 @@ function QueueReferral({
             ) : (
               <button
                 type="button"
-                disabled={pending !== null || !ready || !area || (!handwritten && !firm)}
+                disabled={pending !== null || !ready || !area || (handwritten ? !attorneyName.trim() : !firm)}
                 onClick={() => void submit("send")}
                 className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
               >

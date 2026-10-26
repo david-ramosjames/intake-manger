@@ -21,7 +21,7 @@ import { phoneLikePattern, phoneTail } from "@/lib/phone";
 import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, formatCallDay, formatCallWhen, formatQueueStamp } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
-import { loadNavTiles, type QueueFocus } from "@/lib/dashboard";
+import { DASHBOARD_RELEASE_DAY, loadNavTiles, type QueueFocus } from "@/lib/dashboard";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -64,6 +64,16 @@ function recentCutoff(): string {
   return new Date(Date.UTC(year, month - 1, day - 30)).toISOString().slice(0, 10);
 }
 
+/** Header counts stay inside the last 30 days, and never reach back before the release. */
+function metricStartDay(): string {
+  const rolling = recentCutoff();
+  return rolling > DASHBOARD_RELEASE_DAY ? rolling : DASHBOARD_RELEASE_DAY;
+}
+
+function leadMetricDay(lead: { lead_date: string | null; created_at: string | null }): string {
+  return (lead.lead_date || lead.created_at || "").slice(0, 10);
+}
+
 function phoneKey(value: string | null | undefined): string {
   const digits = (value ?? "").replace(/\D/g, "");
   return digits.length >= 10 ? digits.slice(-10) : "";
@@ -71,6 +81,7 @@ function phoneKey(value: string | null | undefined): string {
 
 function combineByPhone<T extends { lead: ListLead; cycle: string; age: number | null; inWindow: boolean }>(
   input: T[],
+  metricStart: string,
 ): { row: T; others: T[] }[] {
   const groups = new Map<string, T[]>();
   const order: string[] = [];
@@ -101,7 +112,11 @@ function combineByPhone<T extends { lead: ListLead; cycle: string; age: number |
     });
     const [keeper, ...others] = sorted;
     const age = group.reduce<number | null>((newest, item) => (item.age != null && (newest == null || item.age < newest) ? item.age : newest), null);
-    return { row: { ...keeper, age, inWindow: age != null && age <= 30 }, others };
+    const newestDay = group.reduce((best, item) => {
+      const day = leadMetricDay(item.lead);
+      return day > best ? day : best;
+    }, "");
+    return { row: { ...keeper, age, inWindow: Boolean(newestDay) && newestDay >= metricStart }, others };
   });
 }
 
@@ -454,7 +469,7 @@ export default async function LeadListPage({
     .or("lead_status.in.(Signed,Promoted,Lost,Referred),signed_case.eq.true,case_id.not.is.null")
     .order("lead_date", { ascending: false, nullsFirst: false })
     .limit(300);
-  const since = recentCutoff();
+  const since = metricStartDay();
   const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, desiredCount, { data: stepRows }, destinationResult, templateResult] = await Promise.all([
     focusIds ? Promise.resolve({ data: [] as ListLead[], error: null }) : funnel === "closed" ? closedQuery : loadOpenWorkLeads(supabase),
     queue === "nonleads"
@@ -568,19 +583,19 @@ export default async function LeadListPage({
       ? eachSlice(leadIds, 100, async (slice) => {
           const { data } = await supabase
             .from("referral_sends")
-            .select("lead_id, destination_id, created_at")
+            .select("lead_id, destination_id, attorney_name, created_at")
             .in("lead_id", slice);
-          return (data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
+          return (data ?? []) as { lead_id: string; destination_id: string | null; attorney_name: string | null; created_at: string }[];
         }).then((rows) => ({ data: rows, error: null }))
-      : Promise.resolve({ data: [] as { lead_id: string; destination_id: string; created_at: string }[], error: null }),
+      : Promise.resolve({ data: [] as { lead_id: string; destination_id: string | null; attorney_name: string | null; created_at: string }[], error: null }),
     leadIds.length ? supabase.rpc("work_queue_activity", { lead_ids: leadIds }) : Promise.resolve({ data: [] as QueueActivity[], error: null }),
     loadPendingJobs(supabase, idSet),
     loadLeadCallJobs(supabase, leadIds),
     loadStaffTouchedIds(supabase, leadIds),
   ]);
-  const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string; created_at: string }[];
+  const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string | null; attorney_name: string | null; created_at: string }[];
   sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
-  for (const send of sendRows) sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+  for (const send of sendRows) sentFirm.set(send.lead_id, (send.destination_id ? firmName.get(send.destination_id) : "") || send.attorney_name || "");
 
   if (leadIds.length && !activity.error) {
     const activityRows = (activity.data ?? []) as QueueActivity[];
@@ -708,7 +723,7 @@ export default async function LeadListPage({
       tally,
       waiting,
       attention,
-      inWindow: age != null && age <= 30,
+      inWindow: leadMetricDay(lead) >= since,
       label: queueStageLabel(lead, leadStatusLabel(lead, cycle)),
       step: queueStep(lead, cycle, tally.calls),
       actionTitle: openLeadAction(lead, cycle, tally.calls),
@@ -722,8 +737,8 @@ export default async function LeadListPage({
   const listed = queue === "nonleads"
     ? rows.filter((row) => badCall.has(row.lead.caller_class ?? ""))
     : rows.filter((row) => isWorkLead(row.lead) || (q.length > 0 && row.lead.caller_class === DATA_ERROR_CLASS));
-  const combined = combineByPhone(listed);
-  const windowRows = combineByPhone(workRows).filter((group) => group.row.inWindow);
+  const combined = combineByPhone(listed, since);
+  const windowRows = combineByPhone(workRows, since).filter((group) => group.row.inWindow);
   const metrics = {
     contact: windowRows.filter((group) => group.row.cycle === "contact").length,
     information: windowRows.filter((group) => group.row.cycle === "information").length,
@@ -905,14 +920,14 @@ export default async function LeadListPage({
           <QueueHelp />
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400" title="Where leads from the last 30 days are now. Filtering the list below leaves these numbers in place.">
-            Last 30 days
+          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400" title={since > recentCutoff() ? "Where leads since the release are now. Signed cases from before the release are left out. Filtering the list below leaves these numbers in place." : "Where leads from the last 30 days are now. Filtering the list below leaves these numbers in place."}>
+            {since > recentCutoff() ? "Since release" : "Last 30 days"}
           </span>
           <WorkMetric href={href({ queue: "contact", q, range, funnel, focus, entry })} active={queue === "contact"} label={CYCLE_LABEL.contact} value={String(metrics.contact)} tone="text-amber-700" instantQueue={instantStage ? "contact" : undefined} />
           <WorkMetric href={href({ queue: "information", q, range, funnel, focus, entry })} active={queue === "information"} label={CYCLE_LABEL.information} value={String(metrics.information)} tone="text-sky-700" instantQueue={instantStage ? "information" : undefined} />
           <WorkMetric href={href({ queue: "signing", q, range, funnel, focus, entry })} active={queue === "signing"} label="Finish signing" value={String(metrics.signing)} tone="text-violet-700" instantQueue={instantStage ? "signing" : undefined} />
           <WorkMetric href={href({ queue: "signed", q, range, funnel: "closed", focus })} active={queue === "signed" && funnel === "closed"} label="Signed" value={String(metrics.signed)} tone="text-emerald-700" instantQueue={funnel === "closed" ? "signed" : undefined} />
-          <span className="flex items-baseline gap-1.5 px-1" title="Signed leads among desired cases from the last 30 days.">
+          <span className="flex items-baseline gap-1.5 px-1" title={since > recentCutoff() ? "Signed leads among desired cases since the release." : "Signed leads among desired cases from the last 30 days."}>
             <span className="text-lg font-semibold tabular-nums leading-none text-navy">{conversion}%</span>
             <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Of desired</span>
           </span>

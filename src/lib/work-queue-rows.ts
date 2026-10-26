@@ -374,7 +374,7 @@ export async function loadWorkQueueRows(
         .order("name"),
       supabase.from("referral_templates").select("language, body"),
       loadStaff(supabase),
-      supabase.from("referral_sends").select("lead_id, destination_id, created_at").in("lead_id", ids),
+      supabase.from("referral_sends").select("lead_id, destination_id, attorney_name, created_at").in("lead_id", ids),
       supabase.from("lead_jobs").select("id, lead_id, due_at, queue, assigned_name, position").in("lead_id", ids).eq("status", "pending"),
       supabase
         .from("intake_interactions")
@@ -407,10 +407,10 @@ export async function loadWorkQueueRows(
   };
   const firmName = new Map(destinations.map((destination) => [destination.id, destination.name]));
   const sentFirm = new Map<string, string>();
-  for (const send of [...((sendRows ?? []) as { lead_id: string; destination_id: string; created_at: string }[])].sort((a, b) =>
+  for (const send of [...((sendRows ?? []) as { lead_id: string; destination_id: string | null; attorney_name: string | null; created_at: string }[])].sort((a, b) =>
     a.created_at.localeCompare(b.created_at),
   )) {
-    sentFirm.set(send.lead_id, firmName.get(send.destination_id) || "");
+    sentFirm.set(send.lead_id, (send.destination_id ? firmName.get(send.destination_id) : "") || send.attorney_name || "");
   }
 
   const idSet = new Set(ids);

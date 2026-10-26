@@ -1634,25 +1634,31 @@ function QueueReferral({
     ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
     : [];
   const firm = partners.find((item) => item.id === firmId) ?? null;
+  const handwritten = Boolean(area) && partners.length === 0;
+  const preview =
+    area && (firm || handwritten)
+      ? renderReferralSms({
+          language,
+          template: templates[language],
+          leadName: row.leadName || row.title,
+          area,
+          destination: firm ?? { name: "{{attorney}}", phone: "{{phone}}", address: null, email: null, website: null },
+        })
+      : "";
   useEffect(() => {
     if (!startOpen) return;
     setMode("send");
     sectionRef.current?.scrollIntoView({ block: "nearest" });
   }, [startOpen]);
   useEffect(() => {
+    if (handwritten) {
+      setEditingText(true);
+      setDraft(preview);
+      return;
+    }
     setEditingText(false);
     setDraft("");
-  }, [area, firmId, language]);
-  const preview =
-    firm && area
-      ? renderReferralSms({
-          language,
-          template: templates[language],
-          leadName: row.leadName || row.title,
-          area,
-          destination: firm,
-        })
-      : "";
+  }, [area, firmId, language, handwritten, preview]);
 
   function referralFields() {
     const data = new FormData();
@@ -1663,22 +1669,22 @@ function QueueReferral({
   }
 
   async function submit(kind: "send" | "already") {
-    if (!firm || !area) {
-      setError("Choose a referral type and a partner.");
+    if (!area || (!handwritten && !firm)) {
+      setError(handwritten ? "Choose a referral type." : "Choose a referral type and a partner.");
       return;
     }
     setPending(kind);
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
     const data = referralFields();
-    data.set("destination_id", firm.id);
+    if (firm) data.set("destination_id", firm.id);
     if (kind === "send") {
       data.set("language", language);
       const message = (editingText ? draft : preview).trim();
-      if (!message) {
+      if (!message || message.includes("{{")) {
         setPending(null);
-        setError("Write the text before sending.");
-        notify({ tone: "error", text: "Write the text before sending." });
+        setError(message.includes("{{") ? "Fill in the attorney and phone in the text." : "Write the text before sending.");
+        notify({ tone: "error", text: message.includes("{{") ? "Fill in the attorney and phone in the text." : "Write the text before sending." });
         return;
       }
       data.set("message", message);
@@ -1790,23 +1796,27 @@ function QueueReferral({
               ))}
             </select>
           </label>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Referral partner
-            <select
-              value={firm?.id ?? ""}
-              disabled={!area}
-              onChange={(event) => setFirmId(event.target.value)}
-              className={fieldClass}
-            >
-              <option value="">{area ? "Choose the partner" : "Choose a type first"}</option>
-              {partners.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                  {item.phone ? ` · ${item.phone}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          {handwritten ? (
+            <p className="text-sm text-slate-600">No attorney is listed for this type. The text starts from the template so you can write in the name and number.</p>
+          ) : (
+            <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+              Referral partner
+              <select
+                value={firm?.id ?? ""}
+                disabled={!area}
+                onChange={(event) => setFirmId(event.target.value)}
+                className={fieldClass}
+              >
+                <option value="">{area ? "Choose the partner" : "Choose a type first"}</option>
+                {partners.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                    {item.phone ? ` · ${item.phone}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {mode === "send" ? (
             <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
               Language
@@ -1827,7 +1837,7 @@ function QueueReferral({
                 <button
                   type="button"
                   onClick={() => {
-                    if (editingText) {
+                    if (editingText && !handwritten) {
                       setEditingText(false);
                       setDraft("");
                       return;
@@ -1872,7 +1882,7 @@ function QueueReferral({
             ) : (
               <button
                 type="button"
-                disabled={pending !== null || !ready || !firm || !area}
+                disabled={pending !== null || !ready || !area || (!handwritten && !firm)}
                 onClick={() => void submit("send")}
                 className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
               >

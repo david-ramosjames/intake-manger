@@ -1146,15 +1146,30 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const destinationId = text(formData, "destination_id");
   const language = text(formData, "language") === "es" ? "es" : "en";
   const area = text(formData, "practice_area");
-  if (!destinationId) return { error: "Pick the attorney to refer." };
+  const edited = text(formData, "message");
+  if (edited && edited.length > 2000) return { error: "Shorten the text before sending." };
+  if (edited && edited.includes("{{")) return { error: "Fill in the attorney and phone in the text." };
+  if (!destinationId && !edited) return { error: "Pick the attorney to refer, or write the text." };
   if (!isPracticeArea(area)) return { error: "Choose the legal practice area." };
-  const { data: destination, error: loadError } = await supabase
-    .from("referral_destinations")
-    .select("id, name, phone, address, email, website, practice_areas, spanish, notes")
-    .eq("id", destinationId)
-    .maybeSingle();
-  if (loadError || !destination) return { error: loadError?.message ?? "That referral destination is missing." };
-  if (!(destination.practice_areas ?? []).includes(area)) return { error: "That attorney is not listed for this practice area." };
+  let destination: {
+    id: string;
+    name: string;
+    phone: string | null;
+    address: string | null;
+    email: string | null;
+    website: string | null;
+    practice_areas: string[] | null;
+  } | null = null;
+  if (destinationId) {
+    const { data, error: loadError } = await supabase
+      .from("referral_destinations")
+      .select("id, name, phone, address, email, website, practice_areas, spanish, notes")
+      .eq("id", destinationId)
+      .maybeSingle();
+    if (loadError || !data) return { error: loadError?.message ?? "That referral destination is missing." };
+    if (!(data.practice_areas ?? []).includes(area)) return { error: "That attorney is not listed for this practice area." };
+    destination = data;
+  }
 
   const { data: lead, error: leadError } = await supabase
     .from("leads")
@@ -1174,17 +1189,18 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
 
   const { data: templates } = await supabase.from("referral_templates").select("language, body");
   const stored = (templates ?? []).find((row) => row.language === language)?.body;
-  const edited = text(formData, "message");
-  if (edited && edited.length > 2000) return { error: "Shorten the text before sending." };
   const message =
     edited ||
-    renderReferralSms({
-      language,
-      template: stored || DEFAULT_REFERRAL_SMS[language],
-      leadName: lead.lead_name,
-      area,
-      destination,
-    });
+    (destination
+      ? renderReferralSms({
+          language,
+          template: stored || DEFAULT_REFERRAL_SMS[language],
+          leadName: lead.lead_name,
+          area,
+          destination,
+        })
+      : "");
+  if (!message) return { error: "Write the text before sending." };
   const sent = await sendQuoText(to, message);
   if (!sent.ok) return { error: `${sent.error} The lead is still open.` };
 
@@ -1209,7 +1225,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   await stopFollowUp(supabase, leadId, "Referred out.");
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
-    destination_id: destination.id,
+    destination_id: destination?.id ?? null,
     actor: email,
     note,
     language,
@@ -1220,21 +1236,20 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     lead_id: leadId,
     event_type: "referred",
     actor: email,
-    payload: { destination: destination.name, phone: destination.phone, language, message },
+    payload: { destination: destination?.name ?? null, phone: destination?.phone ?? null, language, message },
   });
 
   const who = lead.lead_name || "Unnamed lead";
   const slack = await loadSlackSettings();
+  const attorneyLine = destination
+    ? `${language === "es" ? "Spanish" : "English"} text to the lead with ${destination.name}${destination.phone ? ` ${destination.phone}` : ""}.`
+    : `${language === "es" ? "Spanish" : "English"} text to the lead. The attorney was written into the text.`;
   if (slack.posting) {
     await postToSlack({
       token: slack.token,
       channel: lead.slack_channel_id || slack.channelId || LEAD_CHANNEL_ID,
       threadTs,
-      text: [
-        `Referral sent: ${who}${lead.phone ? ` ${lead.phone}` : ""}`,
-        `${language === "es" ? "Spanish" : "English"} text to the lead with ${destination.name}${destination.phone ? ` ${destination.phone}` : ""}.`,
-        message,
-      ].join("\n"),
+      text: [`Referral sent: ${who}${lead.phone ? ` ${lead.phone}` : ""}`, attorneyLine, message].join("\n"),
     });
   }
 

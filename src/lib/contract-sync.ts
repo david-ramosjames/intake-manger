@@ -17,7 +17,8 @@ function signingSlug(content: string): string | null {
 }
 
 function receivedSigned(content: string): boolean {
-  return /received your signed documents|documentos firmados/i.test(content);
+  // Reminders say "necesitamos sus documentos firmados". Only the thank-you receipt counts.
+  return /received your signed documents|recibió sus documentos firmados|recibio sus documentos firmados/i.test(content);
 }
 
 /** The contract text is the official name. A later link for another document does not reopen the contract. */
@@ -28,7 +29,14 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     .select("phone_e164, content, occurred_at")
     .eq("type", "text")
     .gte("occurred_at", since)
-    .or(`content.ilike.%${HOST}%,content.ilike.%received your signed documents%`)
+    .or(
+      [
+        `content.ilike.%${HOST}%`,
+        'content.ilike."%received your signed documents%"',
+        'content.ilike."%recibió sus documentos firmados%"',
+        'content.ilike."%recibio sus documentos firmados%"',
+      ].join(","),
+    )
     .order("occurred_at", { ascending: false })
     .limit(800);
   if (error) throw new Error(error.message);
@@ -86,28 +94,31 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     const openedAfterSignature = Boolean(
       signal.signedAt && lead.created_at && Date.parse(String(lead.created_at)) > Date.parse(signal.signedAt),
     );
-    if (signedAfterLink && openedAfterSignature) continue;
-    const confirmationForThisContract = Boolean(
-      signedAfterLink && (!storedSlug || !signal.openSlug || signal.openSlug === storedSlug),
-    );
-    if (contractSigned || confirmationForThisContract) {
-      if (status === "sent" || status === "viewed" || !status) {
-        patch.agreement_status = "completed";
-        patch.agreement_next_reminder_at = null;
+    // A lead opened after this phone already signed is not that contract. Keep the name if we have
+    // one, but do not put Finish signing back on the queue.
+    if (!openedAfterSignature) {
+      const confirmationForThisContract = Boolean(
+        signedAfterLink && (!storedSlug || !signal.openSlug || signal.openSlug === storedSlug),
+      );
+      if (contractSigned || confirmationForThisContract) {
+        if (status === "sent" || status === "viewed" || !status) {
+          patch.agreement_status = "completed";
+          patch.agreement_next_reminder_at = null;
+        }
+      } else if (signal.openSlug && !storedSlug) {
+        patch.agreement_status = "sent";
+        patch.agreement_signing_url = `https://${HOST}${signal.openSlug}`;
+        if (!lead.agreement_reminder_count) patch.agreement_reminder_count = 1;
       }
-    } else if (signal.openSlug && !storedSlug) {
-      patch.agreement_status = "sent";
-      patch.agreement_signing_url = `https://${HOST}${signal.openSlug}`;
-      if (!lead.agreement_reminder_count) patch.agreement_reminder_count = 1;
-    }
-    if (contractSigned || confirmationForThisContract) {
-      await supabase
-        .from("lead_jobs")
-        .update({ status: "skipped", detail: "Contract is signed." })
-        .eq("lead_id", lead.id)
-        .eq("queue", "call")
-        .eq("sequence", "want_to_sign")
-        .eq("status", "pending");
+      if (contractSigned || confirmationForThisContract) {
+        await supabase
+          .from("lead_jobs")
+          .update({ status: "skipped", detail: "Contract is signed." })
+          .eq("lead_id", lead.id)
+          .eq("queue", "call")
+          .eq("sequence", "want_to_sign")
+          .eq("status", "pending");
+      }
     }
     if (!Object.keys(patch).length) continue;
     const { error: updateError } = await supabase.from("leads").update(patch).eq("id", lead.id);

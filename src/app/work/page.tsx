@@ -7,9 +7,9 @@ import { loadLeadCallJobs } from "@/lib/call-grade";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
-import { consultationWhen, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
+import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
-import { CYCLE_LABEL, leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
+import { CYCLE_LABEL, leadCycle, leadStatusLabel, nonPiHoldOpen, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
 import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
 import { signedFileReady } from "@/lib/close-ready";
 import { isLostLeadReason, visibleCloseSuggestion } from "@/lib/funnel";
@@ -531,6 +531,22 @@ export default async function LeadListPage({
   ]);
   const practice = (practiceRows.data?.[0] ?? undefined) as ListLead | undefined;
   if (practice) workLeads = [...workLeads, practice];
+  const parkedIds = new Set<string>();
+  if (funnel === "open") {
+    const { data: parked, error: parkedError } = await supabase
+      .from("leads")
+      .select(LIST_COLUMNS)
+      .eq("test", false)
+      .eq("caller_class", "non_pi")
+      .in("lead_status", ["Lost", "Referred"])
+      .order("lead_date", { ascending: false, nullsFirst: false })
+      .limit(300);
+    if (parkedError) throw new Error(parkedError.message);
+    for (const lead of (parked ?? []) as ListLead[]) {
+      parkedIds.add(lead.id);
+      workLeads.push(lead);
+    }
+  }
   const merged = new Map<string, ListLead>();
   for (const lead of [...searched, ...workLeads, ...(queue === "nonleads" ? reviewLeads : [])]) {
     merged.set(lead.id, lead);
@@ -697,7 +713,13 @@ export default async function LeadListPage({
 
 
 
-  const rows = leads.map((lead) => {
+  const queueLeads = leads.filter((lead) => {
+    const hold = nonPiHoldOpen(lead, sentFirm.has(lead.id));
+    if (funnel === "closed") return !hold;
+    if (parkedIds.has(lead.id)) return hold;
+    return true;
+  });
+  const rows = queueLeads.map((lead) => {
     const cycle = leadCycle(lead, talked.has(lead.id) ? [{ type: "call", direction: "inbound" }] : []);
     const age = daysSince(lead.lead_date ?? lead.created_at);
     const outreachAt = lastOutreach.get(lead.id);
@@ -724,7 +746,7 @@ export default async function LeadListPage({
       waiting,
       attention,
       inWindow: leadMetricDay(lead) >= since,
-      label: queueStageLabel(lead, leadStatusLabel(lead, cycle)),
+      label: queueStageLabel({ ...lead, referral_recorded: sentFirm.has(lead.id) }, leadStatusLabel(lead, cycle)),
       step: queueStep(lead, cycle, tally.calls),
       actionTitle: openLeadAction(lead, cycle, tally.calls),
       accident: listAccident(lead),
@@ -831,7 +853,7 @@ export default async function LeadListPage({
       callrail: Boolean(row.lead.callrail_call_id),
       declineReason: row.lead.decline_reason,
       qualifiedLabel: desiredWord(milestoneQualified(row.lead)),
-      consultWhen: consultationWhen(row.lead.consultation_date),
+      consultWhen: consultationLabel(row.lead),
       desired: desiredWord(milestoneDesired(row.lead)),
       desiredLocked: contractSent(row.lead) || milestoneSigned(row.lead) || milestoneQualified(row.lead) === false,
       signed: milestoneSigned(row.lead),

@@ -1,7 +1,7 @@
-import { callerClassLabel } from "./caller-class";
+import { callerClassLabel, isWorkLead } from "./caller-class";
 import { closeGaps, signedFileReady, type CloseReadyLead } from "./close-ready";
 import { contractOutstanding, contractSent, milestoneSigned, signatureNeedsConfirm } from "./desired";
-import { isPiCaseType, officialCaseType, suggestedCaseType, type Lead } from "./leads";
+import { officialCaseType, type Lead } from "./leads";
 import { phoneTail } from "./phone";
 
 export type ClientTouch = {
@@ -45,6 +45,8 @@ type StageLead = CloseReadyLead & {
   summary?: string | null;
   lead_status?: string | null;
   close_reason?: string | null;
+  case_id?: string | null;
+  referral_recorded?: boolean;
 };
 
 function referralChecklist(lead: StageLead): CloseReadyLead {
@@ -64,16 +66,29 @@ export function referralAwaitingSend(lead: {
   callrail_tags?: string[] | null;
   lead_status?: string | null;
   close_reason?: string | null;
+  referral_recorded?: boolean;
 }): boolean {
-  if (lead.lead_status === "Referred" || lead.close_reason === "referred") return false;
+  if (lead.lead_status === "Referred" || lead.close_reason === "referred" || lead.referral_recorded) return false;
   if (lead.caller_class === "non_pi" || officialCaseType(lead.case_type) === "Non-PI Legal Matter") return true;
   return (lead.callrail_tags ?? []).some((tag) => REFERRAL_HOLD_TAGS.includes(tag));
 }
 
 export function queueStageLabel(lead: StageLead, fallback: string): string {
   if (referralAwaitingSend(lead) && closeGaps(referralChecklist(lead), "declined").length === 0) return "Send Referral";
-  if (lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType({ ...lead, case_type: lead.case_type ?? null }))) return fallback;
+  if (lead.caller_class === "non_pi") return fallback;
   return callerClassLabel(lead.caller_class) ?? fallback;
+}
+
+/** A non-PI matter stays on the open queue until the file is complete and the referral is recorded. */
+export function nonPiHoldOpen(lead: StageLead, referralRecorded = false): boolean {
+  if (lead.caller_class !== "non_pi" && !isWorkLead(lead)) return false;
+  const nonPi = lead.caller_class === "non_pi" || officialCaseType(lead.case_type) === "Non-PI Legal Matter";
+  if (!nonPi) return false;
+  if (lead.signed_case || lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.case_id) return false;
+  const gaps = closeGaps(referralChecklist({ ...lead, referral_recorded: referralRecorded }), "declined");
+  if (lead.close_reason === "declined" && gaps.length === 0) return false;
+  const recorded = referralRecorded || lead.lead_status === "Referred" || lead.close_reason === "referred";
+  return !recorded || gaps.length > 0;
 }
 
 type CycleLead = {

@@ -17,7 +17,7 @@ function signingSlug(content: string): string | null {
 }
 
 function receivedSigned(content: string): boolean {
-  return /received your signed documents/i.test(content);
+  return /received your signed documents|documentos firmados/i.test(content);
 }
 
 /** The contract text is the official name. A later link for another document does not reopen the contract. */
@@ -82,8 +82,13 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     const status = String(lead.agreement_status || "").toLowerCase();
     const storedSlug = String(lead.agreement_signing_url || "").match(LINK)?.[1] ?? "";
     const contractSigned = Boolean(lead.signed_case) || status === "signed" || status === "completed";
+    const signedAfterLink = Boolean(signal.signedAt && (!signal.openAt || signal.signedAt > signal.openAt));
+    const openedAfterSignature = Boolean(
+      signal.signedAt && lead.created_at && Date.parse(String(lead.created_at)) > Date.parse(signal.signedAt),
+    );
+    if (signedAfterLink && openedAfterSignature) continue;
     const confirmationForThisContract = Boolean(
-      signal.signedAt && storedSlug && signal.openSlug === storedSlug && (!signal.openAt || signal.signedAt > signal.openAt),
+      signedAfterLink && (!storedSlug || !signal.openSlug || signal.openSlug === storedSlug),
     );
     if (contractSigned || confirmationForThisContract) {
       if (status === "sent" || status === "viewed" || !status) {

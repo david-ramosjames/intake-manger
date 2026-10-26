@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
 import { loadLeadCallJobs } from "@/lib/call-grade";
-import { consultationWhen, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
+import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { isLostLeadReason, visibleCloseSuggestion } from "@/lib/funnel";
@@ -190,7 +190,7 @@ function toQueueRow(
     identityStatus: lead.identity_status,
     agreementStatus: lead.agreement_status,
   });
-  const label = queueStageLabel(lead, leadStatusLabel(lead, cycle));
+  const label = queueStageLabel({ ...lead, referral_recorded: Boolean(input.sentFirm) }, leadStatusLabel(lead, cycle));
   const priority = priorityPlace(lead);
   const closed = !isPracticeTestPhone(lead.phone_e164 || lead.phone) && (cycle === "signed" || cycle === "closed");
   const sequenceInput = {
@@ -247,7 +247,7 @@ function toQueueRow(
     callrail: Boolean(lead.callrail_call_id),
     declineReason: lead.decline_reason,
     qualifiedLabel: desiredWord(milestoneQualified(lead)),
-    consultWhen: consultationWhen(lead.consultation_date),
+    consultWhen: consultationLabel(lead),
     desired: desiredWord(milestoneDesired(lead)),
     desiredLocked: contractSent(lead) || milestoneSigned(lead) || milestoneQualified(lead) === false,
     signed: milestoneSigned(lead),

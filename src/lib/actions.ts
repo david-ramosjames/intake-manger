@@ -352,7 +352,7 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
       consultation_date: consulted === "yes" ? consultationDate : null,
       qualified: tagged.qualified,
       desired_case: desiredDecision === "yes" ? true : desiredDecision === "no" ? false : null,
-      desired_source: desiredDecision === "yes" || desiredDecision === "no" ? "staff" : null,
+      desired_source: desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd" ? "staff" : null,
       signed_case: signed,
       date_signed: signed ? signedDate : null,
       signed_at: signed ? new Date().toISOString() : null,

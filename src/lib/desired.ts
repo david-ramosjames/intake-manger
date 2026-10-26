@@ -91,6 +91,14 @@ export function consultedChoice(input: {
   return "";
 }
 
+export function consultationLabel(input: {
+  consultation_date?: string | null;
+  consultation?: string | null;
+}): string {
+  if (consultedChoice(input) === "no") return "No";
+  return consultationWhen(input.consultation_date);
+}
+
 export function consultationWhen(value: string | null | undefined): string {
   if (!value) return "No consult";
   const [year, month, day] = value.slice(0, 10).split("-").map(Number);
@@ -103,5 +111,5 @@ export function consultationWhen(value: string | null | undefined): string {
 export function desiredWord(value: boolean | null | undefined): string {
   if (value === true) return "Yes";
   if (value === false) return "No";
-  return "—";
+  return "TBD";
 }

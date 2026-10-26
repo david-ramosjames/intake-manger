@@ -20,16 +20,25 @@ function YesNo({
   label,
   value,
   disabled = false,
+  allowTbd = false,
   onChange,
+  onTbd,
 }: {
   label: string;
-  value: "" | "yes" | "no";
+  value: "" | "yes" | "no" | "tbd";
   disabled?: boolean;
+  allowTbd?: boolean;
   onChange: (value: "yes" | "no") => void;
+  onTbd?: () => void;
 }) {
   const side = "flex h-8 cursor-pointer items-center justify-center px-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:text-slate-400";
   return (
     <div className={`inline-flex h-8 w-fit overflow-hidden rounded-md border border-slate-300 bg-white ${disabled ? "bg-slate-100" : ""}`} role="group" aria-label={label}>
+      {allowTbd ? (
+        <button type="button" disabled={disabled} onClick={() => onTbd?.()} className={`${side} border-r border-slate-300 ${value === "tbd" ? "bg-amber-50 text-amber-950" : "text-slate-600"}`}>
+          {value === "tbd" ? "✓ TBD" : "TBD"}
+        </button>
+      ) : null}
       <button type="button" disabled={disabled} onClick={() => onChange("yes")} className={`${side} border-r border-slate-300 ${value === "yes" ? "bg-emerald-50 text-emerald-900" : "text-slate-600"}`}>
         {value === "yes" ? "✓ Yes" : "Yes"}
       </button>
@@ -85,7 +94,7 @@ export function AddLeadForm({
   const [caseType, setCaseType] = useState("");
   const [consulted, setConsulted] = useState<"" | "yes" | "no">("");
   const [qualified, setQualified] = useState<"" | "yes" | "no">("");
-  const [desired, setDesired] = useState<"" | "yes" | "no">("");
+  const [desired, setDesired] = useState<"" | "yes" | "no" | "tbd">("tbd");
   const [size, setSize] = useState("");
   const [decline, setDecline] = useState("");
   const [signed, setSigned] = useState<"" | "yes" | "no">("");
@@ -245,10 +254,16 @@ export function AddLeadForm({
             label="Desired"
             value={desiredValue}
             disabled={nonPi || qualifiedValue === "no"}
+            allowTbd
             onChange={(value) => {
               setDesired(value);
               if (value === "yes") setDecline("");
               if (value === "no") setSize("");
+            }}
+            onTbd={() => {
+              setDesired("tbd");
+              setDecline("");
+              setSize("");
             }}
           />
           <Label label="Size" className="w-36">

@@ -434,7 +434,9 @@ export async function saveLeadDetails(formData: FormData) {
   const keepPhone = formData.get("keep_phone") === "1";
   if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
   const chosenClass = text(formData, "non_lead_reason");
-  const markingNonLead = chosenClass === DATA_ERROR_CLASS || EXCLUDED_CALLER_CLASSES.includes(chosenClass as ExcludedCallerClass);
+  const markingNonLead =
+    officialCaseType(caseType) !== "Non-PI Legal Matter" &&
+    (chosenClass === DATA_ERROR_CLASS || EXCLUDED_CALLER_CLASSES.includes(chosenClass as ExcludedCallerClass));
   const consulted = text(formData, "consulted");
   const consultationDate = text(formData, "consultation_date");
   if (!markingNonLead && consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {
@@ -509,9 +511,9 @@ export async function saveLeadDetails(formData: FormData) {
   } else if (qualifiedDecision === "no") {
     desiredDecision = "no";
   }
-  if (!markingNonLead && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no")) {
+  if (!markingNonLead && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd")) {
     const qualifiedTag = qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "";
-    const desired = desiredDecision === "yes" ? true : desiredDecision === "no" ? false : before.desired_case === true;
+    const desired = desiredDecision === "yes";
     const tagged = tagsFromSelection({
       qualified: qualifiedTag,
       coverage: ["CVR DESIRED", "CVR SIGNED"].filter((tag) => (before.callrail_tags ?? []).includes(tag)),
@@ -528,8 +530,8 @@ export async function saveLeadDetails(formData: FormData) {
       decline_reason: tagged.decline_reason,
     };
     if (tagged.qualified === true || tagged.qualified === false) milestone.qualified = tagged.qualified;
-    if (desiredDecision === "yes" || desiredDecision === "no") {
-      milestone.desired_case = desiredDecision === "yes";
+    if (desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd") {
+      milestone.desired_case = desiredDecision === "yes" ? true : desiredDecision === "no" ? false : null;
       milestone.desired_source = "staff";
     }
     if (qualifiedDecision === "yes" && before.close_suggestion === "not_a_lead") milestone.close_suggestion = null;
@@ -569,7 +571,9 @@ export async function saveLeadDetails(formData: FormData) {
   if (signedNow) await markSignedQualified(supabase, leadId);
   const closed = signedNow
     ? await closeSignedLead(supabase, leadId, actor)
-    : await closeUndesiredLead(supabase, leadId, actor);
+    : officialCaseType(caseType) === "Non-PI Legal Matter"
+      ? await settleNonPiLead(supabase, leadId, actor)
+      : await closeUndesiredLead(supabase, leadId, actor);
   revalidatePath("/");
   revalidatePath("/priority");
   revalidatePath("/review");
@@ -610,6 +614,63 @@ async function closeSignedLead(
   if (lead.signed_case !== true) return false;
   if (closeGaps(lead, "signed").length) return false;
   await closeLead(supabase, leadId, actor, { lead_status: "Signed", close_reason: "signed", event: "signed", path: "signed" });
+  if (lead.text_sequence_status === "active") {
+    await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
+  }
+  return true;
+}
+
+/** Non-PI stays open until the file is complete and a referral has been recorded. */
+async function settleNonPiLead(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+  actor: string,
+): Promise<boolean> {
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select(`lead_status, case_id, close_reason, text_sequence_status, ${CLOSE_READY_COLUMNS}`)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !lead) throw new Error(error?.message ?? "Lead not found");
+  const { count, error: sendError } = await supabase
+    .from("referral_sends")
+    .select("id", { count: "exact", head: true })
+    .eq("lead_id", leadId);
+  if (sendError) throw new Error(sendError.message);
+  const recorded = (count ?? 0) > 0 || lead.lead_status === "Referred" || lead.close_reason === "referred" || lead.close_reason === "declined";
+  const gaps = closeGaps(lead, "declined");
+  const finished = lead.close_reason === "declined" ? gaps.length === 0 : recorded && gaps.length === 0;
+  if (!finished) {
+    if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.close_reason) {
+      const { error: reopenError } = await supabase
+        .from("leads")
+        .update({
+          lead_status: "Working",
+          close_reason: null,
+          close_suggestion: "decline",
+          follow_up: false,
+        })
+        .eq("id", leadId);
+      if (reopenError) throw new Error(reopenError.message);
+      await supabase.from("lead_events").insert({
+        lead_id: leadId,
+        event_type: "lost_lead_reopened",
+        actor,
+        payload: { reason: "non_pi_file_open" },
+      });
+    }
+    return false;
+  }
+  if (lead.lead_status === "Referred" || lead.close_reason === "referred") {
+    if (lead.lead_status !== "Referred" || lead.close_reason !== "referred") {
+      await closeLead(supabase, leadId, actor, { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" });
+    } else {
+      await supabase.from("leads").update({ close_suggestion: null }).eq("id", leadId);
+    }
+    return true;
+  }
+  if (lead.close_reason === "declined") return true;
+  await closeLead(supabase, leadId, actor, { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" });
   if (lead.text_sequence_status === "active") {
     await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
   }
@@ -940,10 +1001,13 @@ export async function classifyNonLead(formData: FormData) {
   }
   const { data, error } = await supabase
     .from("leads")
-    .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags, identity_status")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags, identity_status, caller_class, case_type")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
+  if (data.caller_class === "non_pi" || officialCaseType(data.case_type) === "Non-PI Legal Matter") {
+    throw new Error("A non-PI legal matter stays open until the file is filled in and the referral is recorded.");
+  }
   if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
     throw new Error("A signed or promoted matter stays a lead.");
   }
@@ -1026,10 +1090,13 @@ export async function markNotALead(leadId: string) {
   const { supabase, email } = await requireStaff();
   const { data, error } = await supabase
     .from("leads")
-    .select("id, signed_case, case_id, lead_status, text_sequence_status, consultation_date, grade, callrail_tags, decline_reason, qualified, identity_status")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status, consultation_date, grade, callrail_tags, decline_reason, qualified, identity_status, caller_class, case_type")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
+  if (data.caller_class === "non_pi" || officialCaseType(data.case_type) === "Non-PI Legal Matter") {
+    throw new Error("A non-PI legal matter stays open until the file is filled in and the referral is recorded.");
+  }
   if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
     throw new Error("A signed or promoted matter stays open.");
   }
@@ -1639,6 +1706,17 @@ export async function confirmCloseSuggestion(formData: FormData) {
   const suggestion = text(formData, "suggestion");
   const decision = text(formData, "decision");
   if (!leadId || !suggestion) throw new Error("Missing the close suggestion.");
+  if (suggestion === "decline" && (decision === "refer" || decision === "decline")) {
+    const { data: current, error: currentError } = await supabase
+      .from("leads")
+      .select("caller_class, case_type")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (currentError || !current) throw new Error(currentError?.message ?? "Lead not found");
+    if (current.caller_class === "non_pi" || officialCaseType(current.case_type) === "Non-PI Legal Matter") {
+      throw new Error("A non-PI legal matter stays open until the file is filled in and the referral is recorded.");
+    }
+  }
   if (decision === "dismiss") {
     const { error } = await supabase.from("leads").update({ close_suggestion: null }).eq("id", leadId);
     if (error) throw new Error(error.message);

@@ -973,7 +973,7 @@ function detailGap(input: {
   consulted: "yes" | "no" | "";
   consultDate: string;
   qualified: "yes" | "no" | "";
-  desired: "yes" | "no" | "";
+  desired: "yes" | "no" | "tbd" | "";
   size: string;
   decline: string;
   signedChoice: "yes" | "no" | "";
@@ -1061,7 +1061,7 @@ function LeadFacts({
   const [consultDate, setConsultDate] = useState(row.consultKey.slice(0, 10));
   const [qualified, setQualifiedChoice] = useState<"yes" | "no" | "">(row.qualifiedLabel === "Yes" ? "yes" : row.qualifiedLabel === "No" ? "no" : "");
   const [notLeadReason, setNotLeadReason] = useState(() => notLeadReasonFor(row));
-  const [desired, setDesiredChoice] = useState<"yes" | "no" | "">(row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "");
+  const [desired, setDesiredChoice] = useState<"yes" | "no" | "tbd" | "">(row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "tbd");
   const [size, setSize] = useState(selectedOne(row.tags, SIZE_TAGS));
   const [sourceType, setSourceType] = useState(() => marketingFromRow(row).type);
   const [sourceCategory, setSourceCategory] = useState(() => marketingFromRow(row).category);
@@ -1081,7 +1081,7 @@ function LeadFacts({
     setLeadSource(marketing.source);
     const nextType = shownCaseType(row.caseType);
     const nextQualified = nextType === "Non-PI Legal Matter" ? "no" : row.qualifiedLabel === "Yes" ? "yes" : row.qualifiedLabel === "No" ? "no" : "";
-    const nextDesired = nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "no" : row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "";
+    const nextDesired = nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "no" : row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "tbd";
     setCaseType(nextType);
     setConsulted(row.consulted);
     setConsultDate(row.consultKey.slice(0, 10));
@@ -1410,16 +1410,23 @@ function LeadFacts({
             {qualifiedLocked ? <p className="col-span-2 text-xs text-slate-500">Non-PI legal matters are not qualified.</p> : null}
           </PanelSection>
           <PanelSection title="Desired">
-            <div className="col-span-2 max-w-[12rem]">
+            <div className="col-span-2 max-w-[18rem]">
               <ChoiceToggle
                 label="Desired"
                 value={desiredValue}
                 disabled={desiredLocked}
+                allowTbd
                 onChange={(value) => {
                   mark("desired");
                   setDesiredChoice(value);
                   if (value === "yes") setDecline("");
                   if (value === "no") setSize("");
+                }}
+                onTbd={() => {
+                  mark("desired");
+                  setDesiredChoice("tbd");
+                  setDecline("");
+                  setSize("");
                 }}
               />
             </div>
@@ -1617,7 +1624,7 @@ function QueueReferral({
 }) {
   const firms = referralFirms(destinations);
   const types = PRACTICE_AREAS.filter(
-    (area) => area.id !== "personal_injury" && (area.id === "other" || firms.some((firm) => firm.practice_areas.includes(area.id))),
+    (area) => area.id === "other" || firms.some((firm) => firm.practice_areas.includes(area.id)),
   ).sort((a, b) => a.label.localeCompare(b.label));
   const sectionRef = useRef<HTMLElement>(null);
   const [mode, setMode] = useState<"send" | "record" | null>(startOpen ? "send" : null);
@@ -2531,13 +2538,16 @@ function CloseSuggestion({ row }: { row: QueueRow }) {
       <input type="hidden" name="lead_id" value={row.id} />
       <input type="hidden" name="suggestion" value={suggestion} />
       <p className="font-medium text-orange-950">Suggested close: {CLOSE_SUGGESTION_LABEL[suggestion]}</p>
+      {row.nonPi && suggestion === "decline" ? (
+        <p className="mt-2 text-orange-900">This stays open until the file is filled in and the referral is recorded.</p>
+      ) : null}
       {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : suggestion === "not_interested" ? "lost" : "declined").length ? (
         <p className="mt-2 text-orange-900">
           Closing needs: {rowCloseGaps(row, suggestion === "not_a_lead" ? "nonlead" : suggestion === "not_interested" ? "lost" : "declined").join(", ")}.
         </p>
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {suggestion === "decline" ? (
+        {suggestion === "decline" && row.nonPi ? null : suggestion === "decline" ? (
           <>
             <button name="decision" value="decline" className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e]">
               Decline
@@ -2618,17 +2628,32 @@ function ChoiceToggle({
   label,
   value,
   disabled = false,
+  allowTbd = false,
   onChange,
+  onTbd,
 }: {
   label: string;
-  value: "yes" | "no" | "";
+  value: "yes" | "no" | "tbd" | "";
   disabled?: boolean;
+  allowTbd?: boolean;
   onChange: (value: "yes" | "no") => void;
+  onTbd?: () => void;
 }) {
   const side =
     "flex h-full min-w-0 flex-1 cursor-pointer items-center justify-center px-2 text-sm font-medium normal-case tracking-normal transition duration-150 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent";
   return (
     <div className={`flex h-9 w-full overflow-hidden rounded-lg border border-slate-300 bg-white ${disabled ? "bg-slate-100" : ""}`} role="group" aria-label={label}>
+      {allowTbd ? (
+        <button
+          type="button"
+          aria-pressed={value === "tbd"}
+          disabled={disabled}
+          onClick={() => onTbd?.()}
+          className={`${side} border-r border-slate-300 ${value === "tbd" ? "bg-amber-50 text-amber-950 hover:bg-amber-100" : "text-slate-600"}`}
+        >
+          {value === "tbd" ? "✓ TBD" : "TBD"}
+        </button>
+      ) : null}
       <button
         type="button"
         aria-pressed={value === "yes"}

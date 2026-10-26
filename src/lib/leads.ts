@@ -269,16 +269,16 @@ export function leadSourceFromText(text: string | null | undefined): { source: s
 }
 
 export const PI_CASE_TYPES = [
-  "Auto Accident",
-  "Wrongful Death",
-  "Work Injury",
-  "Sexual Assault / Child Abuse",
-  "Premises Liability",
-  "Pedestrian / Bicycle / Scooter",
-  "Other Injury",
-  "Dog Bite",
-  "Commercial / 18 Wheeler",
   "TBD",
+  "Auto Accident",
+  "Commercial / 18 Wheeler",
+  "Dog Bite",
+  "Other Injury",
+  "Pedestrian / Bicycle / Scooter",
+  "Premises Liability",
+  "Sexual Assault / Child Abuse",
+  "Work Injury",
+  "Wrongful Death",
   "Non-PI Legal Matter",
 ] as const;
 

@@ -80,7 +80,7 @@ export default async function ReferralsPage() {
       </div>
 
       <div className="mt-8 space-y-6">
-        {PRACTICE_AREAS.map((area) => {
+        {[...PRACTICE_AREAS].sort((a, b) => a.label.localeCompare(b.label)).map((area) => {
           const rows = destinations.filter((destination) => destination.practice_areas.includes(area.id));
           if (!rows.length) return null;
           return (

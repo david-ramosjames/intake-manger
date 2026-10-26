@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { CLOSE_READY_COLUMNS, closeGaps } from "./close-ready";
+import { contractSent } from "./desired";
+import { officialCaseType } from "./leads";
+import { QUALIFIED_YES } from "./tags";
 import { isPracticeTestPhone } from "./test-phone";
 
 export const CLOSED_LEAD_STATUSES = ["Signed", "Promoted", "Lost", "Referred"] as const;
@@ -27,6 +30,40 @@ export function isLostLeadReason(value: string | null | undefined): value is Los
 
 export function isCloseSuggestion(value: string | null | undefined): value is CloseSuggestion {
   return value === "decline" || value === "not_interested" || value === "not_a_lead";
+}
+
+/** A chosen case type means this person is a lead. TBD still needs a decision. */
+export function caseTypeIsLead(value: string | null | undefined): boolean {
+  const official = officialCaseType(value);
+  return Boolean(official && official !== "TBD" && official !== "Unknown / No Response");
+}
+
+/** Qualified, a real case type, or a contract already out means "not a lead" no longer applies. */
+export function notALeadSuggestionOff(lead: {
+  qualified?: boolean | null;
+  callrail_tags?: string[] | null;
+  case_type?: string | null;
+  agreement_status?: string | null;
+  agreement_sent_at?: string | null;
+  signed_case?: boolean | null;
+}): boolean {
+  if (lead.qualified === true || (lead.callrail_tags ?? []).includes(QUALIFIED_YES)) return true;
+  if (caseTypeIsLead(lead.case_type)) return true;
+  if (lead.signed_case || contractSent(lead)) return true;
+  return false;
+}
+
+export function visibleCloseSuggestion<T extends string | null>(lead: {
+  close_suggestion?: T;
+  qualified?: boolean | null;
+  callrail_tags?: string[] | null;
+  case_type?: string | null;
+  agreement_status?: string | null;
+  agreement_sent_at?: string | null;
+  signed_case?: boolean | null;
+}): T | null {
+  if (lead.close_suggestion === "not_a_lead" && notALeadSuggestionOff(lead)) return null;
+  return lead.close_suggestion ?? null;
 }
 
 export function isLeadOpen(status: string | null | undefined): boolean {

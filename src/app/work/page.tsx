@@ -7,12 +7,12 @@ import { loadLeadCallJobs } from "@/lib/call-grade";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
-import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
+import { consultationWhen, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
 import { CYCLE_LABEL, leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
 import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
 import { signedFileReady } from "@/lib/close-ready";
-import { isLostLeadReason } from "@/lib/funnel";
+import { isLostLeadReason, visibleCloseSuggestion } from "@/lib/funnel";
 import { automationLine, isQueue, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong, type QueueId } from "@/lib/queue";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
 import { sequenceDayOne } from "@/lib/followup";
@@ -791,7 +791,7 @@ export default async function LeadListPage({
         title: leadTitle(other.lead),
         label: other.label,
       })),
-      closeSuggestion: row.lead.close_suggestion,
+      closeSuggestion: visibleCloseSuggestion(row.lead),
       identityStatus: row.lead.identity_status,
       identityEvidence: row.lead.identity_evidence,
       suggestedName: suggestClientName(row.lead.summary, staff),
@@ -833,6 +833,7 @@ export default async function LeadListPage({
       waiting: row.waiting,
       automationLabel: automation.label,
       automationBad: automation.bad,
+      signingOn: contractOutstanding(row.lead),
       canStartText:
         (row.lead.text_sequence_status || "").toLowerCase() !== "active" &&
         Boolean(row.lead.phone_e164 || row.lead.phone) &&

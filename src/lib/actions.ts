@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { callrailConfigured, pushCallrailTags } from "./callrail";
 import { enrollFollowUp, stopFollowUp } from "./followup";
 import { contractSent } from "./desired";
-import { canonicalLeadSource, displayContact, isSourceType, officialCaseType, standardLeadEmail } from "./leads";
-import { isSourceCategory } from "./source-options";
+import { displayContact, isSourceType, officialCaseType, standardLeadEmail } from "./leads";
+import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { MANAGED_CALLRAIL_TAGS, QUALIFIED_NO, QUALIFIED_YES, injuryTagForCaseType, tagsFromSelection } from "./tags";
 import { toE164 } from "./phone";
 import { chicagoDay } from "./time";
@@ -304,7 +304,7 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
   const sourceType = isSourceType(chosenType) && chosenType !== "Unknown" ? chosenType : null;
   const chosenCategory = text(formData, "source_category");
   const sourceCategory = isSourceCategory(chosenCategory) ? chosenCategory : null;
-  const writtenSource = canonicalLeadSource(text(formData, "lead_source"));
+  const writtenSource = leadSourceChoice(text(formData, "lead_source"));
   const tagged = tagsFromSelection({
     qualified: qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "",
     coverage: [],

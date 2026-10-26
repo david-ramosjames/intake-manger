@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
 import { loadLeadCallJobs } from "@/lib/call-grade";
-import { consultationWhen, consultedChoice, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
+import { consultationWhen, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
-import { isLostLeadReason } from "@/lib/funnel";
+import { isLostLeadReason, visibleCloseSuggestion } from "@/lib/funnel";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { daysSince, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
@@ -222,7 +222,7 @@ function toQueueRow(
     id: lead.id,
     title: leadTitle(lead),
     samePhone: [],
-    closeSuggestion: lead.close_suggestion,
+    closeSuggestion: visibleCloseSuggestion(lead),
     identityStatus: lead.identity_status,
     identityEvidence: lead.identity_evidence,
     suggestedName: suggestClientName(lead.summary, input.staff),
@@ -264,6 +264,7 @@ function toQueueRow(
     waiting,
     automationLabel: automation.label,
     automationBad: automation.bad,
+    signingOn: contractOutstanding(lead),
     canStartText:
       (lead.text_sequence_status || "").toLowerCase() !== "active" &&
       Boolean(lead.phone_e164 || lead.phone) &&

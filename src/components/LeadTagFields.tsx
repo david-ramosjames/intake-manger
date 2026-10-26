@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import {
-  DECLINE_TAGS,
   QUALIFIED_NO,
   QUALIFIED_YES,
   SIZE_TAGS,
   TAG_LABEL,
+  declineOptions,
   declineReasonFromTag,
   qualifiedChoice,
   selectedDecline,
@@ -88,9 +88,9 @@ export function LeadTagFields({
             className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
           >
             <option value="">No decline</option>
-            {DECLINE_TAGS.map((tag) => (
+            {declineOptions(decline).map((tag) => (
               <option key={tag} value={tag}>
-                {TAG_LABEL[tag]}
+                {tag.slice("DEC: ".length)}
               </option>
             ))}
           </select>

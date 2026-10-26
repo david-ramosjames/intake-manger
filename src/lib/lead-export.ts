@@ -3,7 +3,7 @@ import { CLOSED_LEAD_STATUSES } from "@/lib/funnel";
 import { PI_CASE_TYPES, SOURCE_TYPES, priorityReasonText, slackMessageUrl } from "@/lib/leads";
 import { textSequenceLabel } from "@/lib/queue";
 import { CALL_SEQUENCE_LABEL, type CallSequenceId } from "@/lib/sequences";
-import { SIZE_TAGS, selectedOne } from "@/lib/tags";
+import { SIZE_TAGS, declineReasonLabel, selectedOne } from "@/lib/tags";
 import { chicagoDay, chicagoLocalToIso, chicagoParts } from "@/lib/time";
 
 export const EXPORT_RANGES = ["all", "7", "30", "90", "month", "custom"] as const;
@@ -348,7 +348,7 @@ function exportCell(row: ExportLead, id: string): string {
     case "desired":
       return yesNo(row.desired_case);
     case "decline":
-      return text(row.decline_reason);
+      return text(declineReasonLabel(row.decline_reason));
     case "size":
       return selectedOne(row.callrail_tags ?? [], SIZE_TAGS).replace(/^S:\s*/, "");
     case "consultation":

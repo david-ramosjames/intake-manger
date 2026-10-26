@@ -618,7 +618,7 @@ function ReviewRow({ row }: { row: ReviewLead }) {
             <option value="">No decline</option>
             {withCurrent(DECLINE_TAGS, draft.decline).map((item) => (
               <option key={item} value={item}>
-                {TAG_LABEL[item as keyof typeof TAG_LABEL] ?? item}
+                {TAG_LABEL[item as keyof typeof TAG_LABEL] ?? item.replace(/^DEC:\s*/, "")}
               </option>
             ))}
           </select>

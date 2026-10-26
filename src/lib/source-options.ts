@@ -161,10 +161,48 @@ export function getSourcesForCategory(
     .sort();
 }
 
+const STORED_SOURCE_ALIASES: Record<string, string> = {
+  bing: "Bing / Microsoft Ads",
+  "microsoft ads": "Bing / Microsoft Ads",
+  tiktok: "Tiktok",
+  "tik tok": "Tiktok",
+  youtube: "Youtube",
+  whatsapp: "Whatsapp",
+  "walk-in": "Walk in",
+  "walk in": "Walk in",
+  gmb: "Google My Business",
+  "google my business": "Google My Business",
+  linkedin: "Linkedin",
+  "meta form": "Meta Form",
+  "word of mouth": "Word of Mouth (Unknown)",
+  "family member": "Family Member",
+  family: "Family Member",
+  "prior client": "Prior Client",
+  "previous client": "Prior Client",
+  "current client": "Prior Client",
+  "returning client": "Prior Client",
+};
+
 export function findSourceOption(source: string | null | undefined): SourceOption | null {
-  const key = (source ?? "").trim().toLowerCase();
+  const key = (source ?? "").trim().toLowerCase().replace(/\s+/g, " ");
   if (!key) return null;
-  return SOURCE_OPTIONS.find((option) => option.source.toLowerCase() === key) ?? null;
+  const exact = SOURCE_OPTIONS.find((option) => option.source.toLowerCase() === key);
+  if (exact) return exact;
+  const alias = STORED_SOURCE_ALIASES[key];
+  if (alias) return SOURCE_OPTIONS.find((option) => option.source === alias) ?? null;
+  const prefixed = SOURCE_OPTIONS.filter((option) => {
+    const name = option.source.toLowerCase();
+    return name.startsWith(`${key} `) || name.startsWith(`${key}/`);
+  });
+  return prefixed.length === 1 ? prefixed[0] : null;
+}
+
+/** Keep a picked dropdown source. The older short names, like Bing, map back onto that list. */
+export function leadSourceChoice(value: string | null | undefined): { source: string; type: SourceType | "" } {
+  const option = findSourceOption(value);
+  if (option) return { source: option.source, type: option.type };
+  const trimmed = (value ?? "").trim().replace(/\s+/g, " ");
+  return { source: trimmed, type: "" };
 }
 
 export function isSourceCategory(value: string | null | undefined): value is SourceCategory {

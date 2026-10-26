@@ -1,14 +1,17 @@
+import { nameIsUnavailable } from "./leads";
+
 export const PRACTICE_AREAS = [
+  { id: "criminal", label: "Criminal defense" },
+  { id: "employment", label: "Employment" },
   { id: "family", label: "Family" },
   { id: "immigration", label: "Immigration" },
-  { id: "criminal", label: "Criminal defense" },
-  { id: "real_estate", label: "Real estate" },
-  { id: "medmal", label: "Medical malpractice" },
-  { id: "personal_injury", label: "Personal injury" },
-  { id: "workers_comp", label: "Workers compensation" },
-  { id: "miscellaneous", label: "Miscellaneous" },
   { id: "labor", label: "Labor" },
-  { id: "employment", label: "Employment" },
+  { id: "medmal", label: "Medical malpractice" },
+  { id: "miscellaneous", label: "Miscellaneous" },
+  { id: "other", label: "Other" },
+  { id: "personal_injury", label: "Personal injury" },
+  { id: "real_estate", label: "Real estate" },
+  { id: "workers_comp", label: "Workers compensation" },
 ] as const;
 
 export type PracticeAreaId = (typeof PRACTICE_AREAS)[number]["id"];
@@ -43,8 +46,8 @@ const REFERRAL_SMS_CLOSE = {
 } as const;
 
 export const DEFAULT_REFERRAL_SMS = {
-  en: `{{greeting}}, this is Ramos James Law. We are not able to help with {{area}}. Please contact {{attorney}} at {{phone}}. {{details}}\n\n${REFERRAL_SMS_CLOSE.en}`,
-  es: `{{greeting}}, le habla Ramos James Law. No podemos ayudar con asuntos de {{area}}. Comuníquese con {{attorney}} al {{phone}}. {{details}}\n\n${REFERRAL_SMS_CLOSE.es}`,
+  en: `{{greeting}}, this is Ramos James Law. We are not able to help with your {{area}} case. Please contact {{attorney}} at {{phone}}. {{details}}\n\n${REFERRAL_SMS_CLOSE.en}`,
+  es: `{{greeting}}, le saluda Ramos James Law. Lamentablemente, no podemos ayudarle con su caso {{area}}. Por favor, comuníquese con {{attorney}} al {{phone}}. {{details}}\n\n${REFERRAL_SMS_CLOSE.es}`,
 } as const;
 
 export type ReferralDestination = {
@@ -72,11 +75,11 @@ export function renderReferralSms(input: {
   area: string;
   destination: Pick<ReferralDestination, "name" | "phone" | "address" | "email" | "website">;
 }): string {
-  const name = input.leadName?.trim().split(/\s+/)[0] || "";
+  const rawName = input.leadName?.trim().split(/\s+/)[0] || "";
+  const name = nameIsUnavailable(rawName) ? "" : rawName;
   const greeting = input.language === "es" ? (name ? `Hola ${name}` : "Hola") : name ? `Hi ${name}` : "Hi";
   const details = referralDetails(input.destination);
-  const area =
-    input.area === "miscellaneous" ? (input.language === "es" ? "su caso" : "case") : practiceAreaLabel(input.area);
+  const area = input.area === "miscellaneous" ? "" : practiceAreaLabel(input.area);
   const body = input.template
     .replaceAll("{{greeting}}", greeting)
     .replaceAll("{{name}}", name || (input.language === "es" ? "hola" : "there"))

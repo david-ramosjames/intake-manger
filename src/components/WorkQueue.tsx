@@ -7,7 +7,7 @@ import { IdentityMark } from "@/components/IdentityMark";
 import { CLOSE_SUGGESTION_LABEL } from "@/lib/funnel";
 import { heardClientName } from "@/lib/identity";
 import { DATA_ERROR_CLASS, DATA_ERROR_TAG, EXCLUDED_CALLER_CLASSES, NON_LEAD_TAG } from "@/lib/caller-class";
-import { DECLINE_TAGS, SIZE_TAGS, selectedDecline, selectedOne } from "@/lib/tags";
+import { SIZE_TAGS, declineOptions, selectedDecline, selectedOne } from "@/lib/tags";
 import type { LeadEntry } from "@/lib/lead-entry";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, nameIsUnavailable, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
@@ -91,6 +91,7 @@ export type QueueRow = {
   waiting: boolean;
   automationLabel: string;
   automationBad: boolean;
+  signingOn: boolean;
   canStartText: boolean;
   quoUrl: string | null;
   slackUrl: string | null;
@@ -821,19 +822,36 @@ function TextStopButton({ leadId, compact = false }: { leadId: string; compact?:
   );
 }
 
+function SigningMark() {
+  return <span className="text-center font-medium text-violet-800">Signing</span>;
+}
+
 function TextAutomation({ row }: { row: QueueRow }) {
   if (row.textsLive) {
     return (
       <span className="mx-auto flex w-full max-w-[7.5rem] flex-col items-stretch gap-1">
+        {row.signingOn ? <SigningMark /> : null}
         <span className={`text-center ${row.automationBad ? "font-medium text-red-700" : "font-medium text-slate-800"}`}>{row.automationLabel}</span>
         <TextStopButton leadId={row.id} compact />
       </span>
     );
   }
   if (!row.canStartText) {
-    return <span className={`block text-center ${row.automationBad ? "font-medium text-red-700" : "text-slate-400"}`}>{row.automationLabel}</span>;
+    return (
+      <span className="mx-auto flex w-full max-w-[7.5rem] flex-col items-stretch gap-1">
+        {row.signingOn ? <SigningMark /> : null}
+        {row.signingOn && row.automationLabel === "—" ? null : (
+          <span className={`block text-center ${row.automationBad ? "font-medium text-red-700" : "text-slate-400"}`}>{row.automationLabel}</span>
+        )}
+      </span>
+    );
   }
-  return <TextStartButtons leadId={row.id} compact />;
+  return (
+    <span className="mx-auto flex w-full max-w-[7.5rem] flex-col items-stretch gap-1">
+      {row.signingOn ? <SigningMark /> : null}
+      <TextStartButtons leadId={row.id} compact />
+    </span>
+  );
 }
 
 function TbdMark() {
@@ -988,7 +1006,7 @@ function marketingFromRow(row: { sourceType: string; sourceCategory?: string; le
   category: SourceCategory | "";
   source: string;
 } {
-  const named = canonicalLeadSource(row.leadSource).source || row.leadSource;
+  const named = findSourceOption(row.leadSource)?.source || canonicalLeadSource(row.leadSource).source || row.leadSource;
   let match = findSourceOption(named);
   let type: SourceType | "" = cascadeType(chosenSourceType(row.sourceType)) || match?.type || "";
   if (match && type && match.type !== type) match = null;
@@ -1437,7 +1455,7 @@ function LeadFacts({
                 className={fieldClass(desiredValue !== "no" || nonPi)}
               >
                 <option value="">{desiredValue === "no" ? "Choose a reason" : "Locked"}</option>
-                {DECLINE_TAGS.map((tag) => (
+                {declineOptions(declineValue).map((tag) => (
                   <option key={tag} value={tag}>
                     {tag.slice("DEC: ".length)}
                   </option>
@@ -1598,9 +1616,9 @@ function QueueReferral({
   prepare?: () => Promise<void>;
 }) {
   const firms = referralFirms(destinations);
-  const types = PRACTICE_AREAS.filter((area) => firms.some((firm) => firm.practice_areas.includes(area.id))).sort((a, b) =>
-    a.label.localeCompare(b.label),
-  );
+  const types = PRACTICE_AREAS.filter(
+    (area) => area.id !== "personal_injury" && (area.id === "other" || firms.some((firm) => firm.practice_areas.includes(area.id))),
+  ).sort((a, b) => a.label.localeCompare(b.label));
   const sectionRef = useRef<HTMLElement>(null);
   const [mode, setMode] = useState<"send" | "record" | null>(startOpen ? "send" : null);
   const [area, setArea] = useState(types.some((item) => item.id === row.practiceArea) ? (row.practiceArea ?? "") : "");
@@ -1609,6 +1627,8 @@ function QueueReferral({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"send" | "already" | "declined" | null>(null);
   const [recorded, setRecorded] = useState<"sent" | "declined" | null>(null);
+  const [editingText, setEditingText] = useState(false);
+  const [draft, setDraft] = useState("");
   const notify = useContext(DrawerNoticeContext);
   const partners = area
     ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
@@ -1619,6 +1639,10 @@ function QueueReferral({
     setMode("send");
     sectionRef.current?.scrollIntoView({ block: "nearest" });
   }, [startOpen]);
+  useEffect(() => {
+    setEditingText(false);
+    setDraft("");
+  }, [area, firmId, language]);
   const preview =
     firm && area
       ? renderReferralSms({
@@ -1648,7 +1672,17 @@ function QueueReferral({
     notify({ tone: "saving", text: "Saving…" });
     const data = referralFields();
     data.set("destination_id", firm.id);
-    if (kind === "send") data.set("language", language);
+    if (kind === "send") {
+      data.set("language", language);
+      const message = (editingText ? draft : preview).trim();
+      if (!message) {
+        setPending(null);
+        setError("Write the text before sending.");
+        notify({ tone: "error", text: "Write the text before sending." });
+        return;
+      }
+      data.set("message", message);
+    }
     try {
       if (prepare) await prepare();
       const result = kind === "send" ? await sendReferral(row.id, data) : await markReferralAlreadySent(row.id, data);
@@ -1786,7 +1820,39 @@ function QueueReferral({
               </select>
             </label>
           ) : null}
-          {mode === "send" && preview ? <p className="whitespace-pre-line rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p> : null}
+          {mode === "send" && preview ? (
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Text</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editingText) {
+                      setEditingText(false);
+                      setDraft("");
+                      return;
+                    }
+                    setDraft(preview);
+                    setEditingText(true);
+                  }}
+                  className="text-xs font-medium text-navy hover:underline"
+                >
+                  {editingText ? "Use template" : "Edit"}
+                </button>
+              </div>
+              {editingText ? (
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  rows={8}
+                  aria-label="Referral text"
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                />
+              ) : (
+                <p className="mt-1 whitespace-pre-line rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p>
+              )}
+            </div>
+          ) : null}
           {declineTag ? null : (
             <p className="text-sm text-slate-600">
               {desiredNo ? "Choose a decline reason under Desired." : "Set Desired to No and choose a decline reason under Desired."} Workers compensation and medical malpractice fill that reason from the referral type.
@@ -2183,7 +2249,9 @@ function TextSequence({ row }: { row: QueueRow }) {
     <section className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Texts</h3>
       <p className="min-w-0 text-sm text-slate-700">
-        {row.textsLive ? row.automationLabel : "Off"}
+        {row.signingOn ? "Signing" : ""}
+        {row.signingOn && row.textsLive ? " · " : ""}
+        {row.textsLive ? row.automationLabel : row.signingOn ? "" : "Off"}
         {row.textsLive && row.textNext ? ` · Next ${formatChicago(row.textNext)}` : ""}
       </p>
       {row.textsLive ? (

@@ -274,6 +274,7 @@ function fallbackRow(job: OpenCallCard): QueueRow {
     waiting: job.overdue,
     automationLabel: "—",
     automationBad: false,
+    signingOn: false,
     canStartText: false,
     quoUrl: job.quoUrl,
     slackUrl: job.placeHref,

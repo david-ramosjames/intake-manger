@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { chicagoMinute, scheduleCallback } from "./callbacks";
 import { isPlaceholderOwner } from "./talked-with";
 import { contractOutstanding } from "./desired";
-import type { LeadKind } from "./leads";
+import { nameIsUnavailable, type LeadKind } from "./leads";
 import { type CallSequenceId, type WorkHours } from "./sequences";
 import { chicagoLocalToIso, formatChicago } from "./time";
 import { isPracticeTestPhone } from "./test-phone";
@@ -56,7 +56,8 @@ function dayStart(value: string | null | undefined): Date | null {
 }
 
 export function renderStep(body: string, lead: { lead_name: string | null; case_type: string | null }): string {
-  const name = lead.lead_name?.trim().split(/\s+/)[0] || "there";
+  const rawName = lead.lead_name?.trim().split(/\s+/)[0] || "";
+  const name = !rawName || nameIsUnavailable(rawName) ? "there" : rawName;
   const caseType = lead.case_type?.trim() || "case";
   return body.replaceAll("{{name}}", name).replaceAll("{{case_type}}", caseType);
 }

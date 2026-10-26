@@ -14,12 +14,13 @@ import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
-import { canonicalLeadSource, isPiCaseType, isSourceType, officialCaseType, standardLeadEmail } from "./leads";
-import { isSourceCategory } from "./source-options";
+import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standardLeadEmail } from "./leads";
+import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, type ClosePath } from "./close-ready";
-import { isLostLeadReason } from "./funnel";
+import { caseTypeIsLead, isLostLeadReason } from "./funnel";
+import { referralAwaitingSend } from "./next-step";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -113,7 +114,8 @@ export async function startTextSequence(
     if (!phone) return { error: "This lead has no phone number." };
     const staff = await loadStaff(supabase);
     const owner = matchStaff(lead.owner_name, staff);
-    const [first, ...rest] = (lead.lead_name || "").trim().split(/\s+/).filter(Boolean);
+    const usableName = nameIsUnavailable(lead.lead_name) ? "" : (lead.lead_name || "").trim();
+    const [first, ...rest] = usableName.split(/\s+/).filter(Boolean);
     const result = await askSmsFollowUp({
       phone,
       sequence_slug: sequence,
@@ -420,7 +422,7 @@ export async function saveLeadDetails(formData: FormData) {
   const leadId = text(formData, "lead_id");
   if (!leadId) throw new Error("Missing the lead.");
   const caseType = text(formData, "case_type") || null;
-  const writtenSource = canonicalLeadSource(text(formData, "lead_source"));
+  const writtenSource = leadSourceChoice(text(formData, "lead_source"));
   const leadSource = writtenSource.source || null;
   const chosenType = text(formData, "source_type");
   const sourceType = isSourceType(chosenType) ? chosenType : writtenSource.type || null;
@@ -486,6 +488,9 @@ export async function saveLeadDetails(formData: FormData) {
     patch.practice_area = "personal_injury";
     if (before.close_suggestion === "decline") patch.close_suggestion = null;
   }
+  if (patch.close_suggestion !== "decline" && before.close_suggestion === "not_a_lead" && caseTypeIsLead(patch.case_type)) {
+    patch.close_suggestion = null;
+  }
   const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
   if (error) throw new Error(error.message);
   await supabase.from("lead_events").insert({
@@ -527,6 +532,7 @@ export async function saveLeadDetails(formData: FormData) {
       milestone.desired_case = desiredDecision === "yes";
       milestone.desired_source = "staff";
     }
+    if (qualifiedDecision === "yes" && before.close_suggestion === "not_a_lead") milestone.close_suggestion = null;
     const { error: milestoneError } = await supabase.from("leads").update(milestone).eq("id", leadId);
     if (milestoneError) throw new Error(milestoneError.message);
     if (callrailConfigured() && before.callrail_call_id) {
@@ -626,6 +632,7 @@ async function closeUndesiredLead(
   if (lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.lead_status === "Lost" || lead.lead_status === "Referred") return false;
   if (lead.desired_case !== false) return false;
   if (closeGaps(lead, "declined").length) return false;
+  if (referralAwaitingSend(lead)) return false;
   const referred = (lead.callrail_tags ?? []).includes("DEC: Referred");
   await closeLead(
     supabase,
@@ -1107,7 +1114,7 @@ function referralDeclineTag(
   if (!infer) return "";
   if (area === "workers_comp") return "DEC: Workers Comp";
   if (area === "medmal") return "DEC: Medmal";
-  return "DEC: Referred";
+  return "";
 }
 
 async function stampReferralDecision(
@@ -1167,13 +1174,17 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
 
   const { data: templates } = await supabase.from("referral_templates").select("language, body");
   const stored = (templates ?? []).find((row) => row.language === language)?.body;
-  const message = renderReferralSms({
-    language,
-    template: stored || DEFAULT_REFERRAL_SMS[language],
-    leadName: lead.lead_name,
-    area,
-    destination,
-  });
+  const edited = text(formData, "message");
+  if (edited && edited.length > 2000) return { error: "Shorten the text before sending." };
+  const message =
+    edited ||
+    renderReferralSms({
+      language,
+      template: stored || DEFAULT_REFERRAL_SMS[language],
+      leadName: lead.lead_name,
+      area,
+      destination,
+    });
   const sent = await sendQuoText(to, message);
   if (!sent.ok) return { error: `${sent.error} The lead is still open.` };
 

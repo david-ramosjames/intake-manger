@@ -55,11 +55,23 @@ function referralChecklist(lead: StageLead): CloseReadyLead {
   return { ...lead, desired_case: false, callrail_tags: tags };
 }
 
+const REFERRAL_HOLD_TAGS = ["DEC: Outside Service Area", "DEC: Referred", "DEC: Non-PI Legal Matter"];
+
+/** The file is ready, but the referral itself has not been recorded yet. */
+export function referralAwaitingSend(lead: {
+  caller_class?: string | null;
+  case_type?: string | null;
+  callrail_tags?: string[] | null;
+  lead_status?: string | null;
+  close_reason?: string | null;
+}): boolean {
+  if (lead.lead_status === "Referred" || lead.close_reason === "referred") return false;
+  if (lead.caller_class === "non_pi" || officialCaseType(lead.case_type) === "Non-PI Legal Matter") return true;
+  return (lead.callrail_tags ?? []).some((tag) => REFERRAL_HOLD_TAGS.includes(tag));
+}
+
 export function queueStageLabel(lead: StageLead, fallback: string): string {
-  const referred = lead.lead_status === "Referred" || lead.close_reason === "referred";
-  const nonPi = lead.caller_class === "non_pi" || officialCaseType(lead.case_type) === "Non-PI Legal Matter";
-  const declineReferred = (lead.callrail_tags ?? []).includes("DEC: Referred");
-  if (!referred && (nonPi || declineReferred) && closeGaps(referralChecklist(lead), "declined").length === 0) return "Send Referral";
+  if (referralAwaitingSend(lead) && closeGaps(referralChecklist(lead), "declined").length === 0) return "Send Referral";
   if (lead.caller_class === "non_pi" && isPiCaseType(suggestedCaseType({ ...lead, case_type: lead.case_type ?? null }))) return fallback;
   return callerClassLabel(lead.caller_class) ?? fallback;
 }

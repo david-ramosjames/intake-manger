@@ -4,7 +4,7 @@ import { consultationWhen, desiredWord, milestoneDesired, milestoneQualified, mi
 import { listAccident, slackMessageUrl } from "./leads";
 import { readLeadChannel, type LeadChannelMessage } from "./slack";
 import { leadIsClosed, parseSlackLead, slackPostDisposition } from "./slack-lead";
-import { NOT_QUALIFIED_TAGS, SIZE_TAGS, TYPE_TAGS, selectedDecline } from "./tags";
+import { NOT_QUALIFIED_TAGS, SIZE_TAGS, TYPE_TAGS, declineReasonLabel, selectedDecline } from "./tags";
 
 const LEAD_COLUMNS =
   "id, lead_name, phone, phone_e164, source_channel, case_type, case_detail, grade, consultation_date, qualified, desired_case, desired_source, signed_case, lead_status, caller_class, callrail_tags, decline_reason, owner_name, agreement_status, agreement_sent_at, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts, summary, created_at";
@@ -82,7 +82,8 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 }
 
 function declineShown(reason: string | null | undefined, tags: string[]): string {
-  if (reason) return reason;
+  const labeled = declineReasonLabel(reason);
+  if (labeled) return labeled;
   const tag = selectedDecline(tags);
   if (!tag) return "—";
   const split = tag.indexOf(":");

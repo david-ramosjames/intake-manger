@@ -7,14 +7,16 @@ export const DECLINE_TAGS = [
   "DEC: At Fault / Bad Facts",
   "DEC: Has Attorney",
   "DEC: Medmal",
-  "DEC: No Injury / Property Damage",
+  "DEC: Minor Injury / Property Damage",
   "DEC: No Insurance",
   "DEC: Non-PI Legal Matter",
   "DEC: Outside Service Area",
-  "DEC: Referred",
   "DEC: Statue Issue",
   "DEC: Workers Comp",
 ] as const;
+
+/** Older leads can still have this. It is not offered as a new decline reason. */
+const KEPT_DECLINE_TAGS = ["DEC: Referred"] as const;
 
 export const NOT_A_LEAD_TAGS = [
   "NL: Existing Client",
@@ -31,6 +33,7 @@ export const NOT_A_LEAD_TAGS = [
 export const NOT_QUALIFIED_TAGS = ["NQ: Unresponsive"] as const;
 
 const RETIRED_NOT_QUALIFIED_TAGS = ["NQ: Spam / Robo Call", "NQ: Outside Service Area", "NQ: Non-PI Legal Matter"] as const;
+const RETIRED_DECLINE_TAGS = ["DEC: No Injury / Property Damage"] as const;
 
 export const SIZE_TAGS = ["S: Small", "S: Medium", "S: Large"] as const;
 
@@ -60,7 +63,7 @@ export const LEAD_TAGS = [
 ] as const;
 
 /** Tags this app may replace on a CallRail call. The old spam tag is listed so a push removes it. */
-export const MANAGED_CALLRAIL_TAGS = [...LEAD_TAGS, ...RETIRED_NOT_QUALIFIED_TAGS] as const;
+export const MANAGED_CALLRAIL_TAGS = [...LEAD_TAGS, ...RETIRED_NOT_QUALIFIED_TAGS, ...RETIRED_DECLINE_TAGS] as const;
 
 export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
   "QUALIFIED YES": "QUALIFIED YES",
@@ -70,9 +73,8 @@ export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
   "DEC: At Fault / Bad Facts": "DEC: At Fault / Bad Facts",
   "DEC: Has Attorney": "DEC: Has Attorney",
   "DEC: Medmal": "DEC: Medmal",
-  "DEC: No Injury / Property Damage": "DEC: No Injury / Property Damage",
+  "DEC: Minor Injury / Property Damage": "DEC: Minor Injury / Property Damage",
   "DEC: No Insurance": "DEC: No Insurance",
-  "DEC: Referred": "DEC: Referred",
   "DEC: Statue Issue": "DEC: Statue Issue",
   "DEC: Workers Comp": "DEC: Workers Comp",
   "NL: Existing Client": "NL: Existing Client",
@@ -104,18 +106,32 @@ export const TAG_LABEL: Record<(typeof LEAD_TAGS)[number], string> = {
 
 export type DeclineTag = (typeof DECLINE_TAGS)[number];
 
-const DECLINE_SET = new Set<string>(DECLINE_TAGS);
-
-export function declineReasonFromTag(tag: string | null | undefined): string | null {
-  if (!tag || !DECLINE_SET.has(tag)) return null;
-  const reason = tag.slice("DEC:".length).trim();
-  return reason || null;
-}
+const DECLINE_SET = new Set<string>([...DECLINE_TAGS, ...KEPT_DECLINE_TAGS]);
 
 const LEGACY_DECLINE: Record<string, (typeof DECLINE_TAGS)[number]> = {
   "NQ: Outside Service Area": "DEC: Outside Service Area",
   "NQ: Non-PI Legal Matter": "DEC: Non-PI Legal Matter",
+  "DEC: No Injury / Property Damage": "DEC: Minor Injury / Property Damage",
 };
+
+export function declineReasonLabel(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  if (reason === "No Injury / Property Damage") return "Minor Injury / Property Damage";
+  return reason;
+}
+
+export function declineReasonFromTag(tag: string | null | undefined): string | null {
+  const current = tag ? LEGACY_DECLINE[tag] ?? tag : "";
+  if (!current || !DECLINE_SET.has(current)) return null;
+  const reason = current.slice("DEC:".length).trim();
+  return reason || null;
+}
+
+export function declineOptions(current?: string | null): string[] {
+  const options: string[] = [...DECLINE_TAGS];
+  if (current && KEPT_DECLINE_TAGS.includes(current as (typeof KEPT_DECLINE_TAGS)[number]) && !options.includes(current)) options.push(current);
+  return options;
+}
 
 export function selectedDecline(tags: string[]): string {
   const direct = tags.find((tag) => DECLINE_SET.has(tag));
@@ -181,10 +197,11 @@ export function tagsFromSelection(input: {
         ? input.qualified
         : "";
   if (!qualified && input.requireQualified !== false) throw new Error("Choose Qualified YES or Qualified NO.");
+  const chosenDecline = LEGACY_DECLINE[input.decline] ?? input.decline;
   const decline = nonPi
     ? "DEC: Non-PI Legal Matter"
-    : DECLINE_SET.has(input.decline)
-      ? input.decline
+    : DECLINE_SET.has(chosenDecline)
+      ? chosenDecline
       : legacy === "NQ: Outside Service Area"
         ? "DEC: Outside Service Area"
         : legacy === "NQ: Non-PI Legal Matter"
@@ -221,6 +238,9 @@ export function qualifiedLine(tags: string[], declineReason: string | null): str
 
 export function qualifiedSummary(tags: string[], declineReason: string | null): string {
   if (tags.includes(QUALIFIED_YES)) return "Yes";
-  if (tags.includes(QUALIFIED_NO)) return declineReason ? `No · ${declineReason}` : "No";
+  if (tags.includes(QUALIFIED_NO)) {
+    const reason = declineReasonLabel(declineReason);
+    return reason ? `No · ${reason}` : "No";
+  }
   return "Not tagged";
 }

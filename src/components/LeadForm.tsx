@@ -6,7 +6,7 @@ import { buttonPrimary } from "@/lib/ui";
 import { LeadTagFields } from "@/components/LeadTagFields";
 import { milestoneDesired } from "@/lib/desired";
 import { caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, LEAD_STATUSES, SOURCE_CHANNELS, officialCaseType, standardLeadEmail, type Lead, type LeadArrival, type LeadSentiment } from "@/lib/leads";
-import { getCategoriesForType, getSourcesForCategory, isSourceCategory, isSourceType, SOURCE_TYPES, type SourceCategory, type SourceType } from "@/lib/source-options";
+import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, isSourceType, SOURCE_TYPES, type SourceCategory, type SourceType } from "@/lib/source-options";
 
 function isNextRedirect(err: unknown): boolean {
   return (
@@ -47,12 +47,12 @@ export function LeadForm({
   const [sourceCategory, setSourceCategory] = useState<SourceCategory | "">(
     () => (isSourceCategory(lead?.source_category) ? lead.source_category : "")
   );
-  const [leadSource, setLeadSource] = useState(() => lead?.lead_source ?? "");
+  const [leadSource, setLeadSource] = useState(() => findSourceOption(lead?.lead_source)?.source ?? lead?.lead_source ?? "");
   
   useEffect(() => {
     setSourceType(isSourceType(lead?.source_type) ? lead.source_type : "");
     setSourceCategory(isSourceCategory(lead?.source_category) ? lead.source_category : "");
-    setLeadSource(lead?.lead_source ?? "");
+    setLeadSource(findSourceOption(lead?.lead_source)?.source ?? lead?.lead_source ?? "");
   }, [lead?.id, lead?.source_type, lead?.source_category, lead?.lead_source]);
   
   const [pending, setPending] = useState(false);

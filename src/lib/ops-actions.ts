@@ -508,6 +508,13 @@ export async function saveLeadDetails(formData: FormData) {
     actor,
     payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType, lead_name: leadName },
   });
+  // Close as Lost first so CallRail / revalidate failures cannot leave the lead open.
+  const lostDecision = text(formData, "lost_decision");
+  const lostReasonValue = text(formData, "lost_reason");
+  let closed = false;
+  if (lostDecision === "yes" || lostDecision === "no") {
+    closed = await applyLostLeadDecision(supabase, leadId, actor, lostDecision, lostReasonValue);
+  }
   let qualifiedDecision = text(formData, "qualified_decision");
   let desiredDecision = text(formData, "desired_decision");
   let declineTag = text(formData, "decline_tag") ?? "";
@@ -518,7 +525,7 @@ export async function saveLeadDetails(formData: FormData) {
   } else if (qualifiedDecision === "no") {
     desiredDecision = "no";
   }
-  if (!markingNonLead && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd")) {
+  if (!closed && !markingNonLead && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd")) {
     const qualifiedTag = qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "";
     const desired = desiredDecision === "yes";
     const tagged = tagsFromSelection({
@@ -553,7 +560,7 @@ export async function saveLeadDetails(formData: FormData) {
       }
     }
   }
-  if (admin && (signedDecision === "yes" || signedDecision === "no")) {
+  if (!closed && admin && (signedDecision === "yes" || signedDecision === "no")) {
     const wantSigned = signedDecision === "yes";
     const nextDate = wantSigned ? signedDate : null;
     const same = Boolean(before.signed_case) === wantSigned && (before.date_signed ?? null) === nextDate;
@@ -575,17 +582,13 @@ export async function saveLeadDetails(formData: FormData) {
     }
   }
   const signedNow = admin && signedDecision === "yes";
-  if (signedNow) await markSignedQualified(supabase, leadId);
-  let closed = signedNow
-    ? await closeSignedLead(supabase, leadId, actor)
-    : officialCaseType(caseType) === "Non-PI Legal Matter"
-      ? await settleNonPiLead(supabase, leadId, actor)
-      : await closeUndesiredLead(supabase, leadId, actor);
-  const lostDecision = text(formData, "lost_decision");
-  const lostReason = text(formData, "lost_reason");
-  if (!signedNow && (lostDecision === "yes" || lostDecision === "no")) {
-    const lostClosed = await applyLostLeadDecision(supabase, leadId, actor, lostDecision, lostReason);
-    if (lostClosed) closed = true;
+  if (!closed && signedNow) await markSignedQualified(supabase, leadId);
+  if (!closed) {
+    closed = signedNow
+      ? await closeSignedLead(supabase, leadId, actor)
+      : officialCaseType(caseType) === "Non-PI Legal Matter"
+        ? await settleNonPiLead(supabase, leadId, actor)
+        : await closeUndesiredLead(supabase, leadId, actor);
   }
   revalidatePath("/work");
   revalidatePath("/");
@@ -1873,7 +1876,7 @@ export async function setLostLead(formData: FormData) {
 }
 
 /** Returns true when the lead is closed as lost. */
-async function applyLostLeadDecision(
+export async function applyLostLeadDecision(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
   leadId: string,
   email: string,

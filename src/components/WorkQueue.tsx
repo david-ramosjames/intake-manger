@@ -1186,22 +1186,22 @@ function LeadFacts({
     const markLost = lostValue === "yes" && isLostLeadReason(lostReason);
     try {
       const saved = await persistDetails(formData);
+      if (markLost && !saved?.closed) {
+        throw new Error("Could not close as lost. Try Save again.");
+      }
       setSaved(true);
       setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
       setError(null);
-      notify({ tone: "saved", text: saved?.closed || markLost ? "Saved and closed" : "Saved" });
-      if (saved?.closed || markLost) {
-        // Pull the closed lead out of the open list without waiting on a flaky RSC refresh.
+      notify({ tone: "saved", text: saved?.closed ? "Saved and closed" : "Saved" });
+      if (saved?.closed) {
         window.setTimeout(() => window.location.assign("/work"), 400);
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
       if (text.includes("Server Components render")) {
-        // Details + lost write happen before revalidate; RSC can still fail afterward.
         setSaved(true);
         setError(null);
-        notify({ tone: "saved", text: markLost ? "Saved and closed" : "Saved" });
-        if (markLost) window.setTimeout(() => window.location.assign("/work"), 400);
+        notify({ tone: "saved", text: "Saved" });
       } else {
         notify({ tone: "error", text });
         setError(text);
@@ -1229,8 +1229,13 @@ function LeadFacts({
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
       if (!text.includes("Server Components render")) throw err;
-      // Lost is applied in the same action before revalidate, so treat RSC as saved.
-      return { closed: lostValue === "yes" && isLostLeadReason(lostReason) };
+      // RSC can fail after a successful write — confirm Lost before treating it as closed.
+      if (!(lostValue === "yes" && isLostLeadReason(lostReason))) return { closed: false };
+      const check = await fetch(`/api/leads/${row.id}/status`, { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null);
+      if (check?.lead_status === "Lost") return { closed: true };
+      throw new Error("Could not close as lost. Try Save again.");
     }
   }
   const caseOptions = caseTypeChoices(row.caseType);
@@ -1248,6 +1253,12 @@ function LeadFacts({
         >
           <input type="hidden" name="lead_id" value={row.id} />
           {notLeadReason ? <input type="hidden" name="non_lead_reason" value={notLeadReason} /> : null}
+          {lostValue === "yes" && isLostLeadReason(lostReason) ? (
+            <>
+              <input type="hidden" name="lost_decision" value="yes" />
+              <input type="hidden" name="lost_reason" value={lostReason} />
+            </>
+          ) : null}
           {row.signed ? null : (
             <NonLeadChoice row={row} reason={notLeadReason} onReason={setNotLeadReason} />
           )}

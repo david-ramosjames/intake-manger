@@ -2322,6 +2322,22 @@ function ActivityThread({ touches, row, staff }: { touches: Touch[] | null; row:
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 border-b border-slate-200 px-4 py-2 text-xs">
+        {row.quoUrl ? (
+          <a href={row.quoUrl} className="font-medium text-navy underline" target="_blank" rel="noreferrer">
+            Open in Quo
+          </a>
+        ) : (
+          <span className="text-slate-400">No Quo link</span>
+        )}
+        {row.slackUrl ? (
+          <a href={row.slackUrl} className="font-medium text-navy underline" target="_blank" rel="noreferrer">
+            Open in Slack
+          </a>
+        ) : (
+          <span className="text-slate-400">No Slack post</span>
+        )}
+      </div>
       <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
         <div className="mt-auto">
           {ordered === null ? (

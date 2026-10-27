@@ -576,11 +576,18 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const signedNow = admin && signedDecision === "yes";
   if (signedNow) await markSignedQualified(supabase, leadId);
-  const closed = signedNow
+  let closed = signedNow
     ? await closeSignedLead(supabase, leadId, actor)
     : officialCaseType(caseType) === "Non-PI Legal Matter"
       ? await settleNonPiLead(supabase, leadId, actor)
       : await closeUndesiredLead(supabase, leadId, actor);
+  const lostDecision = text(formData, "lost_decision");
+  const lostReason = text(formData, "lost_reason");
+  if (!signedNow && (lostDecision === "yes" || lostDecision === "no")) {
+    const lostClosed = await applyLostLeadDecision(supabase, leadId, actor, lostDecision, lostReason);
+    if (lostClosed) closed = true;
+  }
+  revalidatePath("/work");
   revalidatePath("/");
   revalidatePath("/priority");
   revalidatePath("/review");
@@ -1856,7 +1863,23 @@ export async function setLostLead(formData: FormData) {
   const reason = text(formData, "reason");
   if (!leadId) throw new Error("Missing the lead.");
   if (decision !== "yes" && decision !== "no") throw new Error("Choose yes or no for lost lead.");
+  await applyLostLeadDecision(supabase, leadId, email, decision as "yes" | "no", reason);
+  revalidatePath("/work");
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath("/review");
+  revalidatePath("/open-calls");
+  revalidatePath(`/leads/${leadId}`);
+}
 
+/** Returns true when the lead is closed as lost. */
+async function applyLostLeadDecision(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+  email: string,
+  decision: "yes" | "no",
+  reason: string | null,
+): Promise<boolean> {
   const { data: before, error: loadError } = await supabase
     .from("leads")
     .select(`id, case_id, lead_status, close_reason, follow_up, text_sequence_status, ${CLOSE_READY_COLUMNS}`)
@@ -1895,7 +1918,10 @@ export async function setLostLead(formData: FormData) {
       if (stopError) throw new Error(stopError.message);
     }
     await stopFollowUp(supabase, leadId, LOST_LEAD_REASONS[reason]);
-  } else if (before.lead_status === "Lost" && isLostLeadReason(before.close_reason)) {
+    return true;
+  }
+
+  if (before.lead_status === "Lost" && isLostLeadReason(before.close_reason)) {
     const { error } = await supabase
       .from("leads")
       .update({
@@ -1914,13 +1940,7 @@ export async function setLostLead(formData: FormData) {
       payload: { from: before.close_reason },
     });
   }
-
-  revalidatePath("/");
-  revalidatePath("/work");
-  revalidatePath("/priority");
-  revalidatePath("/review");
-  revalidatePath("/open-calls");
-  revalidatePath(`/leads/${leadId}`);
+  return false;
 }
 
 export async function confirmSigned(formData: FormData) {

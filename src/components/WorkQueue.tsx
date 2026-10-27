@@ -14,7 +14,7 @@ import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSource
 import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import {
   isGuideReferral,
   PRACTICE_AREAS,
@@ -1183,29 +1183,25 @@ function LeadFacts({
     setSaved(false);
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
+    const markLost = lostValue === "yes" && isLostLeadReason(lostReason);
     try {
       const saved = await persistDetails(formData);
-      const clearLost = (nonPi || qualifiedValue === "no") && Boolean(row.lostReason);
-      const markLost = lostValue === "yes" && isLostLeadReason(lostReason);
-      const clearLostChoice = lostValue === "no" && Boolean(row.lostReason);
-      if (markLost || clearLost || clearLostChoice) {
-        const lostData = new FormData();
-        lostData.set("lead_id", row.id);
-        lostData.set("decision", markLost ? "yes" : "no");
-        if (markLost) lostData.set("reason", lostReason);
-        await setLostLead(lostData);
-      }
       setSaved(true);
       setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
       setError(null);
-      notify({ tone: "saved", text: markLost ? "Saved and closed" : saved?.closed ? "Saved and closed" : "Saved" });
+      notify({ tone: "saved", text: saved?.closed || markLost ? "Saved and closed" : "Saved" });
+      if (saved?.closed || markLost) {
+        // Pull the closed lead out of the open list without waiting on a flaky RSC refresh.
+        window.setTimeout(() => window.location.assign("/work"), 400);
+      }
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
       if (text.includes("Server Components render")) {
-        // Action work often finished; Next can still fail the follow-up RSC flight.
+        // Details + lost write happen before revalidate; RSC can still fail afterward.
         setSaved(true);
         setError(null);
-        notify({ tone: "saved", text: lostValue === "yes" ? "Saved and closed" : "Saved" });
+        notify({ tone: "saved", text: markLost ? "Saved and closed" : "Saved" });
+        if (markLost) window.setTimeout(() => window.location.assign("/work"), 400);
       } else {
         notify({ tone: "error", text });
         setError(text);
@@ -1221,11 +1217,20 @@ function LeadFacts({
     data.set("desired_decision", desiredValue);
     data.set("decline_tag", declineValue);
     data.set("size_tag", sizeValue);
+    const clearLost = (nonPi || qualifiedValue === "no") && Boolean(row.lostReason);
+    if (lostValue === "yes" && isLostLeadReason(lostReason)) {
+      data.set("lost_decision", "yes");
+      data.set("lost_reason", lostReason);
+    } else if (lostValue === "no" && (row.lostReason || clearLost)) {
+      data.set("lost_decision", "no");
+    }
     try {
       return await saveLeadDetails(data);
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
       if (!text.includes("Server Components render")) throw err;
+      // Lost is applied in the same action before revalidate, so treat RSC as saved.
+      return { closed: lostValue === "yes" && isLostLeadReason(lostReason) };
     }
   }
   const caseOptions = caseTypeChoices(row.caseType);

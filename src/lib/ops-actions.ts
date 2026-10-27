@@ -1531,8 +1531,8 @@ export async function saveReferralTemplate(formData: FormData) {
   revalidatePath("/referrals");
 }
 
-function guideUrlOrEmpty(raw: string): string {
-  const value = raw.trim();
+function guideUrlOrEmpty(raw: string | null): string {
+  const value = (raw ?? "").trim();
   if (!value) return "";
   try {
     const url = new URL(value);

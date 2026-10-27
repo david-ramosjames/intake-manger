@@ -1252,7 +1252,6 @@ function LeadFacts({
           }}
         >
           <input type="hidden" name="lead_id" value={row.id} />
-          {notLeadReason ? <input type="hidden" name="non_lead_reason" value={notLeadReason} /> : null}
           {lostValue === "yes" && isLostLeadReason(lostReason) ? (
             <>
               <input type="hidden" name="lost_decision" value="yes" />

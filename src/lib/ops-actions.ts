@@ -440,23 +440,19 @@ export async function saveLeadDetails(formData: FormData) {
   const phoneE164 = phone ? toE164(phone) : null;
   const keepPhone = formData.get("keep_phone") === "1";
   if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
-  const chosenClass = text(formData, "non_lead_reason");
-  const markingNonLead =
-    officialCaseType(caseType) !== "Non-PI Legal Matter" &&
-    (chosenClass === DATA_ERROR_CLASS || EXCLUDED_CALLER_CLASSES.includes(chosenClass as ExcludedCallerClass));
   const consulted = text(formData, "consulted");
   const consultationDate = text(formData, "consultation_date");
-  if (!markingNonLead && consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {
+  if (consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {
     throw new Error("Enter the consultation date.");
   }
   const signedDecision = text(formData, "signed_decision");
   const signedDate = text(formData, "date_signed");
-  if (!markingNonLead && admin && signedDecision === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(signedDate ?? "")) {
+  if (admin && signedDecision === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(signedDate ?? "")) {
     throw new Error("Enter the signed date.");
   }
   const { data: before, error: loadError } = await supabase
     .from("leads")
-    .select("caller_class, close_suggestion, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case")
+    .select("caller_class, close_suggestion, close_reason, lead_status, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case")
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
@@ -489,6 +485,9 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const officialType = officialCaseType(caseType);
   patch.case_type = officialType && officialType !== "Unknown / No Response" ? officialType : caseType ? "TBD" : null;
+  const excludedCaller =
+    before.caller_class === DATA_ERROR_CLASS ||
+    EXCLUDED_CALLER_CLASSES.includes(before.caller_class as ExcludedCallerClass);
   if (officialType === "Non-PI Legal Matter") {
     patch.caller_class = "non_pi";
     patch.close_suggestion = "decline";
@@ -496,12 +495,36 @@ export async function saveLeadDetails(formData: FormData) {
     patch.caller_class = null;
     patch.practice_area = "personal_injury";
     if (before.close_suggestion === "decline") patch.close_suggestion = null;
+  } else if (caseTypeIsLead(patch.case_type) && excludedCaller) {
+    // Open leads require null/non_pi caller_class. Saving a real case type alone used to leave insurance/etc stuck in Non-leads.
+    patch.caller_class = null;
   }
   if (patch.close_suggestion !== "decline" && before.close_suggestion === "not_a_lead" && caseTypeIsLead(patch.case_type)) {
     patch.close_suggestion = null;
   }
-  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
+  const reopenNonLead =
+    caseTypeIsLead(patch.case_type) &&
+    before.lead_status === "Lost" &&
+    (before.close_reason === "not_a_lead" || before.close_reason === DATA_ERROR_CLASS);
+  if (reopenNonLead) {
+    patch.lead_status = "Working";
+    patch.close_reason = null;
+    patch.close_suggestion = null;
+  }
+  const { error } = await supabase.from("leads").update(reopenNonLead ? { ...patch, follow_up: true, sequence: null } : patch).eq("id", leadId);
   if (error) throw new Error(error.message);
+  if (reopenNonLead || (caseTypeIsLead(patch.case_type) && excludedCaller)) {
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "non_lead_restored",
+      actor,
+      payload: {
+        from_caller_class: before.caller_class,
+        from_close_reason: before.close_reason,
+        case_type: patch.case_type,
+      },
+    });
+  }
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: "lead_details",
@@ -525,7 +548,7 @@ export async function saveLeadDetails(formData: FormData) {
   } else if (qualifiedDecision === "no") {
     desiredDecision = "no";
   }
-  if (!closed && !markingNonLead && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd")) {
+  if (!closed && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd")) {
     const qualifiedTag = qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "";
     const desired = desiredDecision === "yes";
     const tagged = tagsFromSelection({

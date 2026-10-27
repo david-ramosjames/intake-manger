@@ -24,6 +24,7 @@ import { referralAwaitingSend } from "./next-step";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
+import { loadStoredPropertyDamageGuides } from "./property-damage-guides";
 import { sendQuoText } from "./quo";
 import { listQuoLines } from "./quo-settings";
 import {
@@ -1276,19 +1277,11 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const to = lead.phone_e164 || toE164(lead.phone);
   if (!to) return { error: "This lead needs a phone number before the text can go out." };
 
-  const [{ data: templates }, guideSettings] = await Promise.all([
+  const [{ data: templates }, guides] = await Promise.all([
     supabase.from("referral_templates").select("language, body"),
-    supabase
-      .from("intake_settings")
-      .select("property_damage_guide_url_en, property_damage_guide_url_es")
-      .eq("id", "default")
-      .maybeSingle(),
+    loadStoredPropertyDamageGuides(),
   ]);
   const stored = (templates ?? []).find((row) => row.language === language)?.body;
-  const guides = {
-    en: typeof guideSettings.data?.property_damage_guide_url_en === "string" ? guideSettings.data.property_damage_guide_url_en : "",
-    es: typeof guideSettings.data?.property_damage_guide_url_es === "string" ? guideSettings.data.property_damage_guide_url_es : "",
-  };
   if (guide && !(language === "es" ? guides.es.trim() : guides.en.trim())) {
     return { error: "Save the property damage guide links on the Referrals page first." };
   }
@@ -1544,11 +1537,12 @@ function guideUrlOrEmpty(raw: string | null): string {
 }
 
 export async function savePropertyDamageGuides(formData: FormData) {
-  const { supabase, email } = await requireStaff();
+  const { email } = await requireStaff();
+  const supabase = createSupabaseServiceClient();
   const en = guideUrlOrEmpty(text(formData, "property_damage_guide_url_en"));
   const es = guideUrlOrEmpty(text(formData, "property_damage_guide_url_es"));
   if (!en || !es) throw new Error("Save both the English and Spanish guide links.");
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("intake_settings")
     .update({
       property_damage_guide_url_en: en,
@@ -1556,8 +1550,11 @@ export async function savePropertyDamageGuides(formData: FormData) {
       updated_at: new Date().toISOString(),
       updated_by: email,
     })
-    .eq("id", "default");
+    .eq("id", "default")
+    .select("id")
+    .maybeSingle();
   if (error) throw new Error(error.message);
+  if (!data) throw new Error("Could not save the guide links.");
   revalidatePath("/referrals");
   revalidatePath("/work");
   revalidatePath("/open-calls");

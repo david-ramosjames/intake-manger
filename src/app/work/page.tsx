@@ -516,7 +516,7 @@ export default async function LeadListPage({
       .eq("active", true)
       .order("name"),
     supabase.from("referral_templates").select("language, body"),
-    loadPropertyDamageGuides(supabase),
+    loadPropertyDamageGuides(),
   ]);
   let workLeads = focusIds ? focusedLeads : ((data ?? []) as ListLead[]);
   if (funnel === "closed") workLeads = workLeads.filter((lead) => !signedFileStillOpen(lead));

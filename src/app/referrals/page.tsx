@@ -1,4 +1,6 @@
-import { saveDestination, savePropertyDamageGuides, saveReferralFromNumber, saveReferralTemplate } from "@/lib/ops-actions";
+import { PropertyDamageGuidesForm } from "@/components/PropertyDamageGuidesForm";
+import { saveDestination, saveReferralFromNumber, saveReferralTemplate } from "@/lib/ops-actions";
+import { loadStoredPropertyDamageGuides } from "@/lib/property-damage-guides";
 import { PRACTICE_AREAS, practiceAreaLabel, DEFAULT_REFERRAL_SMS } from "@/lib/referrals";
 import { DEFAULT_REFERRAL_FROM, listQuoLines, loadQuoSettings, quoLineLabel } from "@/lib/quo-settings";
 import { requireStaff } from "@/lib/session";
@@ -19,7 +21,7 @@ type Destination = {
 
 export default async function ReferralsPage() {
   const { supabase, admin } = await requireStaff();
-  const [{ data, error }, { data: templateRows }, quo, { data: guideSettings }] = await Promise.all([
+  const [{ data, error }, { data: templateRows }, quo, guides] = await Promise.all([
     supabase
       .from("referral_destinations")
       .select("id, name, phone, practice_areas, address, email, website, spanish, matters, notes, active")
@@ -27,20 +29,12 @@ export default async function ReferralsPage() {
       .order("name"),
     supabase.from("referral_templates").select("language, body"),
     loadQuoSettings(),
-    supabase
-      .from("intake_settings")
-      .select("property_damage_guide_url_en, property_damage_guide_url_es")
-      .eq("id", "default")
-      .maybeSingle(),
+    loadStoredPropertyDamageGuides(),
   ]);
   const destinations = (data ?? []) as Destination[];
   const stored = (templateRows ?? []) as { language: string; body: string }[];
   const english = stored.find((row) => row.language === "en")?.body || DEFAULT_REFERRAL_SMS.en;
   const spanish = stored.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es;
-  const guideEn =
-    typeof guideSettings?.property_damage_guide_url_en === "string" ? guideSettings.property_damage_guide_url_en.trim() : "";
-  const guideEs =
-    typeof guideSettings?.property_damage_guide_url_es === "string" ? guideSettings.property_damage_guide_url_es.trim() : "";
   const numbers = await listQuoLines(quo.apiKey);
   const lines = quo.fromNumber && !numbers.lines.some((line) => line.number === quo.fromNumber)
     ? [{ number: quo.fromNumber, label: "Saved number" }, ...numbers.lines]
@@ -88,39 +82,7 @@ export default async function ReferralsPage() {
         <TemplateForm language="es" label="Spanish text" body={spanish} />
       </div>
 
-      <form action={savePropertyDamageGuides} className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-navy">Property Damage guides</h2>
-        <p className="text-sm text-slate-600">
-          When staff chooses Property Damage on a referral, the text includes one of these PDF links instead of an attorney.
-        </p>
-        <label className="grid gap-1 text-sm font-medium text-slate-700" htmlFor="guide-en">
-          English PDF link
-          <input
-            id="guide-en"
-            name="property_damage_guide_url_en"
-            type="url"
-            required
-            defaultValue={guideEn}
-            placeholder="https://…"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
-          />
-        </label>
-        <label className="grid gap-1 text-sm font-medium text-slate-700" htmlFor="guide-es">
-          Spanish PDF link
-          <input
-            id="guide-es"
-            name="property_damage_guide_url_es"
-            type="url"
-            required
-            defaultValue={guideEs}
-            placeholder="https://…"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
-          />
-        </label>
-        <button type="submit" className="w-fit rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
-          Save guide links
-        </button>
-      </form>
+      <PropertyDamageGuidesForm en={guides.en} es={guides.es} />
 
       <div className="mt-8 space-y-6">
         {[...PRACTICE_AREAS].sort((a, b) => a.label.localeCompare(b.label)).map((area) => {

@@ -333,7 +333,7 @@ export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promi
       .order("name"),
     supabase.from("referral_templates").select("language, body"),
     loadStaff(supabase),
-    loadPropertyDamageGuides(supabase),
+    loadPropertyDamageGuides(),
   ]);
   const destinations = ((destinationResult.data ?? []) as ReferralDestination[]).map((destination) => ({
     ...destination,
@@ -395,7 +395,7 @@ export async function loadWorkQueueRows(
         .limit(2000),
       loadLeadCallJobs(supabase, ids),
       loadStaffTouchedIds(supabase, ids),
-      loadPropertyDamageGuides(supabase),
+      loadPropertyDamageGuides(),
     ]);
 
   const leads = (leadRows ?? []) as ListLead[];

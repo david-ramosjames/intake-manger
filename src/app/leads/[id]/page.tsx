@@ -56,7 +56,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .order("occurred_at", { ascending: false })
       .limit(30),
     loadSlackSettings(),
-    loadPropertyDamageGuides(supabase),
+    loadPropertyDamageGuides(),
   ]);
 
   if (error) {

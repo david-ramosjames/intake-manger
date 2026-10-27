@@ -1720,14 +1720,11 @@ function QueueReferral({
     sectionRef.current?.scrollIntoView({ block: "nearest" });
   }, [startOpen]);
   useEffect(() => {
-    if (!handwritten) {
-      setEditingText(false);
-      setDraft("");
-      return;
-    }
-    setEditingText(true);
-    if (!textTouched) setDraft(preview);
-  }, [handwritten, preview, textTouched]);
+    // Handwritten referrals stay in the editor. Do not force-close a manual edit
+    // on firm referrals — that was clearing the box on the first keystroke.
+    if (handwritten) setEditingText(true);
+    if ((handwritten || editingText) && !textTouched) setDraft(preview);
+  }, [handwritten, preview, textTouched, editingText]);
 
   function backToChoices() {
     setHideRecorded(true);

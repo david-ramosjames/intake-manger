@@ -13,6 +13,7 @@ import { consultationWhen, contractSent, desiredWord, milestoneDesired, mileston
 import { daysOpen, leadTitle, listAccident, LEAD_ARRIVAL_LABEL, LEAD_KIND_LABEL, LEAD_SENTIMENT_LABEL, priorityReasonText, slackMessageUrl, type Lead, type LeadArrival, type LeadEvent, type LeadSentiment } from "@/lib/leads";
 import { heardClientName, loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
 import { leadCycle, leadNeed, leadStatusLabel, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace } from "@/lib/next-step";
+import { loadPropertyDamageGuides } from "@/lib/property-damage-guides";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { requireStaff } from "@/lib/session";
 import { slackThreadNotes } from "@/lib/slack";
@@ -25,7 +26,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { supabase, email } = await requireStaff();
   const docket = docketBaseUrl();
 
-  const [{ data, error }, eventsResult, jobsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult, slackSettings] = await Promise.all([
+  const [{ data, error }, eventsResult, jobsResult, destinationsResult, templatesResult, attemptsResult, staff, historyResult, slackSettings, propertyDamageGuides] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("lead_events")
@@ -55,6 +56,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .order("occurred_at", { ascending: false })
       .limit(30),
     loadSlackSettings(),
+    loadPropertyDamageGuides(supabase),
   ]);
 
   if (error) {
@@ -336,6 +338,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           referralOpportunity={Boolean(lead.referral_opportunity)}
           destinations={destinations}
           templates={templates}
+          propertyDamageGuides={propertyDamageGuides}
           closed={lead.lead_status === "Referred" || lead.lead_status === "Lost" || lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.signed_case}
         />
       </section>

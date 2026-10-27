@@ -126,11 +126,17 @@ function toCard(job: JobRow, channelId: string, now: number, totals: Map<string,
   };
 }
 
-function tagOptions(names: string[]): string[] {
-  const unique = [...new Set(names.filter(Boolean))];
-  unique.sort((a, b) => a.localeCompare(b));
-  const rest = unique.filter((name) => name !== "Outbound");
-  return unique.includes("Outbound") ? ["Outbound", ...rest] : rest;
+function tagCountsFor(jobs: OpenCallCard[]): { name: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const job of jobs) {
+    const name = job.tagName.trim();
+    if (!name || name === "Not tagged") continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const names = [...counts.keys()].filter((name) => (counts.get(name) ?? 0) > 0);
+  names.sort((a, b) => a.localeCompare(b));
+  const ordered = names.includes("Outbound") ? ["Outbound", ...names.filter((name) => name !== "Outbound")] : names;
+  return ordered.map((name) => ({ name, count: counts.get(name) ?? 0 }));
 }
 
 export default async function OpenCallsPage({
@@ -191,12 +197,12 @@ export default async function OpenCallsPage({
   const upcoming = nextCallPerLead(((upcomingRows ?? []) as JobRow[]).filter((job) => leadStillOpen(leadOf(job)))).map((job) =>
     toCard(job, slack.channelId, now, totals),
   );
-  const people = tagOptions(["Outbound", ...staff.map((person) => person.name), ...waiting.map((job) => job.tagName), ...upcoming.map((job) => job.tagName)]);
   const matches = (job: OpenCallCard) => !tag || job.tagName === tag;
   const waitingShown = waiting.filter(matches);
   const upcomingShown = upcoming.filter(matches);
   const error = waitingError?.message || upcomingError?.message || null;
   const jobs = view === "upcoming" ? upcomingShown : waitingShown;
+  const tagCounts = tagCountsFor(view === "upcoming" ? upcoming : waiting);
   const selectedLead = params.lead?.trim() || "";
   const [shelf, selected] = await Promise.all([
     loadWorkQueueShelfContext(supabase),
@@ -233,9 +239,10 @@ export default async function OpenCallsPage({
         jobs={jobs}
         destinations={shelf.destinations}
         templates={shelf.templates}
+        propertyDamageGuides={shelf.propertyDamageGuides}
         staff={staff}
         staffNames={shelf.staffNames}
-        people={people}
+        tagCounts={tagCounts}
         tag={tag}
         completed={finishCounts.completed}
         autoClosed={finishCounts.autoClosed}

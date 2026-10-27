@@ -48,6 +48,11 @@ export function closeGaps(lead: CloseReadyLead, path: ClosePath = "base"): strin
     if (!/^\d{4}-\d{2}-\d{2}/.test(lead.date_signed ?? "")) gaps.push("Signed date");
     return gaps;
   }
+  if (path === "lost") {
+    // Unresponsive / signed elsewhere / no longer interested — stop outreach without
+    // forcing Desired or the rest of the decline file.
+    return lead.identity_status === "needs_review" ? ["Confirm the client name"] : [];
+  }
   const qualified = qualifiedValue(lead);
   if (qualified !== true && qualified !== false) gaps.push("Qualified");
   if (desiredValue(lead) == null) gaps.push("Desired");

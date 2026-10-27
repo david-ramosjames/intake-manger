@@ -18,6 +18,46 @@ type GradeRow = {
   intake_grade: string | null;
 };
 
+type InteractionRow = {
+  id: string;
+  type: string | null;
+  direction: string | null;
+  content: string | null;
+  occurred_at: string | null;
+  quo_link: string | null;
+  source_id: string | null;
+  phone: string | null;
+  phone_e164: string | null;
+  data: Record<string, unknown> | null;
+};
+
+function partyLabel(value: unknown, fallback: string | null): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (text) return text;
+  const phone = (fallback || "").trim();
+  return phone || null;
+}
+
+/** Texts used to store only the body. Missed calls and Slack already include From/To. */
+function activityContent(touch: InteractionRow, leadPhone: string | null): string | null {
+  const raw = touch.content ? String(touch.content) : "";
+  if (!raw) return null;
+  if (/^From:\s/im.test(raw) || /^📞/m.test(raw)) return raw.slice(0, 700);
+  if (String(touch.type || "").toLowerCase() !== "text") return raw.slice(0, 500);
+
+  const data = touch.data && typeof touch.data === "object" ? touch.data : {};
+  const client = partyLabel(null, touch.phone_e164 || touch.phone || leadPhone);
+  const inbound = String(touch.direction || "").toLowerCase() === "inbound";
+  const from =
+    partyLabel(data.from_display ?? data.fromDisplay ?? data.from, inbound ? client : "Ramos James Law") ||
+    (inbound ? client : "Ramos James Law");
+  const to =
+    partyLabel(data.to_display ?? data.toDisplay ?? data.to, inbound ? "Ramos James Law" : client) ||
+    (inbound ? "Ramos James Law" : client);
+  if (!from && !to) return raw.slice(0, 500);
+  return `From: ${from}\nTo: ${to}\nMessage: ${raw}`.slice(0, 700);
+}
+
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const { supabase } = await requireStaff();
@@ -30,7 +70,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   let query = supabase
     .from("intake_interactions")
-    .select("id, type, direction, content, occurred_at, quo_link, source_id")
+    .select("id, type, direction, content, occurred_at, quo_link, source_id, phone, phone_e164, data")
     .order("occurred_at", { ascending: false })
     .limit(40);
   query = lead?.phone_e164
@@ -72,7 +112,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       id: touch.id,
       type: touch.type,
       direction: touch.direction,
-      content: touch.content ? String(touch.content).slice(0, 500) : null,
+      content: activityContent(touch, lead?.phone_e164 ?? null),
       occurred_at: touch.occurred_at,
       quo_link: touch.quo_link,
       grade: grade?.grade || null,

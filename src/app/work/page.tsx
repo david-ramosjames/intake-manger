@@ -22,6 +22,7 @@ import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, formatCallDay, formatCallWhen, formatQueueStamp } from "@/lib/time";
 import { requireStaff } from "@/lib/session";
 import { DASHBOARD_RELEASE_DAY, loadNavTiles, type QueueFocus } from "@/lib/dashboard";
+import { loadPropertyDamageGuides } from "@/lib/property-damage-guides";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
@@ -470,7 +471,7 @@ export default async function LeadListPage({
     .order("lead_date", { ascending: false, nullsFirst: false })
     .limit(300);
   const since = metricStartDay();
-  const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, desiredCount, { data: stepRows }, destinationResult, templateResult] = await Promise.all([
+  const [{ data, error }, reviewResult, reviewCount, signedCount, closedCount, desiredCount, { data: stepRows }, destinationResult, templateResult, propertyDamageGuides] = await Promise.all([
     focusIds ? Promise.resolve({ data: [] as ListLead[], error: null }) : funnel === "closed" ? closedQuery : loadOpenWorkLeads(supabase),
     queue === "nonleads"
       ? supabase
@@ -515,6 +516,7 @@ export default async function LeadListPage({
       .eq("active", true)
       .order("name"),
     supabase.from("referral_templates").select("language, body"),
+    loadPropertyDamageGuides(supabase),
   ]);
   let workLeads = focusIds ? focusedLeads : ((data ?? []) as ListLead[]);
   if (funnel === "closed") workLeads = workLeads.filter((lead) => !signedFileStillOpen(lead));
@@ -990,6 +992,7 @@ export default async function LeadListPage({
         destinations={destinations}
         admin={admin}
         templates={referralTemplates}
+        propertyDamageGuides={propertyDamageGuides}
         staff={staff.map((person) => person.name)}
       />
 

@@ -15,7 +15,14 @@ import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLostLead, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
-import { PRACTICE_AREAS, referralFirms, renderReferralSms, type ReferralDestination } from "@/lib/referrals";
+import {
+  isGuideReferral,
+  PRACTICE_AREAS,
+  referralFirms,
+  renderPropertyDamageSms,
+  renderReferralSms,
+  type ReferralDestination,
+} from "@/lib/referrals";
 import type { NextActionLine } from "@/lib/next-action";
 import { chicagoLocalInput, formatChicago } from "@/lib/time";
 import { ButtonLabel } from "@/components/ButtonLabel";
@@ -37,7 +44,13 @@ function useNotedSubmit() {
       await task();
       notify({ tone: "saved", text: "Saved" });
     } catch (err) {
-      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save." });
+      const text = err instanceof Error ? err.message : "Could not save.";
+      // Next can reject a finished server action when the follow-up RSC render fails in production.
+      if (text.includes("Server Components render")) {
+        notify({ tone: "saved", text: "Saved" });
+      } else {
+        notify({ tone: "error", text });
+      }
     } finally {
       setPending(false);
     }
@@ -266,6 +279,7 @@ export function WorkQueue({
   initialId,
   destinations,
   templates,
+  propertyDamageGuides = { en: "", es: "" },
   staff,
   admin = false,
 }: {
@@ -273,6 +287,7 @@ export function WorkQueue({
   initialId?: string;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides?: { en: string; es: string };
   staff: string[];
   admin?: boolean;
 }) {
@@ -473,7 +488,7 @@ export function WorkQueue({
                   {row.nonPi || row.tags.includes("DEC: Referred") ? (
                     row.referralSent ? (
                       <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
-                    ) : (
+                    ) : row.label === "Referral Declined" ? null : (
                       <button
                         type="button"
                         onClick={() => {
@@ -530,6 +545,7 @@ export function WorkQueue({
               row={selected}
               destinations={destinations}
               templates={templates}
+              propertyDamageGuides={propertyDamageGuides}
               staff={staff}
               admin={admin}
               startReferral={referralOpenId === selected.id}
@@ -1043,6 +1059,7 @@ function LeadFacts({
   canLeave,
   destinations,
   templates,
+  propertyDamageGuides = { en: "", es: "" },
   startReferral = false,
 }: {
   row: QueueRow;
@@ -1050,6 +1067,7 @@ function LeadFacts({
   canLeave: RefObject<() => boolean>;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides?: { en: string; es: string };
   startReferral?: boolean;
 }) {
   const notify = useContext(DrawerNoticeContext);
@@ -1168,22 +1186,26 @@ function LeadFacts({
     try {
       const saved = await persistDetails(formData);
       const clearLost = (nonPi || qualifiedValue === "no") && Boolean(row.lostReason);
-      if ((dirty.lost || clearLost) && (lostValue === "yes" || lostValue === "no")) {
+      const markLost = lostValue === "yes" && isLostLeadReason(lostReason);
+      const clearLostChoice = lostValue === "no" && Boolean(row.lostReason);
+      if (markLost || clearLost || clearLostChoice) {
         const lostData = new FormData();
         lostData.set("lead_id", row.id);
-        lostData.set("decision", lostValue);
-        if (lostValue === "yes") lostData.set("reason", lostReason);
+        lostData.set("decision", markLost ? "yes" : "no");
+        if (markLost) lostData.set("reason", lostReason);
         await setLostLead(lostData);
       }
       setSaved(true);
       setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
-      notify({ tone: "saved", text: saved?.closed ? "Saved and closed" : "Saved" });
+      setError(null);
+      notify({ tone: "saved", text: markLost ? "Saved and closed" : saved?.closed ? "Saved and closed" : "Saved" });
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
       if (text.includes("Server Components render")) {
+        // Action work often finished; Next can still fail the follow-up RSC flight.
         setSaved(true);
-        setError("Saved. Reload the page if the list looks stale.");
-        notify({ tone: "saved", text: "Saved" });
+        setError(null);
+        notify({ tone: "saved", text: lostValue === "yes" ? "Saved and closed" : "Saved" });
       } else {
         notify({ tone: "error", text });
         setError(text);
@@ -1532,6 +1554,7 @@ function LeadFacts({
                 row={row}
                 destinations={destinations}
                 templates={templates}
+                propertyDamageGuides={propertyDamageGuides}
                 startOpen={startReferral}
                 desiredNo={desiredValue === "no"}
                 declineTag={declineValue}
@@ -1609,6 +1632,7 @@ function QueueReferral({
   row,
   destinations,
   templates,
+  propertyDamageGuides = { en: "", es: "" },
   startOpen = false,
   desiredNo,
   declineTag,
@@ -1617,6 +1641,7 @@ function QueueReferral({
   row: QueueRow;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides?: { en: string; es: string };
   startOpen?: boolean;
   desiredNo: boolean;
   declineTag: string;
@@ -1624,7 +1649,10 @@ function QueueReferral({
 }) {
   const firms = referralFirms(destinations);
   const types = PRACTICE_AREAS.filter(
-    (area) => area.id === "other" || firms.some((firm) => firm.practice_areas.includes(area.id)),
+    (area) =>
+      area.id === "other" ||
+      isGuideReferral(area.id) ||
+      firms.some((firm) => firm.practice_areas.includes(area.id)),
   ).sort((a, b) => a.label.localeCompare(b.label));
   const sectionRef = useRef<HTMLElement>(null);
   const [mode, setMode] = useState<"send" | "record" | null>(startOpen ? "send" : null);
@@ -1642,27 +1670,31 @@ function QueueReferral({
   const [recordedAttorney, setRecordedAttorney] = useState("");
   const [hideRecorded, setHideRecorded] = useState(false);
   const notify = useContext(DrawerNoticeContext);
-  const partners = area
+  const guide = isGuideReferral(area);
+  const partners = area && !guide
     ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
     : [];
   const firm = partners.find((item) => item.id === firmId) ?? null;
-  const handwritten = Boolean(area) && partners.length === 0;
-  const preview =
-    area && (firm || handwritten)
-      ? renderReferralSms({
-          language,
-          template: templates[language],
-          leadName: row.leadName || row.title,
-          area,
-          destination: firm ?? {
-            name: attorneyName.trim() || "{{attorney}}",
-            phone: attorneyPhone.trim() || "{{phone}}",
-            address: null,
-            email: null,
-            website: null,
-          },
-        })
-      : "";
+  const handwritten = Boolean(area) && !guide && partners.length === 0;
+  const preview = !area
+    ? ""
+    : guide
+      ? renderPropertyDamageSms({ language, leadName: row.leadName || row.title, guides: propertyDamageGuides })
+      : firm || handwritten
+        ? renderReferralSms({
+            language,
+            template: templates[language],
+            leadName: row.leadName || row.title,
+            area,
+            destination: firm ?? {
+              name: attorneyName.trim() || "{{attorney}}",
+              phone: attorneyPhone.trim() || "{{phone}}",
+              address: null,
+              email: null,
+              website: null,
+            },
+          })
+        : "";
   useEffect(() => {
     setHideRecorded(false);
   }, [row.id]);
@@ -1706,7 +1738,7 @@ function QueueReferral({
   }
 
   async function submit(kind: "send" | "already") {
-    if (!area || (handwritten ? !attorneyName.trim() : !firm)) {
+    if (!area || (!guide && (handwritten ? !attorneyName.trim() : !firm))) {
       setError(handwritten ? "Enter the attorney." : "Choose a referral type and a partner.");
       return;
     }
@@ -1724,8 +1756,13 @@ function QueueReferral({
       const message = (editingText ? draft : preview).trim();
       if (!message || message.includes("{{")) {
         setPending(null);
-        setError(message.includes("{{") ? "Fill in the attorney and phone in the text." : "Write the text before sending.");
-        notify({ tone: "error", text: message.includes("{{") ? "Fill in the attorney and phone in the text." : "Write the text before sending." });
+        const missing = message.includes("{{")
+          ? guide
+            ? "Fill in the guide link in the text."
+            : "Fill in the attorney and phone in the text."
+          : "Write the text before sending.";
+        setError(missing);
+        notify({ tone: "error", text: missing });
         return;
       }
       data.set("message", message);
@@ -1738,7 +1775,7 @@ function QueueReferral({
         setError(result.error);
         return;
       }
-      setRecordedAttorney(handwritten ? attorneyName.trim() : firm?.name || "");
+      setRecordedAttorney(guide ? "Property damage guide" : handwritten ? attorneyName.trim() : firm?.name || "");
       setRecorded("sent");
       notify({ tone: "saved", text: "Referral sent" });
     } catch (err) {
@@ -1826,7 +1863,7 @@ function QueueReferral({
           )}
           {error ? <p className="w-full text-sm text-red-700">{error}</p> : null}
         </div>
-      ) : firms.length === 0 ? (
+      ) : firms.length === 0 && types.every((item) => !isGuideReferral(item.id) && item.id !== "other") ? (
         <div className="mt-2 space-y-2">
           <p className="text-sm text-slate-600">Add a firm on the Referrals page first.</p>
           <button type="button" onClick={backToChoices} className="text-sm font-medium text-navy underline">
@@ -1856,7 +1893,11 @@ function QueueReferral({
               ))}
             </select>
           </label>
-          {handwritten ? (
+          {guide ? (
+            <p className="text-sm text-slate-600">
+              Sends the English or Spanish property damage guide PDF link. No attorney contact is included.
+            </p>
+          ) : handwritten ? (
             <>
               <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
                 Attorney
@@ -1951,7 +1992,7 @@ function QueueReferral({
           ) : null}
           {declineTag ? null : (
             <p className="text-sm text-slate-600">
-              {desiredNo ? "Choose a decline reason under Desired." : "Set Desired to No and choose a decline reason under Desired."} Workers compensation and medical malpractice fill that reason from the referral type.
+              {desiredNo ? "Choose a decline reason under Desired." : "Set Desired to No and choose a decline reason under Desired."} Workers compensation, medical malpractice, and property damage fill that reason from the referral type.
             </p>
           )}
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
@@ -1962,7 +2003,7 @@ function QueueReferral({
             {mode === "record" ? (
               <button
                 type="button"
-                disabled={pending !== null || !ready || !area || (handwritten ? !attorneyName.trim() : !firm)}
+                disabled={pending !== null || !ready || !area || (!guide && (handwritten ? !attorneyName.trim() : !firm))}
                 onClick={() => void submit("already")}
                 className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
               >
@@ -1971,7 +2012,7 @@ function QueueReferral({
             ) : (
               <button
                 type="button"
-                disabled={pending !== null || !ready || !area || (handwritten ? !attorneyName.trim() : !firm)}
+                disabled={pending !== null || !ready || !area || (!guide && (handwritten ? !attorneyName.trim() : !firm))}
                 onClick={() => void submit("send")}
                 className="cursor-pointer rounded-md bg-navy px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#16366e] disabled:cursor-default disabled:opacity-60"
               >
@@ -2027,6 +2068,7 @@ export function LeadDrawer({
   row,
   destinations,
   templates,
+  propertyDamageGuides = { en: "", es: "" },
   staff,
   admin = false,
   startReferral = false,
@@ -2036,6 +2078,7 @@ export function LeadDrawer({
   row: QueueRow;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides?: { en: string; es: string };
   staff: string[];
   admin?: boolean;
   startReferral?: boolean;
@@ -2162,6 +2205,7 @@ export function LeadDrawer({
           canLeave={canLeave ?? { current: () => true }}
           destinations={destinations}
           templates={templates}
+          propertyDamageGuides={propertyDamageGuides}
           startReferral={startReferral}
         />
       </div>

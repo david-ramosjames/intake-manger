@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { OpenCallPlan } from "@/components/OpenCallPlan";
 import { LeadDrawer, type QueueRow } from "@/components/WorkQueue";
@@ -27,6 +26,10 @@ export type OpenCallCard = {
   dueAt: string;
 };
 
+function tagLabel(name: string): string {
+  return name === "Outbound" ? "Slack Outbound" : name;
+}
+
 export function OpenCallsList({
   view,
   waitingCount,
@@ -34,9 +37,10 @@ export function OpenCallsList({
   jobs,
   destinations,
   templates,
+  propertyDamageGuides = { en: "", es: "" },
   staff,
   staffNames,
-  people,
+  tagCounts,
   tag,
   completed,
   autoClosed,
@@ -48,16 +52,16 @@ export function OpenCallsList({
   jobs: OpenCallCard[];
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides?: { en: string; es: string };
   staff: StaffPerson[];
   staffNames: string[];
-  people: string[];
+  tagCounts: { name: string; count: number }[];
   tag: string;
   completed: number;
   autoClosed: number;
   admin?: boolean;
   initialRow?: QueueRow | null;
 }) {
-  const router = useRouter();
   const [selectedId, setSelectedId] = useState(initialRow?.id ?? "");
   const [row, setRow] = useState<QueueRow | null>(initialRow ?? null);
 
@@ -128,22 +132,41 @@ export function OpenCallsList({
           <span className="mx-2 text-slate-300">·</span>
           <span className="font-semibold text-navy">{autoClosed}</span> auto-closed
         </p>
-        <label className="inline-flex items-center gap-2 text-sm text-slate-600">
-          Tagged
-          <select
-            value={tag}
-            onChange={(event) => router.push(callsHref(view, selectedId, event.target.value))}
-            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900"
-          >
-            <option value="">Everyone</option>
-            {people.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
+      {tagCounts.length ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-slate-600">Tagged</span>
+          <Link
+            href={callsHref(view, selectedId, "")}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
+              !tag ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
+            }`}
+          >
+            Everyone
+          </Link>
+          {tagCounts.map((person) => {
+            const active = tag === person.name;
+            return (
+              <Link
+                key={person.name}
+                href={callsHref(view, selectedId, person.name)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
+                  active ? "bg-brand text-navy" : "bg-white text-slate-700 ring-1 ring-slate-200"
+                }`}
+              >
+                {tagLabel(person.name)}
+                <span
+                  className={`inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${
+                    active ? "bg-accent text-white" : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  {person.count}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className={`mt-6 grid items-start gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_28rem]" : ""}`}>
         <ul className="min-w-0 space-y-3">
@@ -214,6 +237,7 @@ export function OpenCallsList({
             row={selected}
             destinations={destinations}
             templates={templates}
+            propertyDamageGuides={propertyDamageGuides}
             staff={staffNames}
             onClose={closeLead}
           />

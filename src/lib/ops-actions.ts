@@ -19,14 +19,20 @@ import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, type ClosePath } from "./close-ready";
-import { caseTypeIsLead, isLostLeadReason } from "./funnel";
+import { caseTypeIsLead, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
 import { referralAwaitingSend } from "./next-step";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { sendQuoText } from "./quo";
 import { listQuoLines } from "./quo-settings";
-import { DEFAULT_REFERRAL_SMS, isPracticeArea, renderReferralSms } from "./referrals";
+import {
+  DEFAULT_REFERRAL_SMS,
+  isGuideReferral,
+  isPracticeArea,
+  renderPropertyDamageSms,
+  renderReferralSms,
+} from "./referrals";
 import { LEAD_CHANNEL_ID, postToSlack, slackThreadParent } from "./slack";
 import { loadSlackSettings } from "./slack-settings";
 
@@ -1005,16 +1011,19 @@ export async function classifyNonLead(formData: FormData) {
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
-  if (data.caller_class === "non_pi" || officialCaseType(data.case_type) === "Non-PI Legal Matter") {
-    throw new Error("A non-PI legal matter stays open until the file is filled in and the referral is recorded.");
-  }
   if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
     throw new Error("A signed or promoted matter stays a lead.");
   }
   assertCloseReady(data, "nonlead");
   const stopped = data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status;
   if (dataError) {
-    const badCallTags = new Set<string>(NOT_A_LEAD_TAGS);
+    const badCallTags = new Set<string>([
+      ...NOT_A_LEAD_TAGS,
+      "NQ: Non-PI Legal Matter",
+      "DEC: Non-PI Legal Matter",
+      "QUALIFIED YES",
+      "CVR DESIRED",
+    ]);
     const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !badCallTags.has(tag));
     if (!tags.includes(DATA_ERROR_TAG)) tags.push(DATA_ERROR_TAG);
     const { error: updateError } = await supabase
@@ -1044,7 +1053,16 @@ export async function classifyNonLead(formData: FormData) {
     return;
   }
   const reason = callerClass as ExcludedCallerClass;
-  const drop = new Set<string>([...NOT_A_LEAD_TAGS, DATA_ERROR_TAG, "NQ: Spam / Robo Call", "NQ: Outside Service Area", "NQ: Non-PI Legal Matter", "QUALIFIED YES", "CVR DESIRED"]);
+  const drop = new Set<string>([
+    ...NOT_A_LEAD_TAGS,
+    DATA_ERROR_TAG,
+    "NQ: Spam / Robo Call",
+    "NQ: Outside Service Area",
+    "NQ: Non-PI Legal Matter",
+    "DEC: Non-PI Legal Matter",
+    "QUALIFIED YES",
+    "CVR DESIRED",
+  ]);
   const tags = ((data.callrail_tags as string[] | null) ?? []).filter((tag) => !drop.has(tag));
   if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
   const reasonTag = NON_LEAD_TAG[reason];
@@ -1094,9 +1112,6 @@ export async function markNotALead(leadId: string) {
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
-  if (data.caller_class === "non_pi" || officialCaseType(data.case_type) === "Non-PI Legal Matter") {
-    throw new Error("A non-PI legal matter stays open until the file is filled in and the referral is recorded.");
-  }
   if (data.signed_case || data.case_id || data.lead_status === "Signed" || data.lead_status === "Promoted") {
     throw new Error("A signed or promoted matter stays open.");
   }
@@ -1181,6 +1196,7 @@ function referralDeclineTag(
   if (!infer) return "";
   if (area === "workers_comp") return "DEC: Workers Comp";
   if (area === "medmal") return "DEC: Medmal";
+  if (area === "property_damage") return "DEC: Minor Injury / Property Damage";
   return "";
 }
 
@@ -1216,10 +1232,13 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const edited = text(formData, "message");
   const attorneyName = text(formData, "attorney_name");
   const attorneyPhone = text(formData, "attorney_phone");
+  const guide = isGuideReferral(area);
   if (edited && edited.length > 2000) return { error: "Shorten the text before sending." };
-  if (edited && edited.includes("{{")) return { error: "Fill in the attorney and phone in the text." };
-  if (!destinationId && !attorneyName) return { error: "Enter the attorney." };
-  if (!destinationId && !edited) return { error: "Write the text before sending." };
+  if (edited && edited.includes("{{")) {
+    return { error: guide ? "Fill in the guide link in the text." : "Fill in the attorney and phone in the text." };
+  }
+  if (!guide && !destinationId && !attorneyName) return { error: "Enter the attorney." };
+  if (!guide && !destinationId && !edited) return { error: "Write the text before sending." };
   if (!isPracticeArea(area)) return { error: "Choose the legal practice area." };
   let destination: {
     id: string;
@@ -1230,7 +1249,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     website: string | null;
     practice_areas: string[] | null;
   } | null = null;
-  if (destinationId) {
+  if (!guide && destinationId) {
     const { data, error: loadError } = await supabase
       .from("referral_destinations")
       .select("id, name, phone, address, email, website, practice_areas, spanish, notes")
@@ -1257,19 +1276,35 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const to = lead.phone_e164 || toE164(lead.phone);
   if (!to) return { error: "This lead needs a phone number before the text can go out." };
 
-  const { data: templates } = await supabase.from("referral_templates").select("language, body");
+  const [{ data: templates }, guideSettings] = await Promise.all([
+    supabase.from("referral_templates").select("language, body"),
+    supabase
+      .from("intake_settings")
+      .select("property_damage_guide_url_en, property_damage_guide_url_es")
+      .eq("id", "default")
+      .maybeSingle(),
+  ]);
   const stored = (templates ?? []).find((row) => row.language === language)?.body;
+  const guides = {
+    en: typeof guideSettings.data?.property_damage_guide_url_en === "string" ? guideSettings.data.property_damage_guide_url_en : "",
+    es: typeof guideSettings.data?.property_damage_guide_url_es === "string" ? guideSettings.data.property_damage_guide_url_es : "",
+  };
+  if (guide && !(language === "es" ? guides.es.trim() : guides.en.trim())) {
+    return { error: "Save the property damage guide links on the Referrals page first." };
+  }
   const message =
     edited ||
-    (destination
-      ? renderReferralSms({
-          language,
-          template: stored || DEFAULT_REFERRAL_SMS[language],
-          leadName: lead.lead_name,
-          area,
-          destination,
-        })
-      : "");
+    (guide
+      ? renderPropertyDamageSms({ language, leadName: lead.lead_name, guides })
+      : destination
+        ? renderReferralSms({
+            language,
+            template: stored || DEFAULT_REFERRAL_SMS[language],
+            leadName: lead.lead_name,
+            area,
+            destination,
+          })
+        : "");
   if (!message) return { error: "Write the text before sending." };
   const sent = await sendQuoText(to, message);
   if (!sent.ok) return { error: `${sent.error} The lead is still open.` };
@@ -1277,6 +1312,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const note = text(formData, "note");
   const outside = area !== "personal_injury";
   const threadTs = slackThreadParent(lead);
+  const guideLabel = "Property damage guide";
   const { error: updateError } = await supabase
     .from("leads")
     .update({
@@ -1296,7 +1332,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
     destination_id: destination?.id ?? null,
-    attorney_name: destination ? null : attorneyName,
+    attorney_name: destination ? null : guide ? guideLabel : attorneyName,
     actor: email,
     note,
     language,
@@ -1307,16 +1343,24 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     lead_id: leadId,
     event_type: "referred",
     actor: email,
-    payload: { destination: destination?.name ?? attorneyName ?? null, phone: destination?.phone ?? attorneyPhone ?? null, language, message },
+    payload: {
+      destination: destination?.name ?? (guide ? guideLabel : attorneyName) ?? null,
+      phone: destination?.phone ?? attorneyPhone ?? null,
+      language,
+      message,
+      guide: guide || undefined,
+    },
   });
 
   const who = lead.lead_name || "Unnamed lead";
   const slack = await loadSlackSettings();
-  const namedAttorney = destination?.name || attorneyName;
+  const namedAttorney = destination?.name || (guide ? guideLabel : attorneyName);
   const namedPhone = destination?.phone || attorneyPhone;
-  const attorneyLine = namedAttorney
-    ? `${language === "es" ? "Spanish" : "English"} text to the lead with ${namedAttorney}${namedPhone ? ` ${namedPhone}` : ""}.`
-    : `${language === "es" ? "Spanish" : "English"} text to the lead.`;
+  const attorneyLine = guide
+    ? `${language === "es" ? "Spanish" : "English"} property damage guide text to the lead.`
+    : namedAttorney
+      ? `${language === "es" ? "Spanish" : "English"} text to the lead with ${namedAttorney}${namedPhone ? ` ${namedPhone}` : ""}.`
+      : `${language === "es" ? "Spanish" : "English"} text to the lead.`;
   if (slack.posting) {
     await postToSlack({
       token: slack.token,
@@ -1379,10 +1423,11 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
   const chosenLanguage = text(formData, "language");
   const language = chosenLanguage === "es" || chosenLanguage === "en" ? chosenLanguage : null;
   const area = text(formData, "practice_area");
-  if (!destinationId && !attorneyName) return { error: "Enter the attorney." };
+  const guide = isGuideReferral(area);
+  if (!guide && !destinationId && !attorneyName) return { error: "Enter the attorney." };
   if (!isPracticeArea(area)) return { error: "Choose the referral type." };
   let destination: { id: string; name: string; phone: string | null; practice_areas: string[] | null } | null = null;
-  if (destinationId) {
+  if (!guide && destinationId) {
     const { data, error: loadError } = await supabase
       .from("referral_destinations")
       .select("id, name, phone, practice_areas")
@@ -1392,6 +1437,7 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     if (!(data.practice_areas ?? []).includes(area)) return { error: "That firm is not listed for this practice area." };
     destination = data;
   }
+  const guideLabel = "Property damage guide";
   const { data: lead, error: leadError } = await supabase
     .from("leads")
     .select(CLOSE_READY_COLUMNS)
@@ -1424,9 +1470,9 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
     destination_id: destination?.id ?? null,
-    attorney_name: destination ? null : attorneyName,
+    attorney_name: destination ? null : guide ? guideLabel : attorneyName,
     actor: email,
-    note: "Already sent outside Intake Manager",
+    note: guide ? "Property damage guide already sent" : "Already sent outside Intake Manager",
     language,
     message: null,
   });
@@ -1435,7 +1481,12 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     lead_id: leadId,
     event_type: "referred",
     actor: email,
-    payload: { destination: destination?.name ?? attorneyName ?? null, language, recorded: true },
+    payload: {
+      destination: destination?.name ?? (guide ? guideLabel : attorneyName) ?? null,
+      language,
+      recorded: true,
+      guide: guide || undefined,
+    },
   });
   revalidatePath("/");
   revalidatePath("/review");
@@ -1478,6 +1529,38 @@ export async function saveReferralTemplate(formData: FormData) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/referrals");
+}
+
+function guideUrlOrEmpty(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("bad");
+    return value;
+  } catch {
+    throw new Error("Enter a full http or https link for each guide PDF.");
+  }
+}
+
+export async function savePropertyDamageGuides(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const en = guideUrlOrEmpty(text(formData, "property_damage_guide_url_en"));
+  const es = guideUrlOrEmpty(text(formData, "property_damage_guide_url_es"));
+  if (!en || !es) throw new Error("Save both the English and Spanish guide links.");
+  const { error } = await supabase
+    .from("intake_settings")
+    .update({
+      property_damage_guide_url_en: en,
+      property_damage_guide_url_es: es,
+      updated_at: new Date().toISOString(),
+      updated_by: email,
+    })
+    .eq("id", "default");
+  if (error) throw new Error(error.message);
+  revalidatePath("/referrals");
+  revalidatePath("/work");
+  revalidatePath("/open-calls");
 }
 
 export async function saveDestination(formData: FormData) {
@@ -1779,7 +1862,7 @@ export async function setLostLead(formData: FormData) {
 
   const { data: before, error: loadError } = await supabase
     .from("leads")
-    .select(`id, case_id, lead_status, close_reason, ${CLOSE_READY_COLUMNS}`)
+    .select(`id, case_id, lead_status, close_reason, follow_up, text_sequence_status, ${CLOSE_READY_COLUMNS}`)
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
@@ -1801,6 +1884,20 @@ export async function setLostLead(formData: FormData) {
         path: "lost",
       });
     }
+    const stopped = before.text_sequence_status === "active" ? "stopped" : before.text_sequence_status;
+    if (stopped !== before.text_sequence_status || before.follow_up !== false) {
+      const { error: stopError } = await supabase
+        .from("leads")
+        .update({
+          text_sequence_status: stopped,
+          text_next_at: null,
+          follow_up: false,
+          sequence: "stop",
+        })
+        .eq("id", leadId);
+      if (stopError) throw new Error(stopError.message);
+    }
+    await stopFollowUp(supabase, leadId, LOST_LEAD_REASONS[reason]);
   } else if (before.lead_status === "Lost" && isLostLeadReason(before.close_reason)) {
     const { error } = await supabase
       .from("leads")
@@ -1822,6 +1919,7 @@ export async function setLostLead(formData: FormData) {
   }
 
   revalidatePath("/");
+  revalidatePath("/work");
   revalidatePath("/priority");
   revalidatePath("/review");
   revalidatePath("/open-calls");

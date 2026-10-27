@@ -12,6 +12,7 @@ import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-act
 import { leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { automationLine, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong } from "@/lib/queue";
+import { loadPropertyDamageGuides } from "@/lib/property-damage-guides";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { leadSequenceId } from "@/lib/sequences";
 import { docketBaseUrl } from "@/lib/supabase/config";
@@ -321,9 +322,10 @@ function toQueueRow(
 export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promise<{
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides: { en: string; es: string };
   staffNames: string[];
 }> {
-  const [destinationResult, templateResult, staff] = await Promise.all([
+  const [destinationResult, templateResult, staff, guides] = await Promise.all([
     supabase
       .from("referral_destinations")
       .select("id, name, phone, practice_areas, address, email, website, spanish, matters, notes, active")
@@ -331,6 +333,7 @@ export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promi
       .order("name"),
     supabase.from("referral_templates").select("language, body"),
     loadStaff(supabase),
+    loadPropertyDamageGuides(supabase),
   ]);
   const destinations = ((destinationResult.data ?? []) as ReferralDestination[]).map((destination) => ({
     ...destination,
@@ -345,6 +348,7 @@ export async function loadWorkQueueShelfContext(supabase: SupabaseClient): Promi
       en: templateRows.find((row) => row.language === "en")?.body || DEFAULT_REFERRAL_SMS.en,
       es: templateRows.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es,
     },
+    propertyDamageGuides: guides,
     staffNames: staff.map((person) => person.name),
   };
 }
@@ -356,14 +360,21 @@ export async function loadWorkQueueRows(
   rows: QueueRow[];
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides: { en: string; es: string };
   staffNames: string[];
 }> {
   const ids = [...new Set(leadIds.filter(Boolean))];
   if (ids.length === 0) {
-    return { rows: [], destinations: [], templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es }, staffNames: [] };
+    return {
+      rows: [],
+      destinations: [],
+      templates: { en: DEFAULT_REFERRAL_SMS.en, es: DEFAULT_REFERRAL_SMS.es },
+      propertyDamageGuides: { en: "", es: "" },
+      staffNames: [],
+    };
   }
 
-  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }, callJobs, staffTouched] =
+  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }, callJobs, staffTouched, propertyDamageGuides] =
     await Promise.all([
       supabase.from("leads").select(LIST_COLUMNS).in("id", ids),
       supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
@@ -384,6 +395,7 @@ export async function loadWorkQueueRows(
         .limit(2000),
       loadLeadCallJobs(supabase, ids),
       loadStaffTouchedIds(supabase, ids),
+      loadPropertyDamageGuides(supabase),
     ]);
 
   const leads = (leadRows ?? []) as ListLead[];
@@ -493,6 +505,7 @@ export async function loadWorkQueueRows(
     rows,
     destinations,
     templates,
+    propertyDamageGuides,
     staffNames: staff.map((person) => person.name),
   };
 }

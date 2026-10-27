@@ -10,6 +10,7 @@ export const PRACTICE_AREAS = [
   { id: "miscellaneous", label: "Miscellaneous" },
   { id: "other", label: "Other" },
   { id: "personal_injury", label: "Personal injury" },
+  { id: "property_damage", label: "Property Damage" },
   { id: "real_estate", label: "Real estate" },
   { id: "workers_comp", label: "Workers compensation" },
 ] as const;
@@ -17,6 +18,30 @@ export const PRACTICE_AREAS = [
 export type PracticeAreaId = (typeof PRACTICE_AREAS)[number]["id"];
 
 const AREA_LABEL = new Map(PRACTICE_AREAS.map((area) => [area.id, area.label]));
+
+/** Referral types that send a guide link instead of an attorney's contact info. */
+export const GUIDE_REFERRAL_AREAS = new Set<PracticeAreaId>(["property_damage"]);
+
+export function isGuideReferral(value: string | null | undefined): boolean {
+  return Boolean(value && GUIDE_REFERRAL_AREAS.has(value as PracticeAreaId));
+}
+
+export type PropertyDamageGuides = { en: string; es: string };
+
+/** Prefer the URL saved on Referrals, then env, then the production /public file. */
+export function propertyDamageGuideUrl(
+  language: "en" | "es" = "en",
+  stored?: Partial<PropertyDamageGuides> | null,
+): string {
+  const fromSettings = (language === "es" ? stored?.es : stored?.en)?.trim();
+  if (fromSettings) return fromSettings;
+  const fromEnv = (
+    language === "es" ? process.env.PROPERTY_DAMAGE_GUIDE_URL_ES : process.env.PROPERTY_DAMAGE_GUIDE_URL_EN
+  )?.trim();
+  if (fromEnv) return fromEnv;
+  const host = "https://rjl-intake-manger.vercel.app";
+  return language === "es" ? `${host}/property-damage-guide-es.pdf` : `${host}/property-damage-guide-en.pdf`;
+}
 
 export function isPracticeArea(value: string | null | undefined): value is PracticeAreaId {
   return Boolean(value && AREA_LABEL.has(value as PracticeAreaId));
@@ -50,6 +75,11 @@ export const DEFAULT_REFERRAL_SMS = {
   es: `{{greeting}}, le saluda Ramos James Law. Lamentablemente, no podemos ayudarle con su caso {{area}}. Por favor, comuníquese con {{attorney}} al {{phone}}. {{details}}\n\n${REFERRAL_SMS_CLOSE.es}`,
 } as const;
 
+export const DEFAULT_PROPERTY_DAMAGE_SMS = {
+  en: `{{greeting}}, this is Ramos James Law. We are not able to help with a property-damage-only claim. Here is a short guide with next steps:\n{{guide_url}}\n\n${REFERRAL_SMS_CLOSE.en}`,
+  es: `{{greeting}}, le saluda Ramos James Law. Lamentablemente, no podemos ayudarle con un reclamo solo de daños a la propiedad. Aquí tiene una guía breve con los siguientes pasos:\n{{guide_url}}\n\n${REFERRAL_SMS_CLOSE.es}`,
+} as const;
+
 export type ReferralDestination = {
   id: string;
   name: string;
@@ -68,6 +98,25 @@ export function referralDetails(destination: Pick<ReferralDestination, "address"
   return [destination.address, destination.website, destination.email].filter(Boolean).join(". ");
 }
 
+function referralGreeting(language: "en" | "es", leadName: string | null): { greeting: string; name: string } {
+  const rawName = leadName?.trim().split(/\s+/)[0] || "";
+  const name = nameIsUnavailable(rawName) ? "" : rawName;
+  const greeting = language === "es" ? (name ? `Hola ${name}` : "Hola") : name ? `Hi ${name}` : "Hi";
+  return { greeting, name };
+}
+
+function finishReferralSms(language: "en" | "es", body: string): string {
+  const cleaned = body
+    .replace(/[^\S\n]+\./g, ".")
+    .replace(/[^\S\n]{2,}/g, " ")
+    .replace(/[^\S\n]*\n[^\S\n]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  const close = REFERRAL_SMS_CLOSE[language];
+  if (cleaned.includes(close)) return cleaned;
+  return `${cleaned}\n\n${close}`;
+}
+
 export function renderReferralSms(input: {
   language: "en" | "es";
   template: string;
@@ -75,9 +124,7 @@ export function renderReferralSms(input: {
   area: string;
   destination: Pick<ReferralDestination, "name" | "phone" | "address" | "email" | "website">;
 }): string {
-  const rawName = input.leadName?.trim().split(/\s+/)[0] || "";
-  const name = nameIsUnavailable(rawName) ? "" : rawName;
-  const greeting = input.language === "es" ? (name ? `Hola ${name}` : "Hola") : name ? `Hi ${name}` : "Hi";
+  const { greeting, name } = referralGreeting(input.language, input.leadName);
   const details = referralDetails(input.destination);
   const area = input.area === "miscellaneous" ? "" : practiceAreaLabel(input.area);
   const body = input.template
@@ -86,13 +133,21 @@ export function renderReferralSms(input: {
     .replaceAll("{{area}}", area)
     .replaceAll("{{attorney}}", input.destination.name)
     .replaceAll("{{phone}}", input.destination.phone || "")
-    .replaceAll("{{details}}", details)
-    .replace(/[^\S\n]+\./g, ".")
-    .replace(/[^\S\n]{2,}/g, " ")
-    .replace(/[^\S\n]*\n[^\S\n]*/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  const close = REFERRAL_SMS_CLOSE[input.language];
-  if (body.includes(close)) return body;
-  return `${body}\n\n${close}`;
+    .replaceAll("{{details}}", details);
+  return finishReferralSms(input.language, body);
+}
+
+export function renderPropertyDamageSms(input: {
+  language: "en" | "es";
+  leadName: string | null;
+  guideUrl?: string;
+  guides?: Partial<PropertyDamageGuides> | null;
+}): string {
+  const { greeting, name } = referralGreeting(input.language, input.leadName);
+  const guideUrl = input.guideUrl || propertyDamageGuideUrl(input.language, input.guides);
+  const body = DEFAULT_PROPERTY_DAMAGE_SMS[input.language]
+    .replaceAll("{{greeting}}", greeting)
+    .replaceAll("{{name}}", name || (input.language === "es" ? "hola" : "there"))
+    .replaceAll("{{guide_url}}", guideUrl);
+  return finishReferralSms(input.language, body);
 }

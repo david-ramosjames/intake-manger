@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { markReferralOpportunity, sendReferral } from "@/lib/ops-actions";
 import {
   PRACTICE_AREAS,
+  isGuideReferral,
+  renderPropertyDamageSms,
   renderReferralSms,
   type ReferralDestination,
 } from "@/lib/referrals";
@@ -15,6 +17,7 @@ export function ReferralPanel({
   referralOpportunity,
   destinations,
   templates,
+  propertyDamageGuides = { en: "", es: "" },
   closed,
 }: {
   leadId: string;
@@ -23,6 +26,7 @@ export function ReferralPanel({
   referralOpportunity: boolean;
   destinations: ReferralDestination[];
   templates: { en: string; es: string };
+  propertyDamageGuides?: { en: string; es: string };
   closed: boolean;
 }) {
   const [area, setArea] = useState(practiceArea ?? "");
@@ -30,20 +34,25 @@ export function ReferralPanel({
   const [language, setLanguage] = useState<"en" | "es">("en");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const guide = isGuideReferral(area);
   const matches = useMemo(
     () => destinations.filter((destination) => destination.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name)),
     [destinations, area],
   );
   const destination = matches.find((item) => item.id === destinationId) ?? matches[0] ?? null;
-  const preview = destination
-    ? renderReferralSms({
-        language,
-        template: templates[language],
-        leadName,
-        area,
-        destination,
-      })
-    : "";
+  const preview = !area
+    ? ""
+    : guide
+      ? renderPropertyDamageSms({ language, leadName, guides: propertyDamageGuides })
+      : destination
+        ? renderReferralSms({
+            language,
+            template: templates[language],
+            leadName,
+            area,
+            destination,
+          })
+        : "";
 
   if (closed) {
     return <p className="mt-1 text-sm text-slate-600">This referral is already recorded and the lead is closed.</p>;
@@ -90,25 +99,34 @@ export function ReferralPanel({
         }}
       >
         <input type="hidden" name="practice_area" value={area} />
-        <label className="text-sm">
-          <span className="font-medium text-slate-700">Attorney</span>
-          <select
-            name="destination_id"
-            value={destination?.id ?? ""}
-            onChange={(event) => setDestinationId(event.target.value)}
-            required
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
-          >
-            <option value="">{area ? "Choose who receives the referral" : "Choose a practice area first"}</option>
-            {matches.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-                {item.phone ? ` · ${item.phone}` : ""}
-                {item.spanish ? " · Spanish" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!guide ? (
+          <label className="text-sm">
+            <span className="font-medium text-slate-700">Attorney</span>
+            <select
+              name="destination_id"
+              value={destination?.id ?? ""}
+              onChange={(event) => setDestinationId(event.target.value)}
+              required
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+            >
+              <option value="">{area ? "Choose who receives the referral" : "Choose a practice area first"}</option>
+              {matches.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                  {item.phone ? ` · ${item.phone}` : ""}
+                  {item.spanish ? " · Spanish" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="text-sm text-slate-600">
+            Property Damage texts the saved guide PDF link instead of an attorney.
+            {!propertyDamageGuides.en.trim() || !propertyDamageGuides.es.trim()
+              ? " Set both links on the Referrals page first."
+              : ""}
+          </p>
+        )}
         <label className="text-sm">
           <span className="font-medium text-slate-700">Text language</span>
           <select
@@ -121,7 +139,7 @@ export function ReferralPanel({
             <option value="es">Spanish</option>
           </select>
         </label>
-        {destination?.notes ? <p className="text-sm text-slate-600">{destination.notes}</p> : null}
+        {!guide && destination?.notes ? <p className="text-sm text-slate-600">{destination.notes}</p> : null}
         {preview ? (
           <p className="whitespace-pre-line rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-800">{preview}</p>
         ) : null}

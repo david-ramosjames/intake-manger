@@ -7,7 +7,8 @@ export function contractSent(input: {
   agreement_status?: string | null;
 }): boolean {
   const status = (input.agreement_status || "").toLowerCase();
-  if (status === "failed") return false;
+  // Cancelled / expired / failed leave agreement_sent_at set; they are not an active send.
+  if (status === "failed" || status === "cancelled" || status === "expired") return false;
   if (SENT.has(status)) return true;
   return Boolean(input.agreement_sent_at);
 }

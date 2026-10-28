@@ -14,7 +14,7 @@ import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSource
 import { closeGaps, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import {
   isGuideReferral,
   PRACTICE_AREAS,
@@ -1240,9 +1240,21 @@ function LeadFacts({
   }
   const caseOptions = caseTypeChoices(row.caseType);
   const formId = `lead-details-${row.id}`;
+  const canReopen = !row.signed && (Boolean(row.lostReason) || row.cycle === "closed");
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {canReopen ? (
+          <NotedForm
+            action={reopenClosedLead}
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950"
+            idleLabel="Reopen lead"
+          >
+            <input type="hidden" name="lead_id" value={row.id} />
+            <p className="font-medium">This lead is closed.</p>
+            <p className="mt-1 text-amber-900/80">Reopen it to put it back on the open queue, restart call reminders, and keep working the file.</p>
+          </NotedForm>
+        ) : null}
         <form
           id={formId}
           className="space-y-4"
@@ -1620,7 +1632,9 @@ function LeadFacts({
                   <p className="text-xs normal-case tracking-normal text-slate-500">
                     {row.signed || signedChoice === "yes"
                       ? "Unavailable once the lead is signed."
-                      : "Unavailable when the lead is not qualified."}
+                      : row.lostReason
+                        ? "Use Reopen lead above — Lost stays locked while Qualified is No."
+                        : "Unavailable when the lead is not qualified."}
                   </p>
                 ) : null
               }

@@ -548,6 +548,8 @@ export async function saveLeadDetails(formData: FormData) {
   const lostDecision = text(formData, "lost_decision");
   const lostReasonValue = text(formData, "lost_reason");
   let closed = false;
+  // Staff choosing Lost = No means reopen — do not auto-close again as undesired on this Save.
+  let skipAutoClose = lostDecision === "no";
   if (lostDecision === "yes" || lostDecision === "no") {
     closed = await applyLostLeadDecision(supabase, leadId, actor, lostDecision, lostReasonValue);
   }
@@ -619,7 +621,7 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const signedNow = admin && signedDecision === "yes";
   if (!closed && signedNow) await markSignedQualified(supabase, leadId);
-  if (!closed) {
+  if (!closed && !skipAutoClose) {
     closed = signedNow
       ? await closeSignedLead(supabase, leadId, actor)
       : officialCaseType(caseType) === "Non-PI Legal Matter"
@@ -1903,6 +1905,59 @@ export async function setLostLead(formData: FormData) {
   if (!leadId) throw new Error("Missing the lead.");
   if (decision !== "yes" && decision !== "no") throw new Error("Choose yes or no for lost lead.");
   await applyLostLeadDecision(supabase, leadId, email, decision as "yes" | "no", reason);
+  revalidatePath("/work");
+  revalidatePath("/");
+  revalidatePath("/priority");
+  revalidatePath("/review");
+  revalidatePath("/open-calls");
+  revalidatePath(`/leads/${leadId}`);
+}
+
+/** Reopen a Lost / Referred / declined file so staff can work it and schedule Slack reminders again. */
+export async function reopenClosedLead(formData: FormData) {
+  const { supabase, email } = await requireStaff();
+  const leadId = text(formData, "lead_id");
+  if (!leadId) throw new Error("Missing the lead.");
+  const { data: before, error } = await supabase
+    .from("leads")
+    .select(
+      "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, close_reason, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date, phone, phone_e164, text_sequence_status",
+    )
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error || !before) throw new Error(error?.message ?? "Lead not found");
+  if (before.signed_case || before.case_id || before.lead_status === "Signed" || before.lead_status === "Promoted") {
+    throw new Error("A signed or promoted case cannot be reopened here.");
+  }
+  const closed =
+    before.lead_status === "Lost" ||
+    before.lead_status === "Referred" ||
+    Boolean(before.close_reason);
+  if (!closed) throw new Error("This lead is already open.");
+
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      lead_status: "Working",
+      close_reason: null,
+      close_suggestion: null,
+      follow_up: true,
+      sequence: null,
+    })
+    .eq("id", leadId);
+  if (updateError) throw new Error(updateError.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "lost_lead_reopened",
+    actor: email,
+    payload: { from: before.close_reason || before.lead_status, path: "reopen_closed_lead" },
+  });
+  await enrollFollowUp(
+    supabase,
+    { ...before, lead_status: "Working", follow_up: true, close_reason: null },
+    undefined,
+    before.consultation_date ? "post_consult" : "auto",
+  );
   revalidatePath("/work");
   revalidatePath("/");
   revalidatePath("/priority");

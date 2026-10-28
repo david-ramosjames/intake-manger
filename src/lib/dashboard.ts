@@ -519,11 +519,11 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
   const answerTone = higher(answer, 90);
   const leadsAnswerTone = higher(leadsAnswer, 90);
   const wantedTone = higher(wanted, 90);
-  const referralTone = higher(referral, 95);
+  const referralTone = higher(referral, 85);
   const neverTone = lower(neverRate, 5);
   const qualificationTone = higher(qualification, 25);
   const conversionTone = higher(conversion, 10);
-  const speedTone = higher(speedRate, 100);
+  const speedTone = higher(speedRate, 75);
 
   return {
     rates: [
@@ -554,9 +554,9 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         tone: leadsAnswerTone,
       },
       {
-        label: "Missed calls and form fills",
+        label: "<2 Minute Contact: Missed Calls & Form Fills",
         display: showPercent(speedRate),
-        goal: "Goal: contacted within 2 minutes",
+        goal: "Goal 75%+",
         detail: speed.total ? `${statusWord(speedTone)} · ${speed.met} of ${speed.total} contacted in time` : statusWord(speedTone),
         definition:
           "One first contact per new lead: the earliest missed call, Sona call, or web form that needs a callback. Later calls to that lead are not counted again. Contacted in time means an outbound call, or a text a person wrote, within 2 minutes. Automated sequence texts do not count as contact. A form text that lands up to 2 minutes before the lead record is saved still counts when it is not one of those sequence texts. Insurance companies, existing clients, and other non-leads are left out. Open the card to see each lead, its call and text log, and the Slack post.",
@@ -573,7 +573,7 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
       {
         label: "Declined referral rate",
         display: showPercent(referral),
-        goal: "Goal 95%+",
+        goal: "Goal 85%+",
         detail: referral == null ? statusWord(referralTone) : `${statusWord(referralTone)} · ${referred.size} of ${declinedIds.size} declined leads`,
         definition:
           "Referrals given divided by genuine legal leads the firm declined in this period. That includes non-PI legal matters and PI cases marked not wanted or given a decline reason. Spam, vendors, existing clients, and other non-leads stay out. A lead that is still undecided stays out. A referral counts when a referral text is logged or the lead is marked referred.",

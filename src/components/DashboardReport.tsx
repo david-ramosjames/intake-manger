@@ -120,7 +120,7 @@ export function DashboardReport({
         <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           {answerRates.length ? <AnswerRates rates={answerRates} /> : null}
           {otherRates.map((rate) => {
-            const href = rate.label === "Missed calls and form fills" ? speedHref(period) : null;
+            const href = rate.label === "<2 Minute Contact: Missed Calls & Form Fills" ? speedHref(period) : null;
             return (
               <article key={rate.label} className={`rounded-lg border border-slate-200 border-l-4 bg-white px-3 py-2 ${TONE[rate.tone]}`}>
                 <div className="flex items-start gap-2">

@@ -1954,7 +1954,7 @@ export async function reopenClosedLead(formData: FormData) {
   });
   await enrollFollowUp(
     supabase,
-    { ...before, lead_status: "Working", follow_up: true, close_reason: null },
+    { ...before, lead_status: "Working", follow_up: true },
     undefined,
     before.consultation_date ? "post_consult" : "auto",
   );

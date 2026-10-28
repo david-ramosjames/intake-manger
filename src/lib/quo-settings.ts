@@ -50,6 +50,54 @@ export async function loadQuoSettings(): Promise<QuoSettings> {
   return { apiKey, keySet: Boolean(apiKey), fromNumber };
 }
 
+export type QuoUser = {
+  id: string;
+  name: string;
+  email: string | null;
+};
+
+let quoUsersCache: { at: number; users: QuoUser[] } | null = null;
+const QUO_USERS_TTL_MS = 30 * 60_000;
+
+/** Quo workspace users (answeredBy / userId on calls). Cached for half an hour. */
+export async function listQuoUsers(): Promise<QuoUser[]> {
+  if (quoUsersCache && Date.now() - quoUsersCache.at < QUO_USERS_TTL_MS) return quoUsersCache.users;
+  const settings = await loadQuoSettings();
+  if (!settings.apiKey) return quoUsersCache?.users ?? [];
+  const base = (process.env.QUO_API_BASE || "https://api.quo.com/v1").replace(/\/$/, "");
+  try {
+    const users: QuoUser[] = [];
+    let pageToken: string | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const url = new URL(`${base}/users`);
+      url.searchParams.set("maxResults", "50");
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const response = await fetch(url, {
+        headers: { Authorization: settings.apiKey },
+        cache: "no-store",
+      });
+      if (!response.ok) break;
+      const parsed = (await response.json()) as {
+        data?: Array<{ id?: string; firstName?: string; lastName?: string; name?: string; email?: string }>;
+        nextPageToken?: string | null;
+      };
+      for (const row of parsed.data ?? []) {
+        const id = String(row.id || "").trim();
+        if (!id) continue;
+        const name = [row.firstName, row.lastName].filter(Boolean).join(" ").trim() || String(row.name || "").trim() || String(row.email || "").trim();
+        if (!name) continue;
+        users.push({ id, name, email: row.email?.trim() || null });
+      }
+      pageToken = parsed.nextPageToken || null;
+      if (!pageToken) break;
+    }
+    quoUsersCache = { at: Date.now(), users };
+    return users;
+  } catch {
+    return quoUsersCache?.users ?? [];
+  }
+}
+
 export async function listQuoLines(apiKey: string | null): Promise<{ lines: QuoLine[]; warning: string | null }> {
   if (!apiKey) return { lines: FIRM_LINES, warning: null };
   const base = (process.env.QUO_API_BASE || "https://api.quo.com/v1").replace(/\/$/, "");

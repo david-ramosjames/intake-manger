@@ -3,7 +3,7 @@ import { fillOutstandingLeadSources } from "@/lib/lead-source-fill";
 import { fillOutstandingTalkedWith } from "@/lib/talked-with";
 import { dispatchDue } from "@/lib/dispatch";
 import { closeFinishedLeads } from "@/lib/funnel";
-import { enrollMissingFollowUps } from "@/lib/followup";
+import { enrollMissingFollowUps, stopParkedFollowUps } from "@/lib/followup";
 import { syncCallLedger, syncInboxCalls, backfillCallAiFlags } from "@/lib/inbox-calls";
 import { collapseDuplicateOpenCalls } from "@/lib/open-calls";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -50,11 +50,12 @@ export async function POST(request: Request) {
     const contracts = await step("contracts", () => syncContractsFromTexts(supabase));
     const sources = await step("sources", () => fillOutstandingLeadSources(supabase));
     const talkedWith = await step("talkedWith", () => fillOutstandingTalkedWith(supabase));
+    const parked = await step("parked", () => stopParkedFollowUps(supabase));
     const enrolled = await step("enrolled", () => enrollMissingFollowUps(supabase));
     const autoClosedCalls = await step("autoClosedCalls", () => collapseDuplicateOpenCalls(supabase));
     const closed = await step("closed", () => closeFinishedLeads(supabase));
     const dispatch = await step("dispatch", () => dispatchDue(supabase));
-    const failed = [inboxSync, callLedger, callAi, contracts, sources, talkedWith, enrolled, autoClosedCalls, closed, dispatch].filter(
+    const failed = [inboxSync, callLedger, callAi, contracts, sources, talkedWith, parked, enrolled, autoClosedCalls, closed, dispatch].filter(
       (item) => !item.ok,
     );
     return Response.json({
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
       contracts,
       sources,
       talkedWith,
+      parked,
       enrolled,
       autoClosedCalls,
       closed,

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { chicagoMinute, scheduleCallback } from "./callbacks";
+import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "./caller-class";
 import { isPlaceholderOwner } from "./talked-with";
 import { contractOutstanding } from "./desired";
 import { nameIsUnavailable, type LeadKind } from "./leads";
@@ -65,7 +66,7 @@ export function renderStep(body: string, lead: { lead_name: string | null; case_
 
 function closedLead(lead: LeadBits): boolean {
   if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) return false;
-  if (lead.caller_class && lead.caller_class !== "non_pi") return true;
+  if (!isWorkLead(lead)) return true;
   return lead.signed_case || Boolean(lead.case_id) || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status);
 }
 
@@ -293,4 +294,55 @@ export async function stopFollowUp(supabase: SupabaseClient, leadId: string, rea
     .update({ status: "skipped", detail: reason })
     .eq("lead_id", leadId)
     .eq("status", "pending");
+}
+
+const PARKED_CALLER_CLASSES = [...EXCLUDED_CALLER_CLASSES, DATA_ERROR_CLASS] as const;
+
+/**
+ * Quo can park a file in Non-leads (caller_class) without running Move to non-leads.
+ * Pending call jobs kept firing Slack "Call due" until follow-up was stopped here.
+ */
+export async function stopParkedFollowUps(supabase: SupabaseClient): Promise<number> {
+  const parkedFilter = `caller_class.in.(${PARKED_CALLER_CLASSES.join(",")}),lead_status.in.(Lost,Referred,Promoted,Signed),signed_case.eq.true,case_id.not.is.null`;
+  const { data: stillFollowing, error } = await supabase
+    .from("leads")
+    .select("id, phone, phone_e164")
+    .eq("test", false)
+    .eq("follow_up", true)
+    .or(parkedFilter)
+    .limit(200);
+  if (error) throw new Error(error.message);
+
+  const { data: pendingJobs, error: jobsError } = await supabase
+    .from("lead_jobs")
+    .select("lead_id, leads!inner(id, caller_class, lead_status, signed_case, case_id, phone, phone_e164, test)")
+    .eq("status", "pending")
+    .eq("leads.test", false)
+    .limit(200);
+  if (jobsError) throw new Error(jobsError.message);
+
+  const byId = new Map<string, string>();
+  for (const lead of stillFollowing ?? []) {
+    if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
+    byId.set(String(lead.id), String(lead.id));
+  }
+  for (const job of pendingJobs ?? []) {
+    const lead = job.leads as unknown as LeadBits & { test?: boolean | null };
+    if (!lead || isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
+    if (!closedLead(lead)) continue;
+    byId.set(String(lead.id), String(lead.id));
+  }
+  if (!byId.size) return 0;
+
+  let stopped = 0;
+  for (const leadId of byId.values()) {
+    await stopFollowUp(supabase, leadId, "Closed or not a lead. Call sequence stopped.");
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({ follow_up: false, sequence: "stop" })
+      .eq("id", leadId);
+    if (updateError) throw new Error(updateError.message);
+    stopped += 1;
+  }
+  return stopped;
 }

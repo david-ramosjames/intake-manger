@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { weekendCallAllowed } from "./callbacks";
+import { isWorkLead } from "./caller-class";
 import { leadSequenceId, loadWorkHours } from "./sequences";
 import { loadSlackSettings } from "./slack-settings";
 import { loadStaff } from "./identity";
@@ -39,6 +40,7 @@ type LeadRow = {
   signed_case: boolean;
   case_id: string | null;
   lead_status: string;
+  caller_class: string | null;
   kind: string;
   agreement_status: string | null;
   agreement_sent_at: string | null;
@@ -59,7 +61,8 @@ function slackTestMatch(lead: { phone?: string | null; phone_e164?: string | nul
 
 function closed(lead: LeadRow): boolean {
   if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) return false;
-  return Boolean(lead.signed_case || lead.case_id) || ["Lost", "Referred", "Promoted"].includes(lead.lead_status);
+  if (!isWorkLead(lead)) return true;
+  return Boolean(lead.signed_case || lead.case_id) || ["Lost", "Referred", "Promoted", "Signed"].includes(lead.lead_status);
 }
 
 async function resolveCallMention(
@@ -133,7 +136,7 @@ export async function dispatchDue(supabase: SupabaseClient) {
   const { data: leads } = leadIds.length
     ? await supabase
         .from("leads")
-        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, kind, agreement_status, agreement_sent_at, priority, owner_name, consultation_date, test")
+        .select("id, lead_name, phone, phone_e164, slack_channel_id, slack_thread_ts, slack_message_ts, signed_case, case_id, lead_status, caller_class, kind, agreement_status, agreement_sent_at, priority, owner_name, consultation_date, test")
         .in("id", leadIds)
     : { data: [] };
   const byId = new Map((leads ?? []).map((lead) => [lead.id as string, lead as LeadRow]));
@@ -143,10 +146,22 @@ export async function dispatchDue(supabase: SupabaseClient) {
     const lead = byId.get(job.lead_id);
     if (lead?.test && !slackTestMatch(lead, slack.testPhone)) continue;
     if (!lead || closed(lead) || (job.queue === "text" && lead.kind === "needs_info")) {
-      await supabase
-        .from("lead_jobs")
-        .update({ status: "skipped", detail: "Lead is closed or this queue does not apply." })
-        .eq("id", job.id);
+      const detail = lead && !isWorkLead(lead)
+        ? "Not a lead. Call sequence stopped."
+        : "Lead is closed or this queue does not apply.";
+      if (lead && closed(lead)) {
+        await supabase
+          .from("lead_jobs")
+          .update({ status: "skipped", detail })
+          .eq("lead_id", lead.id)
+          .eq("status", "pending");
+        await supabase.from("leads").update({ follow_up: false, sequence: "stop" }).eq("id", lead.id);
+      } else {
+        await supabase
+          .from("lead_jobs")
+          .update({ status: "skipped", detail })
+          .eq("id", job.id);
+      }
       result.skipped += 1;
       continue;
     }

@@ -2401,6 +2401,7 @@ function ActivityThread({ touches, row, staff }: { touches: Touch[] | null; row:
 
 function NextCallDetails({ row, staff }: { row: QueueRow; staff: string[] }) {
   const call = row.nextAction.find((line) => line.label === "Call");
+  const canSchedule = !row.lostReason && !row.signed && row.cycle !== "closed" && row.cycle !== "signed";
   return (
     <section>
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next call</h3>
@@ -2410,7 +2411,11 @@ function NextCallDetails({ row, staff }: { row: QueueRow; staff: string[] }) {
         {call?.when && call.when !== "None" ? call.when : "Not scheduled"}
         {row.callTag ? <span className="text-slate-500"> · {row.callTag}</span> : null}
       </p>
-      <NextActionEdit row={row} staff={staff} part="call" />
+      {row.lostReason ? (
+        <p className="mt-2 text-sm text-slate-600">Turn Lost lead off and Save to schedule Slack call reminders.</p>
+      ) : (
+        <NextActionEdit row={row} staff={staff} part="call" canSchedule={canSchedule} />
+      )}
     </section>
   );
 }
@@ -2438,12 +2443,27 @@ function TextSequence({ row }: { row: QueueRow }) {
   );
 }
 
-function NextActionEdit({ row, staff, part }: { row: QueueRow; staff: string[]; part: "call" | "reminder" }) {
-  const call = row.nextAction.find((line) => line.label === "Call" && line.at);
+function defaultCallLocalInput(): string {
+  const soon = new Date(Date.now() + 2 * 60 * 60_000);
+  return chicagoLocalInput(soon.toISOString()) || "";
+}
+
+function NextActionEdit({
+  row,
+  staff,
+  part,
+  canSchedule = false,
+}: {
+  row: QueueRow;
+  staff: string[];
+  part: "call" | "reminder";
+  canSchedule?: boolean;
+}) {
+  const scheduledCall = row.nextAction.find((line) => line.label === "Call" && line.at);
+  const call = scheduledCall ?? row.nextAction.find((line) => line.label === "Call");
   const reminder = row.nextAction.find((line) => line.label === "Reminder" && line.at);
-  // Show editors whenever a next call/reminder time exists — even if the pending job is overdue
-  // or the time is only computed from the call sequence (setNextAction will attach/create the job).
-  const showCall = part === "call" && Boolean(call?.at);
+  // Show editors when a time exists, or when staff can schedule the first Slack reminder from scratch.
+  const showCall = part === "call" && (Boolean(scheduledCall?.at) || canSchedule);
   const showReminder = part === "reminder" && Boolean(reminder?.at);
   if (!showCall && !showReminder) return null;
   const extra = row.callTag && row.callTag !== "Outbound" && !staff.includes(row.callTag) ? [row.callTag] : [];
@@ -2451,12 +2471,12 @@ function NextActionEdit({ row, staff, part }: { row: QueueRow; staff: string[]; 
   return (
     <NotedForm
       action={setNextAction}
-      formKey={`${row.id}:${row.callJobId ?? ""}:${call?.at ?? ""}:${row.callTag ?? ""}:${reminder?.at ?? ""}`}
+      formKey={`${row.id}:${row.callJobId ?? ""}:${scheduledCall?.at ?? "new"}:${row.callTag ?? ""}:${reminder?.at ?? ""}`}
       className="mt-3 space-y-2 rounded-md bg-slate-50 px-3 py-2"
-      idleLabel="Save next action"
+      idleLabel={scheduledCall?.at ? "Save next action" : "Schedule Slack reminder"}
     >
       <input type="hidden" name="lead_id" value={row.id} />
-      {showCall && call?.at ? (
+      {showCall ? (
         <>
           <input type="hidden" name="call_job_id" value={row.callJobId ?? ""} />
           <div className="grid grid-cols-2 gap-2">
@@ -2465,7 +2485,7 @@ function NextActionEdit({ row, staff, part }: { row: QueueRow; staff: string[]; 
             <input
               type="datetime-local"
               name="call_at"
-              defaultValue={chicagoLocalInput(call.at)}
+              defaultValue={chicagoLocalInput(scheduledCall?.at ?? call?.at) || defaultCallLocalInput()}
               className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm font-normal normal-case tracking-normal text-slate-900"
             />
           </label>

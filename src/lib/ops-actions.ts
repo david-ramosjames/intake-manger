@@ -343,20 +343,33 @@ export async function setNextAction(formData: FormData) {
         .eq("id", jobId);
       if (updateError) throw new Error(updateError.message);
     } else {
-      const { data: lead } = await supabase.from("leads").select("sequence").eq("id", leadId).maybeSingle();
-      const sequence = String(lead?.sequence || "more_info");
+      const { data: lead } = await supabase
+        .from("leads")
+        .select("sequence, consultation_date, lead_status, signed_case, case_id")
+        .eq("id", leadId)
+        .maybeSingle();
+      if (!lead) throw new Error("Lead not found");
+      if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(String(lead.lead_status))) {
+        throw new Error("Reopen this lead before scheduling Slack call reminders.");
+      }
+      // lead_jobs.sequence uses first_talk/more_info; leads.sequence only allows null/stop/legacy labels.
+      const jobSequence = lead.consultation_date ? "more_info" : "first_talk";
       const { error: insertError } = await supabase.from("lead_jobs").insert({
         lead_id: leadId,
         queue: "call",
-        sequence,
+        sequence: jobSequence,
         position: 1,
         due_at: due,
-        body: "Call the lead.",
+        body: lead.consultation_date ? "Call to reconnect after the consultation." : "Call the lead.",
         status: "pending",
         assigned_name: assigned,
         detail,
       });
       if (insertError) throw new Error(insertError.message);
+      await supabase
+        .from("leads")
+        .update({ follow_up: true, sequence: lead.sequence === "stop" ? null : lead.sequence })
+        .eq("id", leadId);
     }
     await supabase.from("lead_events").insert({
       lead_id: leadId,
@@ -1965,6 +1978,21 @@ export async function applyLostLeadDecision(
       actor: email,
       payload: { from: before.close_reason },
     });
+    const { data: reopened } = await supabase
+      .from("leads")
+      .select(
+        "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date, phone, phone_e164",
+      )
+      .eq("id", leadId)
+      .maybeSingle();
+    if (reopened) {
+      await enrollFollowUp(
+        supabase,
+        { ...reopened, follow_up: true },
+        undefined,
+        reopened.consultation_date ? "post_consult" : "auto",
+      );
+    }
   }
   return false;
 }

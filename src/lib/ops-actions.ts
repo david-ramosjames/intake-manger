@@ -1913,6 +1913,30 @@ export async function setLostLead(formData: FormData) {
   revalidatePath(`/leads/${leadId}`);
 }
 
+/** Clear close outcomes so Desired / Qualified / Lost are editable again after reopen. */
+function clearClosedMilestones(tags: string[] | null | undefined) {
+  const drop = new Set<string>([
+    QUALIFIED_YES,
+    QUALIFIED_NO,
+    "CVR DESIRED",
+    "CVR SIGNED",
+    ...NOT_A_LEAD_TAGS,
+    ...DECLINE_TAGS,
+    "DEC: Referred",
+    "NQ: Unresponsive",
+    "NQ: Spam / Robo Call",
+    "NQ: Outside Service Area",
+    "NQ: Non-PI Legal Matter",
+  ]);
+  return {
+    qualified: null as null,
+    desired_case: null as null,
+    desired_source: null as null,
+    decline_reason: null as null,
+    callrail_tags: (tags ?? []).filter((tag) => !drop.has(tag) && !tag.startsWith("DEC:") && !tag.startsWith("NQ:") && !tag.startsWith("NL:")),
+  };
+}
+
 /** Reopen a Lost / Referred / declined file so staff can work it and schedule Slack reminders again. */
 export async function reopenClosedLead(formData: FormData) {
   const { supabase, email } = await requireStaff();
@@ -1921,7 +1945,7 @@ export async function reopenClosedLead(formData: FormData) {
   const { data: before, error } = await supabase
     .from("leads")
     .select(
-      "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, close_reason, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date, phone, phone_e164, text_sequence_status",
+      "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, close_reason, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date, phone, phone_e164, text_sequence_status, callrail_tags",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -1943,6 +1967,7 @@ export async function reopenClosedLead(formData: FormData) {
       close_suggestion: null,
       follow_up: true,
       sequence: null,
+      ...clearClosedMilestones(before.callrail_tags as string[] | null),
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);
@@ -1950,7 +1975,7 @@ export async function reopenClosedLead(formData: FormData) {
     lead_id: leadId,
     event_type: "lost_lead_reopened",
     actor: email,
-    payload: { from: before.close_reason || before.lead_status, path: "reopen_closed_lead" },
+    payload: { from: before.close_reason || before.lead_status, path: "reopen_closed_lead", cleared_milestones: true },
   });
   await enrollFollowUp(
     supabase,
@@ -2024,6 +2049,7 @@ export async function applyLostLeadDecision(
         close_suggestion: null,
         follow_up: true,
         sequence: null,
+        ...clearClosedMilestones(before.callrail_tags as string[] | null),
       })
       .eq("id", leadId);
     if (error) throw new Error(error.message);
@@ -2031,7 +2057,7 @@ export async function applyLostLeadDecision(
       lead_id: leadId,
       event_type: "lost_lead_reopened",
       actor: email,
-      payload: { from: before.close_reason },
+      payload: { from: before.close_reason, cleared_milestones: true },
     });
     const { data: reopened } = await supabase
       .from("leads")

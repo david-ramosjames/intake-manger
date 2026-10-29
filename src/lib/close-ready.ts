@@ -73,7 +73,10 @@ function baseCloseGaps(lead: CloseReadyLead): string[] {
   const consultDate = (lead.consultation_date ?? "").slice(0, 10);
   const consultNo = (lead.consultation ?? "").toLowerCase() === "no";
   const consultYes = /^\d{4}-\d{2}-\d{2}$/.test(consultDate);
-  if (!consultNo && !consultYes) gaps.push(lead.consultation ? "Consultation date" : "Consultation");
+  if (!consultNo && !consultYes) {
+    // "staff" / other truthy means Yes was chosen but the date is still blank.
+    gaps.push(lead.consultation ? "Consultation date" : "Consultation (Yes or No)");
+  }
   return gaps;
 }
 
@@ -97,7 +100,17 @@ export function signedFileReady(lead: CloseReadyLead): boolean {
 }
 
 export function closeIncompleteMessage(gaps: string[]): string {
-  return `Finish the lead before closing it: ${gaps.join(", ")}.`;
+  return `Finish the lead before closing it: ${gaps.join(" · ")}.`;
+}
+
+export function referralCloseMessage(gaps: string[]): string {
+  const parts = gaps.map((gap) => {
+    if (gap === "Desired") return "Desired has to be No";
+    if (gap === "Decline reason") return "Decline reason under Desired";
+    return gap;
+  });
+  if (parts.length === 1) return `Still needed before the referral can close: ${parts[0]}.`;
+  return `Still needed before the referral can close (${parts.length}): ${parts.join(" · ")}.`;
 }
 
 export function assertCloseReady(lead: CloseReadyLead, path: ClosePath = "base"): void {

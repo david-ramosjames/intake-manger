@@ -11,7 +11,7 @@ import { SIZE_TAGS, declineOptions, selectedDecline, selectedOne } from "@/lib/t
 import type { LeadEntry } from "@/lib/lead-entry";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, nameIsUnavailable, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
-import { closeGaps, type ClosePath } from "@/lib/close-ready";
+import { closeGaps, referralCloseMessage, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
@@ -933,25 +933,59 @@ function RowLinks({ quoUrl, slackUrl }: { quoUrl: string | null; slackUrl: strin
   );
 }
 
-function fieldClass(locked = false) {
-  return locked
-    ? "mt-1 block h-9 w-full cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-2 py-0 text-sm font-normal normal-case tracking-normal text-slate-400"
+function fieldClass(locked = false, invalid = false) {
+  if (locked) {
+    return "mt-1 block h-9 w-full cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-2 py-0 text-sm font-normal normal-case tracking-normal text-slate-400";
+  }
+  return invalid
+    ? "mt-1 block h-9 w-full rounded-md border border-red-500 bg-white px-2 py-0 text-sm font-normal normal-case tracking-normal text-slate-900 ring-1 ring-red-400"
     : "mt-1 block h-9 w-full rounded-md border border-slate-300 bg-white px-2 py-0 text-sm font-normal normal-case tracking-normal text-slate-900";
 }
 
-function PanelSection({ title, children }: { title: string; children: ReactNode }) {
+function gapFieldKey(gap: string): string | null {
+  if (gap === "Lead name" || gap === "Confirm the client name") return "name";
+  if (gap === "Phone") return "phone";
+  if (gap === "Source type") return "source_type";
+  if (gap === "Source category") return "source_category";
+  if (gap === "Lead source") return "lead_source";
+  if (gap === "Case type") return "case_type";
+  if (gap === "Consultation" || gap === "Consultation date" || gap === "Consultation (Yes or No)") return "consultation";
+  if (gap === "Qualified") return "qualified";
+  if (gap === "Desired" || gap === "Desired has to be No") return "desired";
+  if (gap === "Decline reason" || gap.startsWith("Decline reason")) return "decline";
+  if (gap === "Size") return "size";
+  if (gap === "Signed date") return "signed_date";
+  return null;
+}
+
+function PanelSection({ title, children, invalid = false }: { title: string; children: ReactNode; invalid?: boolean }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
+    <section className={`rounded-lg border px-3 py-3 ${invalid ? "border-red-400 bg-red-50" : "border-slate-200 bg-slate-50"}`}>
+      <h3 className={`text-xs font-semibold uppercase tracking-wide ${invalid ? "text-red-700" : "text-slate-500"}`}>{title}</h3>
       <div className="mt-2 grid grid-cols-2 gap-3">{children}</div>
     </section>
   );
 }
 
-function FieldLabel({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+function FieldLabel({
+  label,
+  children,
+  className = "",
+  invalid = false,
+  fieldKey,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+  invalid?: boolean;
+  fieldKey?: string;
+}) {
   return (
-    <label className={`flex flex-col text-xs font-medium uppercase leading-4 tracking-wide text-slate-500 ${className}`}>
-      <span>{label}</span>
+    <label
+      data-gap-field={fieldKey}
+      className={`flex flex-col text-xs font-medium uppercase leading-4 tracking-wide ${invalid ? "text-red-700" : "text-slate-500"} ${className}`}
+    >
+      <span>{label}{invalid ? " · needed" : ""}</span>
       {children}
     </label>
   );
@@ -1071,9 +1105,11 @@ function LeadFacts({
   startReferral?: boolean;
 }) {
   const notify = useContext(DrawerNoticeContext);
+  const formScrollRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [missingGaps, setMissingGaps] = useState<string[]>([]);
   const [dirty, setDirty] = useState({ consult: false, qualified: false, desired: false, signed: false, lost: false });
   const [consulted, setConsulted] = useState<"yes" | "no" | "">(row.consulted);
   const [consultDate, setConsultDate] = useState(row.consultKey.slice(0, 10));
@@ -1100,9 +1136,10 @@ function LeadFacts({
     const nextType = shownCaseType(row.caseType);
     const nextQualified = nextType === "Non-PI Legal Matter" ? "no" : row.qualifiedLabel === "Yes" ? "yes" : row.qualifiedLabel === "No" ? "no" : "";
     const nextDesired = nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "no" : row.desired === "Yes" ? "yes" : row.desired === "No" ? "no" : "tbd";
+    const nextConsulted = nextType === "Non-PI Legal Matter" ? "no" : row.consulted;
     setCaseType(nextType);
-    setConsulted(row.consulted);
-    setConsultDate(row.consultKey.slice(0, 10));
+    setConsulted(nextConsulted);
+    setConsultDate(nextConsulted === "yes" ? row.consultKey.slice(0, 10) : "");
     setQualifiedChoice(nextQualified);
     setDesiredChoice(nextDesired);
     setSize(nextDesired === "yes" ? selectedOne(row.tags, SIZE_TAGS) : "");
@@ -1120,23 +1157,71 @@ function LeadFacts({
     setContactName(contactNameFromRow(row));
   }, [row.id, row.leadName, row.title]);
   const nonPi = caseType === "Non-PI Legal Matter";
+  const consultedValue = nonPi ? "no" : consulted;
   const qualifiedValue = nonPi ? "no" : qualified;
   const desiredValue = nonPi || qualifiedValue === "no" ? "no" : desired;
   const lostValue = nonPi || qualifiedValue === "no" ? "no" : lostChoice;
   const declineValue = nonPi ? "DEC: Non-PI Legal Matter" : desiredValue === "no" ? decline : "";
   const sizeValue = desiredValue === "yes" ? size : "";
+  const consultDateValue = consultedValue === "yes" ? consultDate : "";
   const contractLocked = row.desiredLocked && qualifiedValue !== "no";
+  const consultLocked = nonPi;
   const qualifiedLocked = nonPi;
   const desiredLocked = contractLocked || nonPi || qualifiedValue === "no";
   const lostLocked = row.signed || signedChoice === "yes" || nonPi || qualifiedValue === "no";
   const { pending: confirming, submit: confirmSubmit } = useNotedSubmit();
+  const missingKeys = new Set(missingGaps.map(gapFieldKey).filter(Boolean) as string[]);
+  const fieldMissing = (key: string) => missingKeys.has(key);
+
+  function liveReferralGaps() {
+    return closeGaps(
+      {
+        lead_name: contactName,
+        phone: row.phone,
+        email,
+        identity_status: row.identityStatus,
+        owner_name: row.owner,
+        qualified: qualifiedValue === "yes" ? true : qualifiedValue === "no" ? false : null,
+        callrail_tags: [
+          ...row.tags.filter((tag) => !tag.startsWith("DEC:") && !SIZE_TAGS.includes(tag as (typeof SIZE_TAGS)[number])),
+          ...(sizeValue ? [sizeValue] : []),
+          ...(declineValue ? [declineValue] : []),
+        ],
+        desired_case: desiredValue === "yes" ? true : desiredValue === "no" ? false : null,
+        signed_case: row.signed,
+        date_signed: signedDate,
+        caller_class: row.callerClass,
+        case_type: caseType,
+        lead_source: leadSource,
+        source_type: sourceType,
+        source_category: sourceCategory,
+        consultation: consultedValue === "yes" ? "staff" : consultedValue === "no" ? "no" : null,
+        consultation_date: consultDateValue,
+      },
+      "declined",
+    );
+  }
+
+  function showMissingGaps(gaps: string[], message?: string) {
+    setMissingGaps(gaps);
+    const text = message || referralCloseMessage(gaps);
+    setError(text);
+    notify({ tone: "error", text });
+    window.requestAnimationFrame(() => {
+      const root = formScrollRef.current;
+      if (!root) return;
+      const key = gaps.map(gapFieldKey).find(Boolean);
+      const target = key ? root.querySelector(`[data-gap-field="${key}"]`) : null;
+      (target as HTMLElement | null)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
 
   const notALead = Boolean(notLeadReason);
   function gap() {
     return detailGap({
       notALead,
-      consulted,
-      consultDate,
+      consulted: consultedValue,
+      consultDate: consultDateValue,
       qualified: qualifiedValue,
       desired: desiredValue,
       size: sizeValue,
@@ -1151,7 +1236,7 @@ function LeadFacts({
 
   function exitGap() {
     if (notALead) return null;
-    if (dirty.consult && consulted === "yes" && !consultDate) return "Enter the consultation date before saving or closing.";
+    if (dirty.consult && consultedValue === "yes" && !consultDateValue) return "Enter the consultation date before saving or closing.";
     if (dirty.desired && desiredValue === "yes" && !sizeValue) return "Choose a size before saving or closing.";
     if (dirty.desired && desiredValue === "no" && !declineValue) return "Choose a decline reason before saving or closing.";
     if (dirty.signed && admin && signedChoice === "yes" && !signedDate) return "Enter the signed date before saving or closing.";
@@ -1192,6 +1277,7 @@ function LeadFacts({
       setSaved(true);
       setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
       setError(null);
+      setMissingGaps([]);
       notify({ tone: "saved", text: saved?.closed ? "Saved and closed" : "Saved" });
       if (saved?.closed) {
         window.setTimeout(() => window.location.assign("/work"), 400);
@@ -1201,6 +1287,7 @@ function LeadFacts({
       if (text.includes("Server Components render")) {
         setSaved(true);
         setError(null);
+        setMissingGaps([]);
         notify({ tone: "saved", text: "Saved" });
       } else {
         notify({ tone: "error", text });
@@ -1243,7 +1330,12 @@ function LeadFacts({
   const canReopen = !row.signed && (Boolean(row.lostReason) || row.cycle === "closed");
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+      <div ref={formScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {missingGaps.length ? (
+          <div className="rounded-lg border border-red-300 bg-red-600 px-3 py-2 text-sm text-white">
+            {error || referralCloseMessage(missingGaps)}
+          </div>
+        ) : null}
         {canReopen ? (
           <NotedForm
             action={reopenClosedLead}
@@ -1301,10 +1393,10 @@ function LeadFacts({
               )}
             </FieldLabel>
           </PanelSection>
-          <input type="hidden" name="consulted" value={consulted} />
+          <input type="hidden" name="consulted" value={consultedValue} />
           {admin ? <input type="hidden" name="signed_decision" value={signedChoice} /> : null}
-          <PanelSection title="Marketing">
-            <FieldLabel label="Source type">
+          <PanelSection title="Marketing" invalid={fieldMissing("source_type") || fieldMissing("source_category") || fieldMissing("lead_source")}>
+            <FieldLabel label="Source type" fieldKey="source_type" invalid={fieldMissing("source_type")}>
               <input type="hidden" name="source_type" value={sourceType} />
               <select
                 value={sourceType}
@@ -1315,8 +1407,9 @@ function LeadFacts({
                   setSourceType(next);
                   setSourceCategory(category);
                   setLeadSource(next && category && getSourcesForCategory(next, category).includes(leadSource) ? leadSource : "");
+                  setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "source_type"));
                 }}
-                className={fieldClass()}
+                className={fieldClass(false, fieldMissing("source_type"))}
               >
                 <option value="">Not set</option>
                 {SOURCE_TYPE_OPTIONS.map((item) => (
@@ -1326,7 +1419,7 @@ function LeadFacts({
                 ))}
               </select>
             </FieldLabel>
-            <FieldLabel label="Source category">
+            <FieldLabel label="Source category" fieldKey="source_category" invalid={fieldMissing("source_category")}>
               <input type="hidden" name="source_category" value={sourceCategory} />
               <select
                 value={sourceCategory}
@@ -1336,8 +1429,9 @@ function LeadFacts({
                   const next = isSourceCategory(event.target.value) ? event.target.value : "";
                   setSourceCategory(next);
                   setLeadSource(sourceType && next && getSourcesForCategory(sourceType, next).includes(leadSource) ? leadSource : "");
+                  setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "source_category"));
                 }}
-                className={fieldClass(!sourceType)}
+                className={fieldClass(!sourceType, fieldMissing("source_category"))}
               >
                 <option value="">{sourceType ? "Not set" : "Pick source type first"}</option>
                 {sourceType
@@ -1349,14 +1443,17 @@ function LeadFacts({
                   : null}
               </select>
             </FieldLabel>
-            <FieldLabel label="Lead source" className="col-span-2">
+            <FieldLabel label="Lead source" className="col-span-2" fieldKey="lead_source" invalid={fieldMissing("lead_source")}>
               <input type="hidden" name="lead_source" value={leadSource} />
               <select
                 value={leadSource}
                 autoComplete="off"
                 disabled={!sourceCategory}
-                onChange={(event) => setLeadSource(event.target.value)}
-                className={fieldClass(!sourceCategory)}
+                onChange={(event) => {
+                  setLeadSource(event.target.value);
+                  setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "lead_source"));
+                }}
+                className={fieldClass(!sourceCategory, fieldMissing("lead_source"))}
               >
                 <option value="">{sourceCategory ? "Not set" : "Pick category first"}</option>
                 {sourceType && sourceCategory
@@ -1369,14 +1466,15 @@ function LeadFacts({
               </select>
             </FieldLabel>
           </PanelSection>
-          <PanelSection title="Case type">
-            <div className="col-span-2">
+          <PanelSection title="Case type" invalid={fieldMissing("case_type")}>
+            <div className="col-span-2" data-gap-field="case_type">
               <select
                 name="case_type"
                 value={caseOptions.includes(caseType) ? caseType : caseType || ""}
                 onChange={(event) => {
                   const next = event.target.value;
                   setCaseType(next);
+                  setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "case_type"));
                   if (next !== "Non-PI Legal Matter") return;
                   mark("consult");
                   setConsulted("no");
@@ -1391,7 +1489,7 @@ function LeadFacts({
                   setLostChoice("no");
                   setLostReason("");
                 }}
-                className={fieldClass()}
+                className={fieldClass(false, fieldMissing("case_type"))}
               >
                 <option value="">Not set</option>
                 {[...caseOptions].map((item) => (
@@ -1407,34 +1505,49 @@ function LeadFacts({
               </select>
             </div>
           </PanelSection>
-          <PanelSection title="Consultation">
-            <ControlPair
-              label="Consultation date"
-              control={
-                <ChoiceToggle
-                  label="Consultation"
-                  value={consulted}
-                  onChange={(value) => {
-                    mark("consult");
-                    setConsulted(value);
-                    if (value === "no") setConsultDate("");
-                  }}
-                />
-              }
-              field={
-                <input
-                  type="date"
-                  name="consultation_date"
-                  value={consultDate}
-                  disabled={consulted !== "yes"}
-                  onChange={(event) => {
-                    mark("consult");
-                    setConsultDate(event.target.value);
-                  }}
-                  className={fieldClass(consulted !== "yes")}
-                />
-              }
-            />
+          <PanelSection title="Consultation" invalid={fieldMissing("consultation")}>
+            <div data-gap-field="consultation" className="col-span-2 space-y-2">
+              <ControlPair
+                label={missingGaps.includes("Consultation date") ? "Consultation date · needed" : "Consultation date"}
+                control={
+                  <div className={fieldMissing("consultation") ? "rounded-lg ring-2 ring-red-400" : undefined}>
+                    <ChoiceToggle
+                      label="Consultation"
+                      value={consultedValue}
+                      disabled={consultLocked}
+                      onChange={(value) => {
+                        mark("consult");
+                        setConsulted(value);
+                        if (value === "no") setConsultDate("");
+                        setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "consultation"));
+                      }}
+                    />
+                  </div>
+                }
+                field={
+                  <input
+                    type="date"
+                    name="consultation_date"
+                    value={consultDateValue}
+                    disabled={consultedValue !== "yes"}
+                    onChange={(event) => {
+                      mark("consult");
+                      setConsultDate(event.target.value);
+                      setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "consultation"));
+                    }}
+                    className={fieldClass(consultedValue !== "yes", fieldMissing("consultation") && consultedValue === "yes")}
+                  />
+                }
+              />
+              {consultLocked ? <p className="text-xs text-slate-500">Non-PI legal matters are not consulted.</p> : null}
+              {fieldMissing("consultation") ? (
+                <p className="text-xs text-red-700">
+                  {missingGaps.includes("Consultation date")
+                    ? "Enter the consultation date."
+                    : "Choose Yes or No for consultation."}
+                </p>
+              ) : null}
+            </div>
           </PanelSection>
           <PanelSection title="Qualified">
             <div>
@@ -1585,7 +1698,15 @@ function LeadFacts({
                 startOpen={startReferral}
                 desiredNo={desiredValue === "no"}
                 declineTag={declineValue}
-                prepare={() => persistDetails().then(() => undefined)}
+                prepare={async () => {
+                  const gaps = liveReferralGaps();
+                  if (gaps.length) {
+                    showMissingGaps(gaps);
+                    throw new Error(referralCloseMessage(gaps));
+                  }
+                  await persistDetails();
+                }}
+                onGaps={(gaps, message) => showMissingGaps(gaps, message)}
               />
             </div>
           </PanelSection>
@@ -1666,6 +1787,7 @@ function QueueReferral({
   desiredNo,
   declineTag,
   prepare,
+  onGaps,
 }: {
   row: QueueRow;
   destinations: ReferralDestination[];
@@ -1675,6 +1797,7 @@ function QueueReferral({
   desiredNo: boolean;
   declineTag: string;
   prepare?: () => Promise<void>;
+  onGaps?: (gaps: string[], message: string) => void;
 }) {
   const firms = referralFirms(destinations);
   const types = PRACTICE_AREAS.filter(
@@ -1797,16 +1920,25 @@ function QueueReferral({
       if (prepare) await prepare();
       const result = kind === "send" ? await sendReferral(row.id, data) : await markReferralAlreadySent(row.id, data);
       if (result.error) {
-        notify({ tone: "error", text: result.error });
-        setError(result.error);
+        if (result.gaps?.length) onGaps?.(result.gaps, result.error);
+        else {
+          notify({ tone: "error", text: result.error });
+          setError(result.error);
+        }
         return;
       }
       setRecordedAttorney(guide ? "Property damage guide" : handwritten ? attorneyName.trim() : firm?.name || "");
       setRecorded("sent");
       notify({ tone: "saved", text: "Referral sent" });
     } catch (err) {
-      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the referral" });
-      setError(err instanceof Error ? err.message : "Could not record the referral");
+      const text = err instanceof Error ? err.message : "Could not record the referral";
+      // prepare() already surfaced close-ready gaps via onGaps / showMissingGaps.
+      if (!text.startsWith("Still needed before the referral can close")) {
+        notify({ tone: "error", text });
+        setError(text);
+      } else {
+        setError(text);
+      }
     } finally {
       setPending(null);
     }
@@ -1820,15 +1952,23 @@ function QueueReferral({
       if (prepare) await prepare();
       const result = await markReferralDeclined(row.id, referralFields());
       if (result.error) {
-        notify({ tone: "error", text: result.error });
-        setError(result.error);
+        if (result.gaps?.length) onGaps?.(result.gaps, result.error);
+        else {
+          notify({ tone: "error", text: result.error });
+          setError(result.error);
+        }
         return;
       }
       setRecorded("declined");
       notify({ tone: "saved", text: "Referral declined" });
     } catch (err) {
-      notify({ tone: "error", text: err instanceof Error ? err.message : "Could not record the referral" });
-      setError(err instanceof Error ? err.message : "Could not record the referral");
+      const text = err instanceof Error ? err.message : "Could not record the referral";
+      if (!text.startsWith("Still needed before the referral can close")) {
+        notify({ tone: "error", text });
+        setError(text);
+      } else {
+        setError(text);
+      }
     } finally {
       setPending(null);
     }
@@ -2827,6 +2967,7 @@ function contractLabel(row: QueueRow): { label: string; bad: boolean } {
   if (row.agreementSent) {
     const when = formatChicago(row.agreementSent);
     if (status === "cancelled") return { label: `Sent ${when}, then cancelled`, bad: false };
+    if (status === "reopened") return { label: `Prior contract ended ${when} · lead reopened`, bad: false };
     return { label: `Sent ${when}`, bad: false };
   }
   return { label: "Not sent", bad: false };

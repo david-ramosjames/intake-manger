@@ -99,6 +99,7 @@ export function AddLeadForm({
   const [decline, setDecline] = useState("");
   const [signed, setSigned] = useState<"" | "yes" | "no">("");
   const nonPi = caseType === "Non-PI Legal Matter";
+  const consultedValue = nonPi ? "no" : consulted;
   const qualifiedValue = nonPi ? "no" : qualified;
   const desiredValue = nonPi || qualifiedValue === "no" ? "no" : desired;
   const declineValue = nonPi ? "DEC: Non-PI Legal Matter" : desiredValue === "no" ? decline : "";
@@ -115,7 +116,7 @@ export function AddLeadForm({
         data.set("source_category", sourceCategory);
         data.set("lead_source", leadSource);
         data.set("case_type", caseType);
-        data.set("consulted", consulted);
+        data.set("consulted", consultedValue);
         data.set("qualified_decision", qualifiedValue);
         data.set("desired_decision", desiredValue);
         data.set("decline_tag", declineValue);
@@ -231,11 +232,12 @@ export function AddLeadForm({
 
       <Section title="Consultation">
         <Pair>
-          <YesNo label="Consultation" value={consulted} onChange={(value) => setConsulted(value)} />
+          <YesNo label="Consultation" value={consultedValue} disabled={nonPi} onChange={(value) => setConsulted(value)} />
           <Label label="Consultation date" className="w-36">
-            <input name="consultation_date" type="date" disabled={consulted !== "yes"} className={fieldClass} />
+            <input name="consultation_date" type="date" disabled={consultedValue !== "yes"} className={fieldClass} />
           </Label>
         </Pair>
+        {nonPi ? <p className="text-xs text-slate-500">Non-PI legal matters are not consulted.</p> : null}
       </Section>
 
       <Section title="Qualified">

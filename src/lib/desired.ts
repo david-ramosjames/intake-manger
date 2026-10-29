@@ -7,8 +7,8 @@ export function contractSent(input: {
   agreement_status?: string | null;
 }): boolean {
   const status = (input.agreement_status || "").toLowerCase();
-  // Cancelled / expired / failed leave agreement_sent_at set; they are not an active send.
-  if (status === "failed" || status === "cancelled" || status === "expired") return false;
+  // Cancelled / expired / failed / reopened leave agreement_sent_at set; they are not an active send.
+  if (status === "failed" || status === "cancelled" || status === "expired" || status === "reopened") return false;
   if (SENT.has(status)) return true;
   return Boolean(input.agreement_sent_at);
 }
@@ -23,7 +23,7 @@ export function contractOutstanding(input: {
 }): boolean {
   if (input.signed_case) return false;
   const status = (input.agreement_status || "").toLowerCase();
-  if (["signed", "completed", "cancelled", "expired", "failed"].includes(status)) return false;
+  if (["signed", "completed", "cancelled", "expired", "failed", "reopened"].includes(status)) return false;
   if ((input.agreement_reminder_count ?? 0) >= 6 && !input.agreement_next_reminder_at && (status === "sent" || status === "viewed")) {
     return false;
   }

@@ -18,7 +18,7 @@ import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standa
 import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
-import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, type ClosePath } from "./close-ready";
+import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, referralCloseMessage, type ClosePath } from "./close-ready";
 import { caseTypeIsLead, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
 import { referralAwaitingSend } from "./next-step";
 import { isPlaceholderOwner } from "./talked-with";
@@ -1224,12 +1224,7 @@ export async function markReferralOpportunity(leadId: string, formData: FormData
 const DECLINE_TAG_SET = new Set<string>(DECLINE_TAGS);
 
 function referralBlockMessage(gaps: string[]): string {
-  const parts = gaps.map((gap) => {
-    if (gap === "Desired") return "Desired has to be No";
-    if (gap === "Decline reason") return "choose a decline reason under Desired";
-    return gap;
-  });
-  return `Still needed before the referral can close: ${parts.join(", ")}.`;
+  return referralCloseMessage(gaps);
 }
 
 function referralDeclineTag(
@@ -1273,7 +1268,7 @@ async function stampReferralDecision(
   return error?.message ?? null;
 }
 
-export async function sendReferral(leadId: string, formData: FormData): Promise<{ error?: string }> {
+export async function sendReferral(leadId: string, formData: FormData): Promise<{ error?: string; gaps?: string[] }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
   const language = text(formData, "language") === "es" ? "es" : "en";
@@ -1315,13 +1310,21 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  const declineTag = referralDeclineTag(formData, lead, area, true);
   const stampError = await stampReferralDecision(supabase, leadId, lead, {
     desiredNo: true,
-    declineTag: referralDeclineTag(formData, lead, area, true),
+    declineTag,
   });
   if (stampError) return { error: stampError };
-  const gaps = closeGaps(lead, "declined");
-  if (gaps.length) return { error: referralBlockMessage(gaps) };
+  const stamped = {
+    ...lead,
+    desired_case: false as boolean,
+    callrail_tags: declineTag
+      ? Array.from(new Set([...(lead.callrail_tags ?? []).filter((tag: string) => !tag.startsWith("DEC:")), declineTag]))
+      : lead.callrail_tags,
+  };
+  const gaps = closeGaps(stamped, "declined");
+  if (gaps.length) return { error: referralBlockMessage(gaps), gaps };
   const to = lead.phone_e164 || toE164(lead.phone);
   if (!to) return { error: "This lead needs a phone number before the text can go out." };
 
@@ -1421,11 +1424,11 @@ export async function markReferralSent(leadId: string, formData?: FormData): Pro
   return recordReferralOutcome(leadId, "sent", formData);
 }
 
-export async function markReferralDeclined(leadId: string, formData?: FormData): Promise<{ error?: string }> {
+export async function markReferralDeclined(leadId: string, formData?: FormData): Promise<{ error?: string; gaps?: string[] }> {
   return recordReferralOutcome(leadId, "declined", formData);
 }
 
-async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined", formData?: FormData): Promise<{ error?: string }> {
+async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined", formData?: FormData): Promise<{ error?: string; gaps?: string[] }> {
   const { supabase, email } = await requireStaff();
   const { data: lead, error: leadError } = await supabase
     .from("leads")
@@ -1434,18 +1437,26 @@ async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
   const sent = outcome === "sent";
+  const declineTag = referralDeclineTag(formData, lead, formData ? text(formData, "practice_area") : null, sent);
   const stampError = await stampReferralDecision(supabase, leadId, lead, {
     desiredNo: true,
-    declineTag: referralDeclineTag(formData, lead, formData ? text(formData, "practice_area") : null, sent),
+    declineTag,
   });
   if (stampError) return { error: stampError };
+  const stamped = {
+    ...lead,
+    desired_case: false as boolean,
+    callrail_tags: declineTag
+      ? Array.from(new Set([...(lead.callrail_tags ?? []).filter((tag: string) => !tag.startsWith("DEC:")), declineTag]))
+      : lead.callrail_tags,
+  };
   try {
     await closeLead(supabase, leadId, email, sent
       ? { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" }
       : { lead_status: "Lost", close_reason: "declined", event: "referral_declined", path: "declined" });
   } catch (err) {
-    const gaps = closeGaps(lead, "declined");
-    return { error: gaps.length ? referralBlockMessage(gaps) : err instanceof Error ? err.message : "Could not record the referral." };
+    const gaps = closeGaps(stamped, "declined");
+    return { error: gaps.length ? referralBlockMessage(gaps) : err instanceof Error ? err.message : "Could not record the referral.", gaps: gaps.length ? gaps : undefined };
   }
   await stopFollowUp(supabase, leadId, sent ? "Referred out." : "Referral declined.");
   if (lead.text_sequence_status === "active") {
@@ -1457,7 +1468,7 @@ async function recordReferralOutcome(leadId: string, outcome: "sent" | "declined
   return {};
 }
 
-export async function markReferralAlreadySent(leadId: string, formData: FormData): Promise<{ error?: string }> {
+export async function markReferralAlreadySent(leadId: string, formData: FormData): Promise<{ error?: string; gaps?: string[] }> {
   const { supabase, email } = await requireStaff();
   const destinationId = text(formData, "destination_id");
   const attorneyName = text(formData, "attorney_name");
@@ -1485,13 +1496,21 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
+  const declineTag = referralDeclineTag(formData, lead, area, true);
   const stampError = await stampReferralDecision(supabase, leadId, lead, {
     desiredNo: true,
-    declineTag: referralDeclineTag(formData, lead, area, true),
+    declineTag,
   });
   if (stampError) return { error: stampError };
-  const gaps = closeGaps(lead, "declined");
-  if (gaps.length) return { error: referralBlockMessage(gaps) };
+  const stamped = {
+    ...lead,
+    desired_case: false as boolean,
+    callrail_tags: declineTag
+      ? Array.from(new Set([...(lead.callrail_tags ?? []).filter((tag: string) => !tag.startsWith("DEC:")), declineTag]))
+      : lead.callrail_tags,
+  };
+  const gaps = closeGaps(stamped, "declined");
+  if (gaps.length) return { error: referralBlockMessage(gaps), gaps };
   const outside = area !== "personal_injury";
   const { error: updateError } = await supabase
     .from("leads")
@@ -1937,6 +1956,26 @@ function clearClosedMilestones(tags: string[] | null | undefined) {
   };
 }
 
+/**
+ * An exhausted / cancelled Sign Flow series must not keep auto-closing a reopened lead.
+ * Status "reopened" is ignored by the funnel close job and by Sign Flow's Lost sync.
+ */
+function clearExhaustedAgreement(lead: {
+  agreement_status?: string | null;
+  agreement_reminder_count?: number | null;
+  agreement_next_reminder_at?: string | null;
+}) {
+  const status = (lead.agreement_status || "").toLowerCase();
+  const exhausted =
+    ["cancelled", "expired", "failed"].includes(status) ||
+    ((lead.agreement_reminder_count ?? 0) >= 6 && !lead.agreement_next_reminder_at && ["sent", "viewed", "cancelled", "expired"].includes(status));
+  if (!exhausted) return {};
+  return {
+    agreement_status: "reopened",
+    agreement_next_reminder_at: null as null,
+  };
+}
+
 /** Reopen a Lost / Referred / declined file so staff can work it and schedule Slack reminders again. */
 export async function reopenClosedLead(formData: FormData) {
   const { supabase, email } = await requireStaff();
@@ -1945,7 +1984,7 @@ export async function reopenClosedLead(formData: FormData) {
   const { data: before, error } = await supabase
     .from("leads")
     .select(
-      "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, close_reason, arrival, owner_name, agreement_status, agreement_sent_at, priority, created_at, consultation_date, lead_date, phone, phone_e164, text_sequence_status, callrail_tags",
+      "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, close_reason, arrival, owner_name, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, priority, created_at, consultation_date, lead_date, phone, phone_e164, text_sequence_status, callrail_tags",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -1968,6 +2007,7 @@ export async function reopenClosedLead(formData: FormData) {
       follow_up: true,
       sequence: null,
       ...clearClosedMilestones(before.callrail_tags as string[] | null),
+      ...clearExhaustedAgreement(before),
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);
@@ -2041,6 +2081,11 @@ export async function applyLostLeadDecision(
   }
 
   if (before.lead_status === "Lost" && isLostLeadReason(before.close_reason)) {
+    const { data: agreement } = await supabase
+      .from("leads")
+      .select("agreement_status, agreement_reminder_count, agreement_next_reminder_at")
+      .eq("id", leadId)
+      .maybeSingle();
     const { error } = await supabase
       .from("leads")
       .update({
@@ -2050,6 +2095,7 @@ export async function applyLostLeadDecision(
         follow_up: true,
         sequence: null,
         ...clearClosedMilestones(before.callrail_tags as string[] | null),
+        ...clearExhaustedAgreement(agreement ?? {}),
       })
       .eq("id", leadId);
     if (error) throw new Error(error.message);

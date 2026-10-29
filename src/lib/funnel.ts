@@ -96,6 +96,8 @@ export async function closeFinishedLeads(
 const SIGN_SERIES_LENGTH = 6;
 
 async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<number> {
+  // "reopened" means staff deliberately brought the file back after this series —
+  // do not auto-Lost them again from the same cancelled contract.
   const { data, error } = await supabase
     .from("leads")
     .select(`id, ${CLOSE_READY_COLUMNS}`)

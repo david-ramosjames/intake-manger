@@ -145,12 +145,12 @@ const ENVS: { service: string; name: string; why: string }[] = [
   },
   {
     service: "Intake Manager",
-    name: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    name: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     why: "Public key for the signed-in staff session.",
   },
   {
     service: "Intake Manager",
-    name: "SUPABASE_SERVICE_ROLE_KEY",
+    name: "SUPABASE_SECRET_KEY",
     why: "Server only. Slack capture and the queue runner write leads with this.",
   },
   {
@@ -450,12 +450,12 @@ const ENVS: { service: string; name: string; why: string }[] = [
   },
   {
     service: "Docket Flow",
-    name: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    name: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     why: "Staff session.",
   },
   {
     service: "Docket Flow",
-    name: "SUPABASE_SERVICE_ROLE_KEY",
+    name: "SUPABASE_SECRET_KEY",
     why: "Server writes for intakes and cases.",
   },
   {

@@ -1,9 +1,9 @@
+import { supabasePublishableKey } from "./keys";
+
 export const ALLOWED_DOMAIN = "ramosjames.com";
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  );
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && supabasePublishableKey());
 }
 
 export function docketBaseUrl(): string {

@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { supabasePublishableKey } from "@/lib/supabase/keys";
 
 const PUBLIC = ["/login", "/auth/callback", "/api/slack/events", "/api/cron/queues"];
 
@@ -9,8 +10,8 @@ function isPublicPath(pathname: string) {
 
 export async function middleware(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) {
+  const key = supabasePublishableKey();
+  if (!url || !key) {
     if (isPublicPath(request.nextUrl.pathname)) return NextResponse.next();
     const login = request.nextUrl.clone();
     login.pathname = "/login";
@@ -19,7 +20,7 @@ export async function middleware(request: NextRequest) {
   }
 
   let response = NextResponse.next({ request: { headers: request.headers } });
-  const supabase = createServerClient(url, anon, {
+  const supabase = createServerClient(url, key, {
     cookies: {
       getAll() {
         return request.cookies.getAll();

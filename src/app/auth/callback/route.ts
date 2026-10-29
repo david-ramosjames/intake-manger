@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { supabasePublishableKey } from "@/lib/supabase/keys";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
@@ -9,9 +10,13 @@ export async function GET(request: Request) {
   if (!code) return NextResponse.redirect(`${origin}/login?error=auth`);
 
   const cookieStore = await cookies();
+  const publishable = supabasePublishableKey();
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !publishable) {
+    return NextResponse.redirect(`${origin}/login?error=config`);
+  }
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    publishable,
     {
       cookies: {
         getAll() {

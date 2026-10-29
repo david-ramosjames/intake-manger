@@ -47,7 +47,7 @@ function LoginForm({ origin, configured }: { origin: string; configured: boolean
           <p>This deployment has no Supabase connection yet. Set these on Vercel, then redeploy:</p>
           <ul className="mt-2 list-disc pl-5 font-mono text-xs">
             <li>NEXT_PUBLIC_SUPABASE_URL</li>
-            <li>NEXT_PUBLIC_SUPABASE_ANON_KEY</li>
+            <li>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</li>
             <li>NEXT_PUBLIC_SITE_URL</li>
           </ul>
           <p className="mt-2">

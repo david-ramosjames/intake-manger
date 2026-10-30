@@ -69,7 +69,8 @@ export default async function SequencesPage({
       <details className="mt-4 rounded-xl border border-slate-200 bg-white px-5 py-4">
         <summary className={`${buttonQuiet} w-fit cursor-pointer list-none`}>More options</summary>
         <p className="mt-2 text-xs text-slate-500">
-          Slack call reminders post during these hours. The callback itself is still placed in the morning, lunch, or afternoon window.
+          Slack call reminders post during these hours. Uncheck Sat or Sun to pause that sequence’s call tags for the weekend.
+          The callback itself is still placed in the morning, lunch, or afternoon window on open days.
         </p>
         <HoursForm sequence={sequence} hours={hours[sequence]} />
         <div className="mt-4 flex flex-wrap items-center gap-3">

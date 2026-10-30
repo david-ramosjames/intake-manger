@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { weekendCallAllowed } from "./callbacks";
 import { isWorkLead } from "./caller-class";
 import { leadSequenceId, loadWorkHours } from "./sequences";
 import { loadSlackSettings } from "./slack-settings";
@@ -194,11 +193,16 @@ export async function dispatchDue(supabase: SupabaseClient) {
           agreementSentAt: lead.agreement_sent_at,
           signedCase: lead.signed_case,
         }) ?? (talked.has(lead.id) ? "more_info" : "first_talk");
-      const priority = Boolean(lead.priority) || sequence === "want_to_sign";
       const nowDate = new Date();
-      const weekend = !weekendCallAllowed(nowDate, false);
-      if (weekend && !priority && !isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
-      if (!weekend && sequence && !withinWorkHours(nowDate, hoursBySequence[sequence])) continue;
+      // Sat/Sun open toggles on /sequences control weekend Slack call reminders.
+      // A closed weekend day (null hours) pauses that sequence's call tags.
+      if (
+        sequence &&
+        !withinWorkHours(nowDate, hoursBySequence[sequence]) &&
+        !isPracticeTestPhone(lead.phone_e164 || lead.phone)
+      ) {
+        continue;
+      }
       const topicChannel = slack.channelId || LEAD_CHANNEL_ID;
       const mention = await resolveCallMention(job, lead, staff, slack.token, topicChannel);
       if (slack.posting && postThisLead) {

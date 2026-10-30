@@ -106,8 +106,8 @@ export type WorkHours = {
 export const DEFAULT_WORK_HOURS: WorkHours = {
   weekdayStart: 8 * 60,
   weekdayEnd: 18 * 60,
-  saturdayStart: 8 * 60,
-  saturdayEnd: 18 * 60,
+  saturdayStart: null,
+  saturdayEnd: null,
   sundayStart: null,
   sundayEnd: null,
 };

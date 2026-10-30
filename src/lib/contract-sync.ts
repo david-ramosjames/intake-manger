@@ -63,7 +63,7 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
 
   const { data: leads, error: leadError } = await supabase
     .from("leads")
-    .select("id, lead_name, phone_e164, signed_case, agreement_status, agreement_signing_url, agreement_reminder_count, created_at, test")
+    .select("id, lead_name, phone_e164, signed_case, agreement_status, agreement_signing_url, agreement_reminder_count, created_at, test, identity_status")
     .eq("test", false)
     .in("phone_e164", [...latest.keys()])
     .order("created_at", { ascending: false });
@@ -82,7 +82,8 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     if (!lead) continue;
     const patch: Record<string, unknown> = {};
     const current = String(lead.lead_name || "").replace(/\s+/g, " ").trim();
-    if (signal.name && current !== signal.name) {
+    // Staff-confirmed names stay put. Only fill a blank lead from the contract.
+    if (signal.name && !current && lead.identity_status !== "confirmed") {
       patch.lead_name = signal.name;
       patch.identity_status = "confirmed";
       patch.identity_evidence = null;

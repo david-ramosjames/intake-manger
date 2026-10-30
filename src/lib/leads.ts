@@ -675,6 +675,24 @@ export function nameIsUnavailable(value: string | null | undefined): boolean {
   return NAME_UNAVAILABLE.test((value ?? "").trim());
 }
 
+/** Form answers and chat blurbs sometimes land in the Name field. Those are not people. */
+export function looksLikePersonName(value: string | null | undefined): boolean {
+  const text = usableFact(value);
+  if (!text) return false;
+  if (nameIsUnavailable(text)) return false;
+  if (text.length > 60) return false;
+  if (/[.!?…]/.test(text)) return false;
+  if (
+    /\b(it'?s|its|was|were|that|got|get|my|his|her|their|brother|sister|called|about|because|who|when|where|what)\b/i.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  const words = text.split(/\s+/);
+  return words.length >= 1 && words.length <= 5;
+}
+
 export function leadTitle(lead: {
   lead_name: string | null;
   phone: string | null;
@@ -683,7 +701,9 @@ export function leadTitle(lead: {
 }): string {
   const stored = lead.lead_name?.trim() ? displayName(lead.lead_name, lead.phone) : "";
   if (nameIsUnavailable(stored)) return "N/A";
-  const name = usableFact(stored) ?? webLeadFacts(lead.case_detail).name;
+  // Only the stored lead_name counts once staff has touched the row. Falling
+  // back to case_detail *Name:* made cleared junk names reappear on every load.
+  const name = usableFact(stored);
   if (name) return name;
   return "Not captured";
 }

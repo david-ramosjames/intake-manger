@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enrollFollowUp } from "./followup";
-import { leadSourceFromText } from "./leads";
+import { leadSourceFromText, looksLikePersonName } from "./leads";
 import { isPlaceholderOwner } from "./talked-with";
 import { parseSlackLead, leadIsClosed, slackPostDisposition } from "./slack-lead";
 import { LEAD_CHANNEL_ID } from "./slack";
@@ -114,7 +114,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
     const open = matches.find((lead) => !leadIsClosed(lead)) ?? matches[0];
     if (open) {
       const patch: Record<string, unknown> = {};
-      if (!open.lead_name && parsed.name) patch.lead_name = parsed.name;
+      if (!open.lead_name && parsed.name && looksLikePersonName(parsed.name)) patch.lead_name = parsed.name;
       if (!open.phone && parsed.phone) {
         patch.phone = parsed.phone;
         patch.phone_e164 = parsed.phoneE164;
@@ -155,7 +155,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
     .from("leads")
     .insert({
       lead_date: new Date().toISOString().slice(0, 10),
-      lead_name: parsed.name,
+      lead_name: looksLikePersonName(parsed.name) ? parsed.name : null,
       phone: parsed.phone,
       phone_e164: parsed.phoneE164,
       email: parsed.email,

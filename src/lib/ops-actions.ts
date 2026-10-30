@@ -27,7 +27,7 @@ import { createSupabaseServiceClient } from "./supabase/service";
 import { loadStoredPropertyDamageGuides } from "./property-damage-guides";
 import { sendQuoText } from "./quo";
 import { listQuoLines } from "./quo-settings";
-import { enrollSmsFollowUp, stopSmsFollowUp } from "./sms-followup";
+import { enrollSmsFollowUp, stopSmsFollowUp, updateSmsFollowUpContact } from "./sms-followup";
 import {
   DEFAULT_REFERRAL_SMS,
   isGuideReferral,
@@ -456,7 +456,7 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const { data: before, error: loadError } = await supabase
     .from("leads")
-    .select("caller_class, close_suggestion, close_reason, lead_status, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case")
+    .select("caller_class, close_suggestion, close_reason, lead_status, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case, phone, phone_e164, lead_name")
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
@@ -475,10 +475,10 @@ export async function saveLeadDetails(formData: FormData) {
     patch.phone = phone;
     patch.phone_e164 = phoneE164;
   }
-  if (leadName) {
-    patch.identity_status = "confirmed";
-    patch.identity_evidence = null;
-  }
+  // Any staff save of the name field — including clearing it — is authoritative.
+  // Confirmed stops Quo Router from refilling an empty name from a later call.
+  patch.identity_status = "confirmed";
+  patch.identity_evidence = null;
   if (formData.has("lead_date")) patch.lead_date = leadDate && /^\d{4}-\d{2}-\d{2}$/.test(leadDate) ? leadDate : null;
   if (consulted === "yes") {
     patch.consultation = "staff";
@@ -535,6 +535,19 @@ export async function saveLeadDetails(formData: FormData) {
     actor,
     payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType, lead_name: leadName },
   });
+  const syncPhone = (!keepPhone && (phoneE164 || phone)) || before.phone_e164 || before.phone;
+  const previousName = (before.lead_name || "").trim();
+  const nextName = (leadName || "").trim();
+  if (syncPhone && previousName !== nextName) {
+    const usable = nextName && !nameIsUnavailable(nextName) ? nextName : "";
+    const [first, ...rest] = usable.split(/\s+/).filter(Boolean);
+    await updateSmsFollowUpContact({
+      phone: syncPhone,
+      first_name: first || null,
+      last_name: rest.join(" ") || null,
+      actor,
+    }).catch(() => ({ ok: false }));
+  }
   // Close as Lost first so CallRail / revalidate failures cannot leave the lead open.
   const lostDecision = text(formData, "lost_decision");
   const lostReasonValue = text(formData, "lost_reason");

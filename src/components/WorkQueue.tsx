@@ -1078,7 +1078,9 @@ function marketingFromRow(row: { sourceType: string; sourceCategory?: string; le
 }
 
 function contactNameFromRow(row: { leadName: string; title: string }): string {
-  return row.leadName || (row.title === "Not captured" ? "" : row.title);
+  // Use the stored lead name only. Title can still show N/A / Not captured, and
+  // must not refill the edit field after staff cleared a bad form answer.
+  return row.leadName || "";
 }
 
 function shownCaseType(value: string): string {

@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { CLOSE_READY_COLUMNS, closeGaps } from "./close-ready";
+import { toE164 } from "./phone";
+import { stopSmsFollowUp } from "./sms-followup";
 import { contractSent } from "./desired";
 import { officialCaseType } from "./leads";
 import { QUALIFIED_YES } from "./tags";
@@ -122,6 +124,8 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
       sequence: "stop",
       close_reason: "no_response",
       close_suggestion: null,
+      text_sequence_status: "stopped",
+      text_next_at: null,
     })
     .in("id", ids)
     .not("lead_status", "in", CLOSED_LIST);
@@ -131,6 +135,10 @@ async function closeExhaustedSignSeries(supabase: SupabaseClient): Promise<numbe
     .update({ status: "skipped", detail: "Sign Flow reminder series finished with no signature." })
     .in("lead_id", ids)
     .eq("status", "pending");
+  for (const row of rows) {
+    const phone = String(row.phone_e164 || toE164(row.phone) || "");
+    if (phone) await stopSmsFollowUp(phone, "funnel").catch(() => ({ ok: false }));
+  }
   return ids.length;
 }
 
@@ -419,6 +427,8 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
       sequence: "stop",
       close_reason: "no_response",
       close_suggestion: null,
+      text_sequence_status: "stopped",
+      text_next_at: null,
     })
     .in("id", closing)
     .not("lead_status", "in", CLOSED_LIST);
@@ -429,6 +439,8 @@ async function closeExpiredSequences(supabase: SupabaseClient): Promise<number> 
     if (!tags.includes("QUALIFIED NO")) tags.push("QUALIFIED NO");
     if (!tags.includes("NQ: Unresponsive")) tags.push("NQ: Unresponsive");
     await supabase.from("leads").update({ callrail_tags: tags, qualified: false, desired_case: false, desired_source: "staff" }).eq("id", row.id);
+    const phone = String(row.phone_e164 || toE164(row.phone) || "");
+    if (phone) await stopSmsFollowUp(phone, "funnel").catch(() => ({ ok: false }));
   }
   return closing.length;
 }

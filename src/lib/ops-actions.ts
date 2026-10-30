@@ -27,6 +27,7 @@ import { createSupabaseServiceClient } from "./supabase/service";
 import { loadStoredPropertyDamageGuides } from "./property-damage-guides";
 import { sendQuoText } from "./quo";
 import { listQuoLines } from "./quo-settings";
+import { enrollSmsFollowUp, stopSmsFollowUp } from "./sms-followup";
 import {
   DEFAULT_REFERRAL_SMS,
   isGuideReferral,
@@ -207,42 +208,12 @@ export async function stopTextSequence(
   }
 }
 
-async function askSmsFollowUp(body: Record<string, unknown>): Promise<{
-  ok: boolean;
-  reason?: string;
-  next_run_at?: string | null;
-  sequence?: { slug?: string };
-}> {
-  const base = process.env.SMS_FOLLOWUP_URL?.replace(/\/$/, "");
-  const token = process.env.SMS_FOLLOWUP_TOKEN || process.env.INTAKE_ENROLL_TOKEN;
-  if (!base || !token) return { ok: false, reason: "not_configured" };
-  const response = await fetch(`${base}/api/intake/enroll`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = (await response.json().catch(() => null)) as {
-    ok?: boolean;
-    reason?: string;
-    next_run_at?: string | null;
-    sequence?: { slug?: string };
-  } | null;
-  if (!data) return { ok: false, reason: "unreachable" };
-  return { ok: Boolean(data.ok), reason: data.reason, next_run_at: data.next_run_at, sequence: data.sequence };
+async function askSmsFollowUp(body: Record<string, unknown>) {
+  return enrollSmsFollowUp(body);
 }
 
-async function askSmsFollowUpStop(phone: string, actor: string): Promise<{ ok: boolean; reason?: string; stopped?: number }> {
-  const base = process.env.SMS_FOLLOWUP_URL?.replace(/\/$/, "");
-  const token = process.env.SMS_FOLLOWUP_TOKEN || process.env.INTAKE_ENROLL_TOKEN;
-  if (!base || !token) return { ok: false, reason: "not_configured" };
-  const response = await fetch(`${base}/api/intake/stop`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, actor }),
-  });
-  const data = (await response.json().catch(() => null)) as { ok?: boolean; reason?: string; stopped?: number } | null;
-  if (!data) return { ok: false, reason: "unreachable" };
-  return { ok: Boolean(data.ok), reason: data.reason, stopped: data.stopped };
+async function askSmsFollowUpStop(phone: string, actor: string) {
+  return stopSmsFollowUp(phone, actor);
 }
 
 function textSequenceError(reason: string | undefined): string {
@@ -1056,7 +1027,7 @@ export async function classifyNonLead(formData: FormData) {
   }
   const { data, error } = await supabase
     .from("leads")
-    .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags, identity_status, caller_class, case_type")
+    .select("id, signed_case, case_id, lead_status, text_sequence_status, callrail_call_id, callrail_tags, identity_status, caller_class, case_type, phone, phone_e164")
     .eq("id", leadId)
     .maybeSingle();
   if (error || !data) throw new Error(error?.message ?? "Lead not found");
@@ -1065,6 +1036,7 @@ export async function classifyNonLead(formData: FormData) {
   }
   assertCloseReady(data, "nonlead");
   const stopped = data.text_sequence_status === "active" ? "stopped" : data.text_sequence_status;
+  const phone = data.phone_e164 || toE164(data.phone);
   if (dataError) {
     const badCallTags = new Set<string>([
       ...NOT_A_LEAD_TAGS,
@@ -1086,10 +1058,12 @@ export async function classifyNonLead(formData: FormData) {
         caller_class: DATA_ERROR_CLASS,
         callrail_tags: tags,
         text_sequence_status: stopped,
+        ...(stopped === "stopped" ? { text_next_at: null } : {}),
       })
       .eq("id", leadId);
     if (updateError) throw new Error(updateError.message);
     await stopFollowUp(supabase, leadId, "Data error");
+    if (phone) await askSmsFollowUpStop(phone, email).catch(() => ({ ok: false }));
     await supabase.from("lead_events").insert({
       lead_id: leadId,
       event_type: "data_error",
@@ -1130,10 +1104,12 @@ export async function classifyNonLead(formData: FormData) {
       desired_source: "staff",
       callrail_tags: tags,
       text_sequence_status: stopped,
+      ...(stopped === "stopped" ? { text_next_at: null } : {}),
     })
     .eq("id", leadId);
   if (updateError) throw new Error(updateError.message);
   await stopFollowUp(supabase, leadId, "Not a lead");
+  if (phone) await askSmsFollowUpStop(phone, email).catch(() => ({ ok: false }));
   await supabase.from("lead_events").insert({
     lead_id: leadId,
     event_type: "not_a_lead",
@@ -1890,11 +1866,12 @@ async function closeLead(
 ) {
   const { data: lead, error: loadError } = await supabase
     .from("leads")
-    .select(CLOSE_READY_COLUMNS)
+    .select(`${CLOSE_READY_COLUMNS}, text_sequence_status, phone_e164`)
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
   assertCloseReady(lead, change.path);
+  const textsWereActive = (lead.text_sequence_status || "").toLowerCase() === "active";
   const { error } = await supabase
     .from("leads")
     .update({
@@ -1903,6 +1880,7 @@ async function closeLead(
       close_suggestion: null,
       follow_up: false,
       sequence: "stop",
+      ...(textsWereActive ? { text_sequence_status: "stopped", text_next_at: null } : {}),
     })
     .eq("id", leadId);
   if (error) throw new Error(error.message);
@@ -1913,6 +1891,12 @@ async function closeLead(
     actor: email,
     payload: { close_reason: change.close_reason },
   });
+  // Local status alone does not stop SMS Follow-Up — tell that service too.
+  const phone = lead.phone_e164 || toE164(lead.phone);
+  if (phone) {
+    await askSmsFollowUpStop(phone, email).catch(() => ({ ok: false }));
+  }
+  await stopFollowUp(supabase, leadId, change.close_reason);
 }
 
 /** Mark a pursued lead lost (signed elsewhere / no longer interested / unresponsive), or reopen that close. */

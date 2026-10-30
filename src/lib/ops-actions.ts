@@ -109,7 +109,7 @@ export async function startTextSequence(
     if (!canonicalTextSequence(sequence)) return { error: "Choose a text sequence." };
     const { data: lead, error } = await supabase
       .from("leads")
-      .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email")
+      .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, text_sequence_slug, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email")
       .eq("id", leadId)
       .maybeSingle();
     if (error || !lead) return { error: error?.message ?? "Lead not found" };
@@ -136,7 +136,27 @@ export async function startTextSequence(
       slack_thread_ts: lead.slack_thread_ts || lead.slack_message_ts,
       lead_detail: { email: lead.email, started_by: email },
     });
-    if (!result.ok) return { error: textSequenceError(result.reason) };
+    if (!result.ok) {
+      // Follow-Up already has a live series, but Docket's lead row can lag
+      // (short calls used to skip the status mirror). Resync so Stop SMS shows.
+      if (result.reason === "already_active") {
+        const slug = canonicalTextSequence(result.sequence?.slug)
+          || canonicalTextSequence(lead.text_sequence_slug)
+          || sequence;
+        await supabase
+          .from("leads")
+          .update({
+            text_sequence_slug: slug,
+            text_sequence_status: "active",
+            text_next_at: result.next_run_at ?? null,
+          })
+          .eq("id", leadId);
+        revalidatePath("/");
+        revalidatePath("/priority");
+        revalidatePath(`/leads/${leadId}`);
+      }
+      return { error: textSequenceError(result.reason) };
+    }
     const slug = canonicalTextSequence(result.sequence?.slug) || sequence;
     if (slug !== sequence) {
       const started = textSequenceLabel(result.sequence?.slug) ?? "a different sequence";

@@ -27,6 +27,7 @@ export async function enrollSmsFollowUp(body: Record<string, unknown>): Promise<
   reason?: string;
   next_run_at?: string | null;
   sequence?: { slug?: string };
+  status?: string | null;
 }> {
   const { base, token } = config();
   if (!base || !token) return { ok: false, reason: "not_configured" };
@@ -40,7 +41,14 @@ export async function enrollSmsFollowUp(body: Record<string, unknown>): Promise<
     reason?: string;
     next_run_at?: string | null;
     sequence?: { slug?: string };
+    status?: string | null;
   } | null;
   if (!data) return { ok: false, reason: "unreachable" };
-  return { ok: Boolean(data.ok), reason: data.reason, next_run_at: data.next_run_at, sequence: data.sequence };
+  return {
+    ok: Boolean(data.ok),
+    reason: data.reason,
+    next_run_at: data.next_run_at,
+    sequence: data.sequence,
+    status: data.status ?? null,
+  };
 }

@@ -1049,9 +1049,9 @@ function stepsForLead(
   return steps.filter((step) => step.sequence === sequence);
 }
 
-function slackTag(assigned: string | null | undefined, owner: string | null | undefined, consultationDate: string | null | undefined): string | null {
+function slackTag(assigned: string | null | undefined, owner: string | null | undefined, _consultationDate?: string | null): string | null {
   if (!isPlaceholderOwner(assigned)) return assigned?.trim() || null;
-  if (consultationDate && !isPlaceholderOwner(owner)) return owner?.trim() || null;
+  if (!isPlaceholderOwner(owner) && !/^outbound$/i.test(owner?.trim() ?? "")) return owner?.trim() || null;
   return null;
 }
 

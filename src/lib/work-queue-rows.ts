@@ -124,9 +124,10 @@ function countsAsContact(type: string): boolean {
   return type === "call" || type === "sona_call" || type === "text" || type === "voicemail";
 }
 
-function slackTag(assigned: string | null | undefined, owner: string | null | undefined, consultationDate: string | null | undefined): string | null {
+function slackTag(assigned: string | null | undefined, owner: string | null | undefined, _consultationDate?: string | null): string | null {
   if (!isPlaceholderOwner(assigned)) return assigned?.trim() || null;
-  if (consultationDate && !isPlaceholderOwner(owner)) return owner?.trim() || null;
+  // Fall back to the lead's sticky call tag even when there is no consultation yet.
+  if (!isPlaceholderOwner(owner) && !/^outbound$/i.test(owner?.trim() ?? "")) return owner?.trim() || null;
   return null;
 }
 

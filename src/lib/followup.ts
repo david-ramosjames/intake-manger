@@ -89,10 +89,11 @@ function proposedCaller(
   _sequence: CallSequenceId,
   _position: number,
   owner: string | null | undefined,
-  consultation: boolean,
+  _consultation: boolean,
 ): string | null {
   const name = owner?.trim() ?? "";
-  if (isPlaceholderOwner(name) || !consultation) return null;
+  // Sticky Slack tag / talked-with person — use for every later reminder on this lead.
+  if (isPlaceholderOwner(name) || /^outbound$/i.test(name)) return null;
   return name;
 }
 

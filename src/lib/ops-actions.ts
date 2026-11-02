@@ -309,6 +309,9 @@ export async function setNextAction(formData: FormData) {
     const person = assigned && assigned !== "Outbound" ? matchStaff(assigned, staff) : null;
     const detail = !tag || tag === "Outbound" ? "Tag Slack Outbound." : `Tag ${tag}.`;
     const mention = person?.slackUserId || null;
+    // Stick the chosen Slack tag on the lead so later reminders default to the same person.
+    const stickyOwner =
+      assigned !== "Outbound" && !isPlaceholderOwner(assigned) ? assigned : null;
     let jobId = callJobId;
     if (!jobId) {
       const { data: existing } = await supabase
@@ -426,6 +429,21 @@ export async function setNextAction(formData: FormData) {
         .update({ follow_up: true, sequence: lead.sequence === "stop" ? null : lead.sequence })
         .eq("id", leadId);
     }
+    if (stickyOwner) {
+      const { error: ownerError } = await supabase
+        .from("leads")
+        .update({ owner_name: stickyOwner })
+        .eq("id", leadId);
+      if (ownerError) throw new Error(ownerError.message);
+    }
+    // Keep every pending call reminder on this lead tagged the same way.
+    const { error: tagError } = await supabase
+      .from("lead_jobs")
+      .update({ assigned_name: assigned, mention, detail })
+      .eq("lead_id", leadId)
+      .eq("queue", "call")
+      .eq("status", "pending");
+    if (tagError) throw new Error(tagError.message);
     await supabase.from("lead_events").insert({
       lead_id: leadId,
       event_type: "next_action",

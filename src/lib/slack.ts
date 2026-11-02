@@ -305,6 +305,17 @@ export function slackThreadParent(lead: {
   return lead.slack_thread_ts || fromLink || lead.slack_message_ts || parseSlackPermalink(lead.slack_permalink)?.ts || null;
 }
 
+/** Channel for the lead's Slack thread, including recovery from a stored permalink. */
+export function slackLeadChannel(
+  lead: {
+    slack_permalink?: string | null;
+    slack_channel_id?: string | null;
+  },
+  fallback?: string | null,
+): string {
+  return lead.slack_channel_id || parseSlackPermalink(lead.slack_permalink)?.channel || fallback || LEAD_CHANNEL_ID;
+}
+
 export function parseSlackPermalink(url: string | null | undefined): { channel: string; ts: string } | null {
   const match = (url || "").match(/\/archives\/([CGD][A-Z0-9]+)\/p(\d{16,})/i);
   if (!match) return null;

@@ -98,6 +98,7 @@ export function AddLeadForm({
   const [size, setSize] = useState("");
   const [decline, setDecline] = useState("");
   const [signed, setSigned] = useState<"" | "yes" | "no">("");
+  const [secondCase, setSecondCase] = useState(false);
   const nonPi = caseType === "Non-PI Legal Matter";
   const consultedValue = nonPi ? "no" : consulted;
   const qualifiedValue = nonPi ? "no" : qualified;
@@ -148,6 +149,22 @@ export function AddLeadForm({
         <Label label="Phone">
           <input name="phone" required inputMode="tel" className={fieldClass} />
         </Label>
+        <label className="col-span-2 flex items-start gap-2 text-sm font-normal normal-case tracking-normal text-slate-700">
+          <input
+            type="checkbox"
+            name="second_case"
+            value="1"
+            checked={secondCase}
+            onChange={(event) => setSecondCase(event.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            Second case for this phone
+            <span className="block text-xs text-slate-500">
+              Use when this person already has a signed or closed file and is opening a new matter. Also required if another lead is still open on this number.
+            </span>
+          </span>
+        </label>
         <Label label="Email">
           <input value={email} autoComplete="off" onChange={(event) => setEmail(event.target.value)} placeholder="Optional" className={fieldClass} />
           {emailIsUnavailable(email) ? null : (

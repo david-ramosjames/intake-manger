@@ -49,6 +49,49 @@ const EDITABLE = [
 
 type EditableKey = (typeof EDITABLE)[number];
 
+type SamePhoneLead = {
+  id: string;
+  lead_name: string | null;
+  lead_status: string | null;
+  signed_case: boolean | null;
+  case_id: string | null;
+  preferred_language: string | null;
+};
+
+function phoneLeadIsFinished(row: Pick<SamePhoneLead, "lead_status" | "signed_case" | "case_id">): boolean {
+  if (row.signed_case || row.case_id) return true;
+  return ["Signed", "Promoted", "Lost", "Referred"].includes(String(row.lead_status || ""));
+}
+
+/** Allow a second lead on the same phone when prior work is finished, or staff opts in. */
+async function resolveSamePhoneCreate(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  phoneE164: string,
+  forceSecondCase: boolean,
+): Promise<{ error?: string; prior: SamePhoneLead | null; secondCase: boolean }> {
+  const { data: existingRows, error } = await supabase
+    .from("leads")
+    .select("id, lead_name, lead_status, signed_case, case_id, preferred_language")
+    .eq("phone_e164", phoneE164)
+    .eq("test", false)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) return { error: error.message, prior: null, secondCase: false };
+  const rows = (existingRows ?? []) as SamePhoneLead[];
+  if (!rows.length) return { prior: null, secondCase: false };
+  const open = rows.find((row) => !phoneLeadIsFinished(row));
+  if (open && !forceSecondCase) {
+    return {
+      error:
+        `${open.lead_name || "A lead"} already has an open file on this phone. ` +
+        `Check “Second case for this phone” to add another case, or open that lead instead.`,
+      prior: open,
+      secondCase: false,
+    };
+  }
+  return { prior: rows[0] ?? null, secondCase: true };
+}
+
 function text(formData: FormData, key: string): string | null {
   const value = String(formData.get(key) ?? "").trim();
   return value.length ? value : null;
@@ -212,25 +255,27 @@ export async function createLead(formData: FormData) {
       }
     : {};
 
+  const forceSecondCase = text(formData, "second_case") === "1" || text(formData, "second_case") === "yes";
+  let samePhone: { prior: SamePhoneLead | null; secondCase: boolean } = { prior: null, secondCase: false };
   if (fields.phone_e164) {
-    const { data: existingRows, error: existingError } = await supabase
-      .from("leads")
-      .select("id, lead_name")
-      .eq("phone_e164", fields.phone_e164)
-      .eq("test", false)
-      .limit(1);
-    if (existingError) throw new Error(existingError.message);
-    const existing = existingRows?.[0];
-    if (existing) {
-      throw new Error(
-        `${existing.lead_name || "A lead"} already uses this phone. Open that lead instead of adding another.`,
-      );
-    }
+    const resolved = await resolveSamePhoneCreate(supabase, fields.phone_e164, forceSecondCase);
+    if (resolved.error) throw new Error(resolved.error);
+    samePhone = resolved;
   }
+  const inheritedLanguage =
+    samePhone.prior?.preferred_language === "en" || samePhone.prior?.preferred_language === "es"
+      ? samePhone.prior.preferred_language
+      : null;
 
   const { data, error } = await supabase
     .from("leads")
-    .insert({ ...fields, arrival: fields.arrival ?? "manual", needs_verification: !fields.lead_name || !fields.phone, ...signedExtras })
+    .insert({
+      ...fields,
+      arrival: fields.arrival ?? "manual",
+      needs_verification: !fields.lead_name || !fields.phone,
+      ...(inheritedLanguage ? { preferred_language: inheritedLanguage } : {}),
+      ...signedExtras,
+    })
     .select("id")
     .single();
   if (error || !data) {
@@ -241,7 +286,12 @@ export async function createLead(formData: FormData) {
     lead_id: data.id,
     event_type: "created",
     actor: email,
-    payload: { lead_name: fields.lead_name, lead_status: signedExtras.lead_status ?? fields.lead_status },
+    payload: {
+      lead_name: fields.lead_name,
+      lead_status: signedExtras.lead_status ?? fields.lead_status,
+      second_case: samePhone.secondCase || undefined,
+      prior_lead_id: samePhone.prior?.id || undefined,
+    },
   });
 
   if (fields.follow_up && !fields.signed_case) {
@@ -317,17 +367,13 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
     requireQualified: false,
   });
 
-  const { data: existingRows, error: existingError } = await supabase
-    .from("leads")
-    .select("id, lead_name")
-    .eq("phone_e164", phoneE164)
-    .eq("test", false)
-    .limit(1);
-  if (existingError) return { error: existingError.message };
-  const existing = existingRows?.[0];
-  if (existing) {
-    return { error: `${existing.lead_name || "A lead"} already uses this phone. Open that lead instead of adding another.` };
-  }
+  const forceSecondCase = text(formData, "second_case") === "1" || text(formData, "second_case") === "yes";
+  const samePhone = await resolveSamePhoneCreate(supabase, phoneE164, forceSecondCase);
+  if (samePhone.error) return { error: samePhone.error };
+  const inheritedLanguage =
+    samePhone.prior?.preferred_language === "en" || samePhone.prior?.preferred_language === "es"
+      ? samePhone.prior.preferred_language
+      : null;
 
   const signed = signedDecision === "yes";
   const { data, error } = await supabase
@@ -348,6 +394,7 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
       follow_up: !signed,
       needs_verification: false,
       identity_status: "confirmed",
+      preferred_language: inheritedLanguage,
       consultation: consulted === "yes" ? "staff" : consulted === "no" ? "no" : null,
       consultation_date: consulted === "yes" ? consultationDate : null,
       qualified: tagged.qualified,
@@ -368,7 +415,12 @@ export async function createQuickLead(formData: FormData): Promise<{ error: stri
     lead_id: data.id,
     event_type: "created",
     actor: email,
-    payload: { lead_name: leadName, lead_status: "New" },
+    payload: {
+      lead_name: leadName,
+      lead_status: "New",
+      second_case: samePhone.secondCase || undefined,
+      prior_lead_id: samePhone.prior?.id || undefined,
+    },
   });
   await enrollFollowUp(supabase, {
     id: data.id,

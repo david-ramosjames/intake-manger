@@ -155,6 +155,54 @@ export async function enrollFollowUp(
           : null,
     }];
   });
+  // Keep the soonest pending reminder when switching sequences so a staff-set
+  // Slack tag/time is not wiped by enrollMissingFollowUps.
+  const { data: keep } = await supabase
+    .from("lead_jobs")
+    .select("id, position")
+    .eq("lead_id", lead.id)
+    .eq("queue", "call")
+    .eq("status", "pending")
+    .neq("sequence", sequence)
+    .order("due_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (keep?.id) {
+    let keepPosition = typeof keep.position === "number" && keep.position > 0 ? keep.position : 1;
+    const { data: clash } = await supabase
+      .from("lead_jobs")
+      .select("id")
+      .eq("lead_id", lead.id)
+      .eq("queue", "call")
+      .eq("sequence", sequence)
+      .eq("position", keepPosition)
+      .eq("status", "pending")
+      .neq("id", keep.id)
+      .maybeSingle();
+    if (clash?.id) {
+      const { data: taken } = await supabase
+        .from("lead_jobs")
+        .select("position")
+        .eq("lead_id", lead.id)
+        .eq("queue", "call")
+        .eq("sequence", sequence);
+      const used = new Set((taken ?? []).map((row) => Number(row.position)).filter((n) => Number.isFinite(n)));
+      keepPosition = 1;
+      while (used.has(keepPosition)) keepPosition += 1;
+    }
+    await supabase
+      .from("lead_jobs")
+      .delete()
+      .eq("lead_id", lead.id)
+      .eq("queue", "call")
+      .eq("sequence", sequence)
+      .eq("position", keepPosition)
+      .eq("status", "skipped");
+    await supabase
+      .from("lead_jobs")
+      .update({ sequence, position: keepPosition })
+      .eq("id", keep.id);
+  }
   await supabase
     .from("lead_jobs")
     .update({ status: "skipped", detail: "Moved to another sequence." })
@@ -172,6 +220,7 @@ export async function enrollFollowUp(
     .eq("status", "skipped")
     .or("outcome_note.is.null,outcome_note.neq.auto_closed")
     .in("position", rows.map((row) => row.position));
+  // Prefer existing pending rows (including a just-rehomed staff reminder) over cadence defaults.
   const { error: insertError } = await supabase.from("lead_jobs").upsert(rows, {
     onConflict: "lead_id,queue,sequence,position",
     ignoreDuplicates: true,

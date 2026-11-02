@@ -21,7 +21,7 @@ import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, formatCallDay, formatCallWhen, formatQueueStamp } from "@/lib/time";
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_category, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_category, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, preferred_language, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -49,6 +49,7 @@ type ListLead = Pick<
   | "caller_class"
   | "practice_area"
   | "referral_opportunity"
+  | "preferred_language"
   | "priority"
   | "priority_reason"
   | "priority_suggestion"
@@ -258,6 +259,7 @@ function toQueueRow(
     referralSent: Boolean(input.sentFirm) || lead.lead_status === "Referred" || lead.close_reason === "referred",
     referralFirm: input.sentFirm,
     callerClass: lead.caller_class,
+    preferredLanguage: lead.preferred_language === "es" || lead.preferred_language === "en" ? lead.preferred_language : null,
     confirmSigned: signatureNeedsConfirm(lead),
     lastLabel: lastContacted(outreach),
     lastDays: outreach,
@@ -472,10 +474,10 @@ export async function loadWorkQueueRows(
       continue;
     }
     if (job.queue !== "call") continue;
-    if (new Date(job.due_at).getTime() <= Date.now()) continue;
     const position = typeof job.position === "number" ? job.position : Number.MAX_SAFE_INTEGER;
     const current = nextCall.get(job.lead_id);
-    if (!current || position < current.position) {
+    // Soonest due reminder wins so a staff-edited time/tag sticks in the drawer.
+    if (!current || job.due_at < current.dueAt || (job.due_at === current.dueAt && position < current.position)) {
       nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name, position });
     }
   }

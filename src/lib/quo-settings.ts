@@ -6,18 +6,26 @@ export type QuoLine = {
   label: string;
 };
 
-/** Firm lines, used when Quo has not returned a list yet. */
-const FIRM_LINES: QuoLine[] = [
-  { number: "+15125373369", label: "RJL Main Line" },
-  { number: "+19563137771", label: "RGV Number" },
-  { number: "+15127643037", label: "Leads" },
+/** Firm lines staff can send referral texts from (side panel + settings). */
+export const REFERRAL_FROM_LINES: QuoLine[] = [
   { number: "+15126010647", label: "Intake" },
+  { number: "+15127643037", label: "Leads" },
+  { number: "+19563137771", label: "RGV Number" },
+  { number: "+15125373369", label: "RJL Main Line" },
   { number: "+15125005266", label: "RJL Outbound" },
   { number: "+15126300907", label: "RJL Transfers" },
 ];
 
+/** Firm lines, used when Quo has not returned a list yet. */
+const FIRM_LINES: QuoLine[] = REFERRAL_FROM_LINES;
+
 /** Referral texts start on the Leads line unless staff pick another number. */
 export const DEFAULT_REFERRAL_FROM = "+15127643037";
+
+export function isReferralFromNumber(value: string | null | undefined): boolean {
+  const number = toE164(value);
+  return Boolean(number && REFERRAL_FROM_LINES.some((line) => line.number === number));
+}
 
 export type QuoSettings = {
   apiKey: string | null;

@@ -263,10 +263,18 @@ type CohortLead = {
   arrival: string | null;
   lead_source: string | null;
   summary: string | null;
+  preferred_language: string | null;
 };
 
 const COHORT_COLUMNS =
-  "id, lead_date, created_at, phone, phone_e164, case_type, grade, qualified, desired_case, desired_source, signed_case, date_signed, signed_at, lead_status, close_reason, caller_class, consultation_date, callrail_tags, agreement_status, agreement_sent_at, arrival, lead_source, summary";
+  "id, lead_date, created_at, phone, phone_e164, case_type, grade, qualified, desired_case, desired_source, signed_case, date_signed, signed_at, lead_status, close_reason, caller_class, consultation_date, callrail_tags, agreement_status, agreement_sent_at, arrival, lead_source, summary, preferred_language";
+
+export type LanguageFilter = "all" | "en" | "es";
+
+export function resolveLanguageFilter(params: { language?: string } | undefined): LanguageFilter {
+  const value = params?.language;
+  return value === "en" || value === "es" ? value : "all";
+}
 
 export type RateMetric = {
   label: string;
@@ -286,6 +294,8 @@ export type CountMetric = {
 export type DashboardReport = {
   rates: RateMetric[];
   counts: CountMetric[];
+  language: LanguageFilter;
+  languageCounts: { all: number; en: number; es: number; unset: number };
 };
 
 function arrivalDay(lead: { lead_date: string | null; created_at: string | null }): string {
@@ -455,7 +465,11 @@ async function neverConnected(supabase: SupabaseClient, leads: CohortLead[]): Pr
   return { never: ids.filter((id) => !connected.has(id)).length, ids };
 }
 
-export async function loadDashboardReport(supabase: SupabaseClient, period: ResolvedPeriod): Promise<DashboardReport> {
+export async function loadDashboardReport(
+  supabase: SupabaseClient,
+  period: ResolvedPeriod,
+  language: LanguageFilter = "all",
+): Promise<DashboardReport> {
   const inboxPromise = loadInboxAnswerRate(supabase, period.fromIso, period.toIso);
   const speedPromise = loadSpeedDetail(supabase, period);
   const consultsPromise = countConsults(supabase, period);
@@ -469,11 +483,20 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
     .or(`and(created_at.gte."${period.fromIso}",created_at.lt."${period.toIso}"),and(lead_date.gte.${period.start},lead_date.lte.${period.end})`)
     .limit(2000);
   if (error) throw new Error(error.message);
-  const cohort = ((data ?? []) as CohortLead[]).filter((lead) => {
+  const arrived = ((data ?? []) as CohortLead[]).filter((lead) => {
     if (!isWorkLead(lead) || isPracticeTestPhone(lead.phone_e164 || lead.phone)) return false;
     const day = arrivalDay(lead);
     return day >= period.start && day <= period.end;
   });
+  const languageCounts = {
+    all: arrived.length,
+    en: arrived.filter((lead) => lead.preferred_language === "en").length,
+    es: arrived.filter((lead) => lead.preferred_language === "es").length,
+    unset: arrived.filter((lead) => lead.preferred_language !== "en" && lead.preferred_language !== "es").length,
+  };
+  const cohort = language === "all"
+    ? arrived
+    : arrived.filter((lead) => lead.preferred_language === language);
   const desiredLeads = cohort.filter((lead) => milestoneDesired(lead) === true || milestoneSigned(lead));
   const qualified = cohort.filter((lead) => milestoneQualified(lead) === true).length;
   const signedCohort = cohort.filter((lead) => milestoneSigned(lead)).length;
@@ -651,6 +674,8 @@ export async function loadDashboardReport(supabase: SupabaseClient, period: Reso
         definition: "Representation contracts with a signed date in this period.",
       },
     ],
+    language,
+    languageCounts,
   };
 }
 

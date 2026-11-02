@@ -99,7 +99,12 @@ export function referralDetails(destination: Pick<ReferralDestination, "address"
 }
 
 function referralGreeting(language: "en" | "es", leadName: string | null): { greeting: string; name: string } {
-  const rawName = leadName?.trim().split(/\s+/)[0] || "";
+  const full = (leadName ?? "").trim();
+  // Title placeholders like "Not captured" must not become "Hi Not".
+  if (!full || nameIsUnavailable(full)) {
+    return { greeting: language === "es" ? "Hola" : "Hi", name: "" };
+  }
+  const rawName = full.split(/\s+/)[0] || "";
   const name = nameIsUnavailable(rawName) ? "" : rawName;
   const greeting = language === "es" ? (name ? `Hola ${name}` : "Hola") : name ? `Hi ${name}` : "Hi";
   return { greeting, name };
@@ -129,7 +134,7 @@ export function renderReferralSms(input: {
   const area = input.area === "miscellaneous" ? "" : practiceAreaLabel(input.area);
   const body = input.template
     .replaceAll("{{greeting}}", greeting)
-    .replaceAll("{{name}}", name || (input.language === "es" ? "hola" : "there"))
+    .replaceAll("{{name}}", name)
     .replaceAll("{{area}}", area)
     .replaceAll("{{attorney}}", input.destination.name)
     .replaceAll("{{phone}}", input.destination.phone || "")
@@ -147,7 +152,7 @@ export function renderPropertyDamageSms(input: {
   const guideUrl = input.guideUrl || propertyDamageGuideUrl(input.language, input.guides);
   const body = DEFAULT_PROPERTY_DAMAGE_SMS[input.language]
     .replaceAll("{{greeting}}", greeting)
-    .replaceAll("{{name}}", name || (input.language === "es" ? "hola" : "there"))
+    .replaceAll("{{name}}", name)
     .replaceAll("{{guide_url}}", guideUrl);
   return finishReferralSms(input.language, body);
 }

@@ -9,6 +9,7 @@ import {
   renderReferralSms,
   type ReferralDestination,
 } from "@/lib/referrals";
+import { DEFAULT_REFERRAL_FROM, REFERRAL_FROM_LINES, quoLineLabel } from "@/lib/quo-settings";
 
 export function ReferralPanel({
   leadId,
@@ -32,6 +33,7 @@ export function ReferralPanel({
   const [area, setArea] = useState(practiceArea ?? "");
   const [destinationId, setDestinationId] = useState("");
   const [language, setLanguage] = useState<"en" | "es">("en");
+  const [fromNumber, setFromNumber] = useState(DEFAULT_REFERRAL_FROM);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const guide = isGuideReferral(area);
@@ -137,6 +139,21 @@ export function ReferralPanel({
           >
             <option value="en">English</option>
             <option value="es">Spanish</option>
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="font-medium text-slate-700">Send from</span>
+          <select
+            name="quo_from_number"
+            value={fromNumber}
+            onChange={(event) => setFromNumber(event.target.value)}
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+          >
+            {REFERRAL_FROM_LINES.map((line) => (
+              <option key={line.number} value={line.number}>
+                {quoLineLabel(line)}
+              </option>
+            ))}
           </select>
         </label>
         {!guide && destination?.notes ? <p className="text-sm text-slate-600">{destination.notes}</p> : null}

@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { PERIODS, type CountMetric, type NavTiles, type PeriodId, type RateMetric, type ResolvedPeriod } from "@/lib/dashboard";
+import {
+  PERIODS,
+  type CountMetric,
+  type LanguageFilter,
+  type NavTiles,
+  type PeriodId,
+  type RateMetric,
+  type ResolvedPeriod,
+} from "@/lib/dashboard";
 
 const TONE = {
   met: "border-emerald-600",
@@ -20,11 +28,15 @@ export function DashboardReport({
   tiles,
   rates,
   counts,
+  language,
+  languageCounts,
 }: {
   period: ResolvedPeriod;
   tiles: NavTiles;
   rates: RateMetric[];
   counts: CountMetric[];
+  language: LanguageFilter;
+  languageCounts: { all: number; en: number; es: number; unset: number };
 }) {
   const tilesView = [
     { href: "/work", label: "Open leads", value: tiles.open, note: "Still in the work queue" },
@@ -35,6 +47,11 @@ export function DashboardReport({
 
   const answerRates = rates.filter((rate) => ANSWER_LABELS.has(rate.label));
   const otherRates = rates.filter((rate) => !ANSWER_LABELS.has(rate.label));
+  const languageOptions: { id: LanguageFilter; label: string; count: number }[] = [
+    { id: "all", label: "All languages", count: languageCounts.all },
+    { id: "en", label: "English", count: languageCounts.en },
+    { id: "es", label: "Spanish", count: languageCounts.es },
+  ];
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-3 xl:px-6">
@@ -49,7 +66,7 @@ export function DashboardReport({
         {PERIODS.map((item) => (
           <Link
             key={item.id}
-            href={periodHref(item.id)}
+            href={periodHref(item.id, language)}
             title={item.hint}
             className={`rounded-full px-3 py-1 text-sm ${
               period.id === item.id ? "bg-navy text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
@@ -60,6 +77,7 @@ export function DashboardReport({
         ))}
         <form action="/" className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="period" value="custom" />
+          {language !== "all" ? <input type="hidden" name="language" value={language} /> : null}
           <input
             type="date"
             name="from"
@@ -84,6 +102,24 @@ export function DashboardReport({
             Apply
           </button>
         </form>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {languageOptions.map((item) => (
+          <Link
+            key={item.id}
+            href={languageHref(period, item.id)}
+            className={`rounded-full px-3 py-1 text-sm ${
+              language === item.id ? "bg-navy text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            {item.label}
+            <span className={`ml-1 tabular-nums ${language === item.id ? "text-white/80" : "text-slate-500"}`}>{item.count}</span>
+          </Link>
+        ))}
+        {languageCounts.unset > 0 ? (
+          <p className="text-xs text-slate-500">{languageCounts.unset} not tagged yet</p>
+        ) : null}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-3 lg:grid-cols-6">
@@ -196,9 +232,24 @@ function speedHref(period: ResolvedPeriod): string {
   return `/speed?${params}`;
 }
 
-function periodHref(id: PeriodId): string {
-  if (id === "l7" || id === "custom") return "/";
-  return `/?period=${id}`;
+function periodHref(id: PeriodId, language: LanguageFilter = "all"): string {
+  const params = new URLSearchParams();
+  if (id !== "l7" && id !== "custom") params.set("period", id);
+  if (language !== "all") params.set("language", language);
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
+}
+
+function languageHref(period: ResolvedPeriod, language: LanguageFilter): string {
+  const params = new URLSearchParams();
+  if (period.id !== "l7") params.set("period", period.id);
+  if (period.id === "custom") {
+    params.set("from", period.start);
+    params.set("to", period.end);
+  }
+  if (language !== "all") params.set("language", language);
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
 }
 
 function Tip({ text }: { text: string }) {

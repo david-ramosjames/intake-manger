@@ -1,9 +1,15 @@
-import { loadQuoSettings } from "./quo-settings";
+import { DEFAULT_REFERRAL_FROM, isReferralFromNumber, loadQuoSettings } from "./quo-settings";
+import { toE164 } from "./phone";
 
-export async function sendQuoText(to: string, content: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function sendQuoText(
+  to: string,
+  content: string,
+  options?: { from?: string | null },
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const settings = await loadQuoSettings();
   const key = settings.apiKey;
-  const from = settings.fromNumber;
+  const chosen = toE164(options?.from) || settings.fromNumber || DEFAULT_REFERRAL_FROM;
+  const from = isReferralFromNumber(chosen) ? chosen : DEFAULT_REFERRAL_FROM;
   if (!key) return { ok: false, error: "Quo sending is not configured." };
   if (!from) return { ok: false, error: "Choose the Quo number on How it fits." };
   const base = (process.env.QUO_API_BASE || "https://api.quo.com/v1").replace(/\/$/, "");

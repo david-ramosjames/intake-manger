@@ -11,10 +11,10 @@ import { loadStaff, matchStaff } from "./identity";
 import { firmUserId } from "./staff";
 import { canonicalTextSequence, textSequenceLabel } from "./queue";
 import { contractSent } from "./desired";
-import { enrollFollowUp, enrollMissingFollowUps, stopFollowUp } from "./followup";
+import { enrollFollowUp, enrollMissingFollowUps, sequenceForLead, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
-import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standardLeadEmail } from "./leads";
+import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standardLeadEmail, type LeadKind } from "./leads";
 import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
@@ -26,7 +26,7 @@ import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
 import { loadStoredPropertyDamageGuides } from "./property-damage-guides";
 import { sendQuoText } from "./quo";
-import { listQuoLines } from "./quo-settings";
+import { DEFAULT_REFERRAL_FROM, isReferralFromNumber, listQuoLines } from "./quo-settings";
 import { enrollSmsFollowUp, stopSmsFollowUp, updateSmsFollowUpContact } from "./sms-followup";
 import {
   DEFAULT_REFERRAL_SMS,
@@ -305,7 +305,10 @@ export async function setNextAction(formData: FormData) {
   if (callAt) {
     const due = chicagoLocalToIso(callAt);
     const assigned = tag || "Outbound";
+    const staff = await loadStaff(supabase);
+    const person = assigned && assigned !== "Outbound" ? matchStaff(assigned, staff) : null;
     const detail = !tag || tag === "Outbound" ? "Tag Slack Outbound." : `Tag ${tag}.`;
+    const mention = person?.slackUserId || null;
     let jobId = callJobId;
     if (!jobId) {
       const { data: existing } = await supabase
@@ -314,49 +317,110 @@ export async function setNextAction(formData: FormData) {
         .eq("lead_id", leadId)
         .eq("queue", "call")
         .eq("status", "pending")
-        .order("position", { ascending: true })
+        .order("due_at", { ascending: true })
         .limit(1)
         .maybeSingle();
       jobId = existing?.id ?? "";
     }
+    const { data: lead } = await supabase
+      .from("leads")
+      .select(
+        "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, consultation_date, lead_date, created_at, phone, phone_e164, caller_class, sequence, priority",
+      )
+      .eq("id", leadId)
+      .maybeSingle();
+    if (!lead) throw new Error("Lead not found");
+    if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(String(lead.lead_status))) {
+      throw new Error("Reopen this lead before scheduling Slack call reminders.");
+    }
+    const jobSequence =
+      sequenceForLead(
+        {
+          id: lead.id,
+          kind: lead.kind as LeadKind,
+          follow_up: true,
+          lead_name: lead.lead_name,
+          case_type: lead.case_type,
+          signed_case: Boolean(lead.signed_case),
+          case_id: lead.case_id,
+          lead_status: String(lead.lead_status),
+          arrival: lead.arrival,
+          owner_name: lead.owner_name,
+          agreement_status: lead.agreement_status,
+          agreement_sent_at: lead.agreement_sent_at,
+          consultation_date: lead.consultation_date,
+          lead_date: lead.lead_date,
+          created_at: lead.created_at,
+          phone: lead.phone,
+          phone_e164: lead.phone_e164,
+          caller_class: lead.caller_class,
+          priority: lead.priority,
+        },
+        "auto",
+      ) ?? (lead.consultation_date ? "more_info" : "first_talk");
+    const body =
+      jobSequence === "want_to_sign"
+        ? "Follow up on the signature."
+        : lead.consultation_date
+          ? "Call to reconnect after the consultation."
+          : "Call the lead.";
     if (jobId) {
       const { data: job, error } = await supabase
         .from("lead_jobs")
-        .select("id, lead_id, queue, status")
+        .select("id, lead_id, queue, status, sequence, position")
         .eq("id", jobId)
         .maybeSingle();
       if (error || !job || job.lead_id !== leadId || job.queue !== "call" || job.status !== "pending") {
         throw new Error(error?.message ?? "That call is no longer on the schedule.");
       }
-      const { error: updateError } = await supabase
-        .from("lead_jobs")
-        .update({ due_at: due, assigned_name: assigned, mention: null, detail })
-        .eq("id", jobId);
+      const patch: {
+        due_at: string;
+        assigned_name: string;
+        mention: string | null;
+        detail: string;
+        sequence?: string;
+        body?: string;
+      } = { due_at: due, assigned_name: assigned, mention, detail };
+      if (job.sequence !== jobSequence) {
+        await supabase
+          .from("lead_jobs")
+          .delete()
+          .eq("lead_id", leadId)
+          .eq("queue", "call")
+          .eq("sequence", jobSequence)
+          .eq("position", job.position ?? 1)
+          .eq("status", "skipped");
+        patch.sequence = jobSequence;
+        patch.body = body;
+      }
+      const { error: updateError } = await supabase.from("lead_jobs").update(patch).eq("id", jobId);
       if (updateError) throw new Error(updateError.message);
     } else {
-      const { data: lead } = await supabase
-        .from("leads")
-        .select("sequence, consultation_date, lead_status, signed_case, case_id")
-        .eq("id", leadId)
-        .maybeSingle();
-      if (!lead) throw new Error("Lead not found");
-      if (lead.signed_case || lead.case_id || ["Lost", "Referred", "Promoted", "Signed"].includes(String(lead.lead_status))) {
-        throw new Error("Reopen this lead before scheduling Slack call reminders.");
-      }
-      // lead_jobs.sequence uses first_talk/more_info; leads.sequence only allows null/stop/legacy labels.
-      const jobSequence = lead.consultation_date ? "more_info" : "first_talk";
-      const { error: insertError } = await supabase.from("lead_jobs").insert({
-        lead_id: leadId,
-        queue: "call",
-        sequence: jobSequence,
-        position: 1,
-        due_at: due,
-        body: lead.consultation_date ? "Call to reconnect after the consultation." : "Call the lead.",
-        status: "pending",
-        assigned_name: assigned,
-        detail,
-      });
-      if (insertError) throw new Error(insertError.message);
+      await supabase
+        .from("lead_jobs")
+        .delete()
+        .eq("lead_id", leadId)
+        .eq("queue", "call")
+        .eq("sequence", jobSequence)
+        .eq("position", 1)
+        .eq("status", "skipped");
+      const { error: upsertError } = await supabase.from("lead_jobs").upsert(
+        {
+          lead_id: leadId,
+          queue: "call",
+          sequence: jobSequence,
+          position: 1,
+          due_at: due,
+          body,
+          status: "pending",
+          assigned_name: assigned,
+          mention,
+          detail,
+          outcome_note: null,
+        },
+        { onConflict: "lead_id,queue,sequence,position" },
+      );
+      if (upsertError) throw new Error(upsertError.message);
       await supabase
         .from("leads")
         .update({ follow_up: true, sequence: lead.sequence === "stop" ? null : lead.sequence })
@@ -366,7 +430,7 @@ export async function setNextAction(formData: FormData) {
       lead_id: leadId,
       event_type: "next_action",
       actor: email,
-      payload: { queue: "call", due_at: due, assigned_name: assigned },
+      payload: { queue: "call", due_at: due, assigned_name: assigned, sequence: jobSequence },
     });
   }
 
@@ -471,6 +535,10 @@ export async function saveLeadDetails(formData: FormData) {
     const chosenCategory = text(formData, "source_category");
     patch.source_category = isSourceCategory(chosenCategory) ? chosenCategory : null;
   }
+  if (formData.has("preferred_language")) {
+    const chosenLanguage = text(formData, "preferred_language");
+    patch.preferred_language = chosenLanguage === "en" || chosenLanguage === "es" ? chosenLanguage : null;
+  }
   if (!keepPhone) {
     patch.phone = phone;
     patch.phone_e164 = phoneE164;
@@ -499,11 +567,12 @@ export async function saveLeadDetails(formData: FormData) {
     patch.caller_class = null;
     patch.practice_area = "personal_injury";
     if (before.close_suggestion === "decline") patch.close_suggestion = null;
-  } else if (caseTypeIsLead(patch.case_type) && excludedCaller) {
-    // Open leads require null/non_pi caller_class. Saving a real case type alone used to leave insurance/etc stuck in Non-leads.
+  } else if (excludedCaller) {
+    // Any staff Details save that is not intentionally Non-PI clears sticky
+    // insurance/spam/etc parking so reopen sticks (Jose Espinoza-style bounce-backs).
     patch.caller_class = null;
   }
-  if (patch.close_suggestion !== "decline" && before.close_suggestion === "not_a_lead" && caseTypeIsLead(patch.case_type)) {
+  if (patch.close_suggestion !== "decline" && before.close_suggestion === "not_a_lead" && (caseTypeIsLead(patch.case_type) || excludedCaller)) {
     patch.close_suggestion = null;
   }
   const reopenNonLead =
@@ -517,7 +586,7 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const { error } = await supabase.from("leads").update(reopenNonLead ? { ...patch, follow_up: true, sequence: null } : patch).eq("id", leadId);
   if (error) throw new Error(error.message);
-  if (reopenNonLead || (caseTypeIsLead(patch.case_type) && excludedCaller)) {
+  if (reopenNonLead || excludedCaller) {
     await supabase.from("lead_events").insert({
       lead_id: leadId,
       event_type: "non_lead_restored",
@@ -1315,7 +1384,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
 
   const { data: lead, error: leadError } = await supabase
     .from("leads")
-    .select(`summary, slack_channel_id, slack_thread_ts, slack_message_ts, slack_permalink, ${CLOSE_READY_COLUMNS}`)
+    .select(`summary, slack_channel_id, slack_thread_ts, slack_message_ts, slack_permalink, text_sequence_status, ${CLOSE_READY_COLUMNS}`)
     .eq("id", leadId)
     .maybeSingle();
   if (leadError || !lead) return { error: leadError?.message ?? "Lead not found" };
@@ -1336,6 +1405,8 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
   if (gaps.length) return { error: referralBlockMessage(gaps), gaps };
   const to = lead.phone_e164 || toE164(lead.phone);
   if (!to) return { error: "This lead needs a phone number before the text can go out." };
+  const chosenFrom = toE164(text(formData, "quo_from_number"));
+  const fromNumber = chosenFrom && isReferralFromNumber(chosenFrom) ? chosenFrom : DEFAULT_REFERRAL_FROM;
 
   const [{ data: templates }, guides] = await Promise.all([
     supabase.from("referral_templates").select("language, body"),
@@ -1359,7 +1430,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
           })
         : "");
   if (!message) return { error: "Write the text before sending." };
-  const sent = await sendQuoText(to, message);
+  const sent = await sendQuoText(to, message, { from: fromNumber });
   if (!sent.ok) return { error: `${sent.error} The lead is still open.` };
 
   const note = text(formData, "note");
@@ -1382,6 +1453,11 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     .eq("id", leadId);
   if (updateError) return { error: `The text was sent. The lead did not close: ${updateError.message}` };
   await stopFollowUp(supabase, leadId, "Referred out.");
+  const textsWereActive = (lead.text_sequence_status || "").toLowerCase() === "active";
+  if (textsWereActive) {
+    await supabase.from("leads").update({ text_sequence_status: "stopped", text_next_at: null }).eq("id", leadId);
+  }
+  await askSmsFollowUpStop(to, email).catch(() => ({ ok: false }));
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
     destination_id: destination?.id ?? null,
@@ -1401,6 +1477,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
       phone: destination?.phone ?? attorneyPhone ?? null,
       language,
       message,
+      from_number: fromNumber,
       guide: guide || undefined,
     },
   });
@@ -1567,11 +1644,7 @@ export async function saveReferralFromNumber(formData: FormData) {
   const { email } = await requireStaff();
   const supabase = createSupabaseServiceClient();
   const chosen = toE164(String(formData.get("quo_from_number") ?? ""));
-  if (!chosen) throw new Error("Choose the number referral texts send from.");
-  const { data: current } = await supabase.from("intake_settings").select("quo_api_key").eq("id", "default").maybeSingle();
-  const key = (typeof current?.quo_api_key === "string" ? current.quo_api_key.trim() : "") || process.env.QUO_API_KEY?.trim() || null;
-  const { lines } = await listQuoLines(key);
-  if (!lines.some((line) => line.number === chosen)) throw new Error("That number is not one of the Quo lines.");
+  if (!chosen || !isReferralFromNumber(chosen)) throw new Error("Choose one of the firm Quo lines.");
   const { error } = await supabase
     .from("intake_settings")
     .update({
@@ -2021,6 +2094,8 @@ export async function reopenClosedLead(formData: FormData) {
       lead_status: "Working",
       close_reason: null,
       close_suggestion: null,
+      // Clear Non-leads parking so Quo auto-class does not keep bouncing a reopened file.
+      caller_class: null,
       follow_up: true,
       sequence: null,
       ...clearClosedMilestones(before.callrail_tags as string[] | null),
@@ -2032,11 +2107,11 @@ export async function reopenClosedLead(formData: FormData) {
     lead_id: leadId,
     event_type: "lost_lead_reopened",
     actor: email,
-    payload: { from: before.close_reason || before.lead_status, path: "reopen_closed_lead", cleared_milestones: true },
+    payload: { from: before.close_reason || before.lead_status, path: "reopen_closed_lead", cleared_milestones: true, cleared_caller_class: true },
   });
   await enrollFollowUp(
     supabase,
-    { ...before, lead_status: "Working", follow_up: true },
+    { ...before, lead_status: "Working", follow_up: true, caller_class: null },
     undefined,
     before.consultation_date ? "post_consult" : "auto",
   );

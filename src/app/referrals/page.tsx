@@ -2,7 +2,7 @@ import { PropertyDamageGuidesForm } from "@/components/PropertyDamageGuidesForm"
 import { saveDestination, saveReferralFromNumber, saveReferralTemplate } from "@/lib/ops-actions";
 import { loadStoredPropertyDamageGuides } from "@/lib/property-damage-guides";
 import { PRACTICE_AREAS, practiceAreaLabel, DEFAULT_REFERRAL_SMS } from "@/lib/referrals";
-import { DEFAULT_REFERRAL_FROM, listQuoLines, loadQuoSettings, quoLineLabel } from "@/lib/quo-settings";
+import { DEFAULT_REFERRAL_FROM, REFERRAL_FROM_LINES, loadQuoSettings, quoLineLabel } from "@/lib/quo-settings";
 import { requireStaff } from "@/lib/session";
 
 type Destination = {
@@ -35,11 +35,9 @@ export default async function ReferralsPage() {
   const stored = (templateRows ?? []) as { language: string; body: string }[];
   const english = stored.find((row) => row.language === "en")?.body || DEFAULT_REFERRAL_SMS.en;
   const spanish = stored.find((row) => row.language === "es")?.body || DEFAULT_REFERRAL_SMS.es;
-  const numbers = await listQuoLines(quo.apiKey);
-  const lines = quo.fromNumber && !numbers.lines.some((line) => line.number === quo.fromNumber)
-    ? [{ number: quo.fromNumber, label: "Saved number" }, ...numbers.lines]
-    : numbers.lines;
-  const fromNumber = quo.fromNumber && lines.some((line) => line.number === quo.fromNumber) ? quo.fromNumber : DEFAULT_REFERRAL_FROM;
+  const lines = REFERRAL_FROM_LINES;
+  const fromNumber =
+    quo.fromNumber && lines.some((line) => line.number === quo.fromNumber) ? quo.fromNumber : DEFAULT_REFERRAL_FROM;
   const sendingFrom = lines.find((line) => line.number === fromNumber);
 
   return (
@@ -69,8 +67,8 @@ export default async function ReferralsPage() {
           ))}
         </select>
         <p className="text-sm text-slate-500">
-          {sendingFrom ? `Texts currently send from ${quoLineLabel(sendingFrom)}.` : "Choose a Quo number."} The usual number is Leads.
-          {numbers.warning ? ` ${numbers.warning}` : ""}
+          {sendingFrom ? `Default on the Referrals settings page is ${quoLineLabel(sendingFrom)}.` : "Choose a Quo number."}{" "}
+          Staff can still pick a different line when sending from the lead drawer. The usual number is Leads.
         </p>
         <button type="submit" className="w-fit rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm">
           Save number

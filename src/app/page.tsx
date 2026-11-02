@@ -1,5 +1,11 @@
 import { DashboardReport } from "@/components/DashboardReport";
-import { dashboardPeriod, loadDashboardReport, loadNavTiles, resolvePeriod } from "@/lib/dashboard";
+import {
+  dashboardPeriod,
+  loadDashboardReport,
+  loadNavTiles,
+  resolveLanguageFilter,
+  resolvePeriod,
+} from "@/lib/dashboard";
 import { requireStaff } from "@/lib/session";
 
 export const metadata = { title: "Intake · Intake Manager" };
@@ -7,12 +13,22 @@ export const metadata = { title: "Intake · Intake Manager" };
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ period?: string; from?: string; to?: string }>;
+  searchParams: Promise<{ period?: string; from?: string; to?: string; language?: string }>;
 }) {
   const params = await searchParams;
   const period = dashboardPeriod(resolvePeriod(params));
+  const language = resolveLanguageFilter(params);
   const { supabase } = await requireStaff();
-  const [tiles, report] = await Promise.all([loadNavTiles(supabase), loadDashboardReport(supabase, period)]);
+  const [tiles, report] = await Promise.all([loadNavTiles(supabase), loadDashboardReport(supabase, period, language)]);
 
-  return <DashboardReport period={period} tiles={tiles} rates={report.rates} counts={report.counts} />;
+  return (
+    <DashboardReport
+      period={period}
+      tiles={tiles}
+      rates={report.rates}
+      counts={report.counts}
+      language={report.language}
+      languageCounts={report.languageCounts}
+    />
+  );
 }

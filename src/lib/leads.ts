@@ -384,6 +384,7 @@ export type Lead = {
   caller_class: string | null;
   practice_area: string | null;
   referral_opportunity: boolean;
+  preferred_language: "en" | "es" | null;
   agreement_status: string | null;
   agreement_sent_at: string | null;
   agreement_last_reminder_at: string | null;
@@ -669,7 +670,7 @@ function displayName(raw: string, phone: string | null): string {
   return name.replace(/\s*[-–—]\s*$/, "").trim();
 }
 
-const NAME_UNAVAILABLE = /^(n\/a|n\.a\.?|na|none|unknown|no name)$/i;
+const NAME_UNAVAILABLE = /^(n\/a|n\.a\.?|na|none|unknown|no name|not captured|not available)$/i;
 
 export function nameIsUnavailable(value: string | null | undefined): boolean {
   return NAME_UNAVAILABLE.test((value ?? "").trim());

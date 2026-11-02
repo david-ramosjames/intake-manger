@@ -30,6 +30,7 @@ import { buttonPrimary, buttonSecondary } from "@/lib/ui";
 import { inArrivedRange, useWorkFilters } from "@/components/WorkFilters";
 import { phoneMatches, phoneTail } from "@/lib/phone";
 import { DEFAULT_TEXT_SEQUENCE, matchesQueue, TEXT_SEQUENCES } from "@/lib/queue";
+import { DEFAULT_REFERRAL_FROM, REFERRAL_FROM_LINES, quoLineLabel } from "@/lib/quo-settings";
 
 type DrawerNotice = { tone: "saving" | "saved" | "error"; text: string };
 const DrawerNoticeContext = createContext<(notice: DrawerNotice | null) => void>(() => {});
@@ -97,6 +98,7 @@ export type QueueRow = {
   referralSent: boolean;
   referralFirm: string | null;
   callerClass: string | null;
+  preferredLanguage: "en" | "es" | null;
   confirmSigned: boolean;
   lastLabel: string;
   lastDays: number | null;
@@ -1125,6 +1127,7 @@ function LeadFacts({
   const [caseType, setCaseType] = useState(() => shownCaseType(row.caseType));
   const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
   const [contactName, setContactName] = useState(() => contactNameFromRow(row));
+  const [preferredLanguage, setPreferredLanguage] = useState<"en" | "es" | "">(row.preferredLanguage ?? "");
   const [decline, setDecline] = useState(selectedDecline(row.tags));
   const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(() => (row.signed || row.confirmSigned ? "yes" : ""));
   const [signedDate, setSignedDate] = useState(row.signedDate);
@@ -1148,6 +1151,7 @@ function LeadFacts({
     setDecline(nextType === "Non-PI Legal Matter" ? "DEC: Non-PI Legal Matter" : selectedDecline(row.tags));
     setEmail(standardLeadEmail(row.email) ?? "");
     setContactName(contactNameFromRow(row));
+    setPreferredLanguage(row.preferredLanguage ?? "");
     setNotLeadReason(notLeadReasonFor(row));
     setSignedChoice(row.signed || row.confirmSigned ? "yes" : "");
     setSignedDate(row.signedDate);
@@ -1393,6 +1397,21 @@ function LeadFacts({
                   N/A
                 </button>
               )}
+            </FieldLabel>
+            <FieldLabel label="Language" className="col-span-2">
+              <input type="hidden" name="preferred_language" value={preferredLanguage} />
+              <select
+                value={preferredLanguage}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setPreferredLanguage(next === "en" || next === "es" ? next : "");
+                }}
+                className={fieldClass()}
+              >
+                <option value="">Not set</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+              </select>
             </FieldLabel>
           </PanelSection>
           <input type="hidden" name="consulted" value={consultedValue} />
@@ -1813,6 +1832,7 @@ function QueueReferral({
   const [area, setArea] = useState(types.some((item) => item.id === row.practiceArea) ? (row.practiceArea ?? "") : "");
   const [firmId, setFirmId] = useState("");
   const [language, setLanguage] = useState<"en" | "es">("en");
+  const [fromNumber, setFromNumber] = useState(DEFAULT_REFERRAL_FROM);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"send" | "already" | "declined" | null>(null);
   const [recorded, setRecorded] = useState<"sent" | "declined" | null>(null);
@@ -1833,12 +1853,12 @@ function QueueReferral({
   const preview = !area
     ? ""
     : guide
-      ? renderPropertyDamageSms({ language, leadName: row.leadName || row.title, guides: propertyDamageGuides })
+      ? renderPropertyDamageSms({ language, leadName: row.leadName || null, guides: propertyDamageGuides })
       : firm || handwritten
         ? renderReferralSms({
             language,
             template: templates[language],
-            leadName: row.leadName || row.title,
+            leadName: row.leadName || null,
             area,
             destination: firm ?? {
               name: attorneyName.trim() || "{{attorney}}",
@@ -1870,6 +1890,7 @@ function QueueReferral({
     setArea("");
     setFirmId("");
     setLanguage("en");
+    setFromNumber(DEFAULT_REFERRAL_FROM);
     setError(null);
     setEditingText(false);
     setDraft("");
@@ -1904,6 +1925,7 @@ function QueueReferral({
     }
     if (kind === "send") {
       data.set("language", language);
+      data.set("quo_from_number", fromNumber || DEFAULT_REFERRAL_FROM);
       const message = (editingText ? draft : preview).trim();
       if (!message || message.includes("{{")) {
         setPending(null);
@@ -2106,20 +2128,36 @@ function QueueReferral({
             </label>
           )}
           {mode === "send" ? (
-            <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-              Language
-              <select
-                value={language}
-                onChange={(event) => {
-                  setLanguage(event.target.value === "es" ? "es" : "en");
-                  setTextTouched(false);
-                }}
-                className={fieldClass}
-              >
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-              </select>
-            </label>
+            <>
+              <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Language
+                <select
+                  value={language}
+                  onChange={(event) => {
+                    setLanguage(event.target.value === "es" ? "es" : "en");
+                    setTextTouched(false);
+                  }}
+                  className={fieldClass}
+                >
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
+                </select>
+              </label>
+              <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Send from
+                <select
+                  value={fromNumber}
+                  onChange={(event) => setFromNumber(event.target.value)}
+                  className={fieldClass}
+                >
+                  {REFERRAL_FROM_LINES.map((line) => (
+                    <option key={line.number} value={line.number}>
+                      {quoLineLabel(line)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
           ) : null}
           {mode === "send" && preview ? (
             <div>

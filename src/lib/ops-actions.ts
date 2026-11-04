@@ -538,7 +538,7 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const { data: before, error: loadError } = await supabase
     .from("leads")
-    .select("caller_class, close_suggestion, close_reason, lead_status, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case, phone, phone_e164, lead_name")
+    .select("caller_class, close_suggestion, close_reason, lead_status, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case, phone, phone_e164, lead_name, agreement_status")
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
@@ -692,14 +692,37 @@ export async function saveLeadDetails(formData: FormData) {
   if (!closed && admin && (signedDecision === "yes" || signedDecision === "no")) {
     const wantSigned = signedDecision === "yes";
     const nextDate = wantSigned ? signedDate : null;
-    const same = Boolean(before.signed_case) === wantSigned && (before.date_signed ?? null) === nextDate;
+    // lead_status can stay "Signed" after signed_case is cleared — that still locks the UI and call times.
+    const stuckClosedAsSigned = !wantSigned && before.lead_status === "Signed";
+    const same =
+      Boolean(before.signed_case) === wantSigned &&
+      (before.date_signed ?? null) === nextDate &&
+      !stuckClosedAsSigned;
     if (!same) {
-      const signedPatch: { signed_case: boolean; date_signed: string | null; signed_at?: string | null } = {
+      const signedPatch: Record<string, unknown> = {
         signed_case: wantSigned,
         date_signed: nextDate,
       };
-      if (!wantSigned) signedPatch.signed_at = null;
-      else if (!before.signed_case) signedPatch.signed_at = new Date().toISOString();
+      if (!wantSigned) {
+        signedPatch.signed_at = null;
+        signedPatch.callrail_tags = ((before.callrail_tags ?? []) as string[]).filter((tag) => tag !== "CVR SIGNED");
+        if (before.lead_status === "Signed") {
+          signedPatch.lead_status = "Working";
+          signedPatch.close_reason = null;
+          signedPatch.follow_up = true;
+          signedPatch.sequence = null;
+        }
+        // Void a completed/signed agreement status so Confirm signature / text sync
+        // cannot re-close from a misspelled (or otherwise rejected) contract.
+        // An active corrected send (sent/viewed) is left alone.
+        const agreement = String(before.agreement_status || "").toLowerCase();
+        if (agreement === "signed" || agreement === "completed") {
+          signedPatch.agreement_status = "reopened";
+          signedPatch.agreement_next_reminder_at = null;
+        }
+      } else if (!before.signed_case) {
+        signedPatch.signed_at = new Date().toISOString();
+      }
       const { error: signedError } = await supabase.from("leads").update(signedPatch).eq("id", leadId);
       if (signedError) throw new Error(signedError.message);
       await supabase.from("lead_events").insert({
@@ -708,6 +731,23 @@ export async function saveLeadDetails(formData: FormData) {
         actor,
         payload: signedPatch,
       });
+      if (!wantSigned && before.lead_status === "Signed") {
+        const { data: reopened } = await supabase
+          .from("leads")
+          .select(
+            "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, arrival, owner_name, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, priority, created_at, consultation_date, lead_date, phone, phone_e164",
+          )
+          .eq("id", leadId)
+          .maybeSingle();
+        if (reopened) {
+          await enrollFollowUp(
+            supabase,
+            { ...reopened, follow_up: true },
+            undefined,
+            reopened.consultation_date ? "post_consult" : "auto",
+          );
+        }
+      }
     }
   }
   const signedNow = admin && signedDecision === "yes";

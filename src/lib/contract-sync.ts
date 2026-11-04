@@ -90,7 +90,16 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     }
     const status = String(lead.agreement_status || "").toLowerCase();
     const storedSlug = String(lead.agreement_signing_url || "").match(LINK)?.[1] ?? "";
-    const contractSigned = Boolean(lead.signed_case) || status === "signed" || status === "completed";
+    // Admin voided a bad signature (reopened), or a newer signing link went out after the
+    // thank-you (wrong-name contract → corrected send) — do not resurrect "completed".
+    const staffRejectedSignature = status === "reopened";
+    const newerLinkAfterThankYou = Boolean(
+      signal.signedAt && signal.openAt && signal.openAt > signal.signedAt,
+    );
+    const contractSigned =
+      !staffRejectedSignature &&
+      !newerLinkAfterThankYou &&
+      (Boolean(lead.signed_case) || status === "signed" || status === "completed");
     const signedAfterLink = Boolean(signal.signedAt && (!signal.openAt || signal.signedAt > signal.openAt));
     const openedAfterSignature = Boolean(
       signal.signedAt && lead.created_at && Date.parse(String(lead.created_at)) > Date.parse(signal.signedAt),
@@ -99,7 +108,10 @@ export async function syncContractsFromTexts(supabase: SupabaseClient): Promise<
     // one, but do not put Finish signing back on the queue.
     if (!openedAfterSignature) {
       const confirmationForThisContract = Boolean(
-        signedAfterLink && (!storedSlug || !signal.openSlug || signal.openSlug === storedSlug),
+        !staffRejectedSignature &&
+          !newerLinkAfterThankYou &&
+          signedAfterLink &&
+          (!storedSlug || !signal.openSlug || signal.openSlug === storedSlug),
       );
       if (contractSigned || confirmationForThisContract) {
         if (status === "sent" || status === "viewed" || !status) {

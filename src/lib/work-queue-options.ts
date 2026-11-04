@@ -31,13 +31,25 @@ export function workGradeOptions(rows: WorkFilterRow[]): string[] {
   );
 }
 
+export const PRIORITY_CONTRACT_AND_FLAGGED = "Contract out + Flagged";
+
 export function workPriorityOptions(rows: WorkFilterRow[]): string[] {
-  const priorityOrder = ["Flagged", "Suggested", "Contract out", "None"];
-  return [...new Set(rows.map(priorityLabel))].sort((left, right) => {
+  const priorityOrder = [PRIORITY_CONTRACT_AND_FLAGGED, "Flagged", "Suggested", "Contract out", "None"];
+  const labels = new Set(rows.map(priorityLabel));
+  // Always offer the one-click combo when either side exists on the list.
+  if (labels.has("Contract out") || labels.has("Flagged")) labels.add(PRIORITY_CONTRACT_AND_FLAGGED);
+  return [...labels].sort((left, right) => {
     const leftPlace = priorityOrder.indexOf(left);
     const rightPlace = priorityOrder.indexOf(right);
     return (leftPlace === -1 ? 99 : leftPlace) - (rightPlace === -1 ? 99 : rightPlace) || left.localeCompare(right);
   });
+}
+
+export function matchesPriorityFilter(rowPriority: string | null | undefined, filter: string): boolean {
+  if (!filter) return true;
+  const label = rowPriority ?? "None";
+  if (filter === PRIORITY_CONTRACT_AND_FLAGGED) return label === "Contract out" || label === "Flagged";
+  return label === filter;
 }
 
 export function workHandlerOptions(rows: WorkFilterRow[], kind: "screen" | "intake"): string[] {

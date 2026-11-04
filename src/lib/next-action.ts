@@ -23,8 +23,14 @@ export function nextActionLines(input: {
   leadId?: string | null;
 }): NextActionLine[] {
   const lines: NextActionLine[] = [];
-  if (!input.closed && (input.textStatus || "").toLowerCase() === "active" && input.textNextAt) {
-    lines.push({ label: "Text", when: formatCallWhen(input.textNextAt), at: input.textNextAt });
+  const textLive = (input.textStatus || "").toLowerCase() === "active";
+  if (!input.closed && textLive) {
+    if (input.textNextAt) {
+      lines.push({ label: "Text", when: formatCallWhen(input.textNextAt), at: input.textNextAt });
+    } else {
+      // Series is live but next_run_at was not mirrored — still show the column.
+      lines.push({ label: "Text", when: "Queued", at: null });
+    }
   }
   const agreement = (input.agreementStatus || "").toLowerCase();
   if (!input.closed && input.reminderAt && !REMINDER_CLOSED.has(agreement)) {
@@ -32,7 +38,15 @@ export function nextActionLines(input: {
   }
   if (!lines.length) lines.push({ label: "Text", when: "None", at: null });
   const callAt = nextCallAt(input);
-  lines.push({ label: "Call", when: callAt ? formatCallWhen(callAt) : "None", at: callAt });
+  lines.push({
+    label: "Call",
+    when: callAt
+      ? new Date(callAt).getTime() <= Date.now()
+        ? `Overdue · ${formatCallWhen(callAt)}`
+        : formatCallWhen(callAt)
+      : "None",
+    at: callAt,
+  });
   return lines;
 }
 
@@ -56,13 +70,17 @@ function nextCallAt(input: {
 }): string | null {
   if (input.closed || input.sequence === "stop") return null;
   const now = Date.now();
-  if (input.pendingCallAt && new Date(input.pendingCallAt).getTime() > now) return input.pendingCallAt;
+  // Prefer the pending job even when overdue — staff still need to see / reschedule it.
+  if (input.pendingCallAt) return input.pendingCallAt;
   const steps = [...input.callSteps].sort((a, b) => a.position - b.position);
   if (!steps.length || !input.callStart) return null;
   const start = new Date(input.callStart).getTime();
   if (Number.isNaN(start)) return null;
   const contactAt = input.contactAt ? new Date(input.contactAt) : null;
-  for (let index = Math.max(0, input.callsMade); index < steps.length; index += 1) {
+  // callsMade used to count every dial (including voicemail); that skipped past
+  // remaining cadence steps. Cap so at least the last step can still surface.
+  const fromIndex = Math.min(Math.max(0, input.callsMade), Math.max(0, steps.length - 1));
+  for (let index = fromIndex; index < steps.length; index += 1) {
     const step = steps[index];
     const at = scheduleCallback({
       from: new Date(start + step.delay_minutes * 60_000),

@@ -9,7 +9,7 @@ import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
-import { CYCLE_LABEL, leadCycle, leadStatusLabel, nonPiHoldOpen, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
+import { CYCLE_LABEL, leadCycle, leadStatusLabel, nonPiHoldOpen, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep, touchReachedClient } from "@/lib/next-step";
 import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
 import { signedFileReady } from "@/lib/close-ready";
 import { isLostLeadReason, visibleCloseSuggestion } from "@/lib/funnel";
@@ -32,6 +32,7 @@ type HistoryTouch = {
   phone_e164?: string | null;
   type: string | null;
   direction: string | null;
+  content?: string | null;
   occurred_at: string | null;
   quo_link: string | null;
   slack_permalink: string | null;
@@ -142,7 +143,7 @@ async function loadTouches(
     for (let from = 0; from < 20000; from += page) {
       const { data } = await supabase
         .from("intake_interactions")
-        .select("lead_id, phone, type, direction, occurred_at, quo_link, slack_permalink")
+        .select("lead_id, phone, type, direction, content, occurred_at, quo_link, slack_permalink")
         .in("lead_id", slice)
         .order("occurred_at", { ascending: false })
         .range(from, from + page - 1);
@@ -166,7 +167,7 @@ async function loadTouchesByPhone(
     for (let from = 0; from < 20000; from += page) {
       const { data } = await supabase
         .from("intake_interactions")
-        .select("lead_id, phone, phone_e164, type, direction, occurred_at, quo_link, slack_permalink")
+        .select("lead_id, phone, phone_e164, type, direction, content, occurred_at, quo_link, slack_permalink")
         .in("phone_e164", slice)
         .order("occurred_at", { ascending: false })
         .range(from, from + page - 1);
@@ -661,8 +662,7 @@ export default async function LeadListPage({
         if (type === "text") tally.texts += 1;
         contact.set(leadId, tally);
         if (type === "call" && direction === "outbound") calledOut.add(leadId);
-        const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
-        if (reached) talked.add(leadId);
+        if (touchReachedClient(touch)) talked.add(leadId);
         if (touch.occurred_at && countsAsContact(type)) {
           const current = lastOutreach.get(leadId);
           if (!current || touch.occurred_at > current) lastOutreach.set(leadId, touch.occurred_at);
@@ -728,10 +728,15 @@ export default async function LeadListPage({
     const outreachAt = lastOutreach.get(lead.id);
     const outreach = daysSince(outreachAt);
     const pendingCall = nextCall.get(lead.id);
-    // Only future dues drive "next at" / waiting; overdue jobs still expose callJobId for editing.
-    const nextAt = pendingCall && new Date(pendingCall.dueAt).getTime() > Date.now() ? pendingCall.dueAt : null;
+    // Include overdue pending jobs so Next Action / editors still surface them.
+    const nextAt = pendingCall?.dueAt ?? null;
     const tally = contact.get(lead.id) ?? { calls: 0, texts: 0 };
-    const waiting = waitingTooLong(cycle, age, outreach, nextAt ?? undefined);
+    const waiting = waitingTooLong(
+      cycle,
+      age,
+      outreach,
+      nextAt && new Date(nextAt).getTime() > Date.now() ? nextAt : undefined,
+    );
     const attention = needsAttention({
       cycle,
       waiting,
@@ -759,9 +764,18 @@ export default async function LeadListPage({
 
   const badCall = new Set<string>(EXCLUDED_CALLER_CLASSES);
   const workRows = rows.filter((row) => isWorkLead(row.lead));
-  const listed = queue === "nonleads"
-    ? rows.filter((row) => badCall.has(row.lead.caller_class ?? ""))
-    : rows.filter((row) => isWorkLead(row.lead) || (q.length > 0 && row.lead.caller_class === DATA_ERROR_CLASS));
+  // Ctrl/Cmd can combine Closed + Non-leads; show the union instead of intersecting.
+  const listed =
+    queue === "nonleads" && funnel === "closed"
+      ? rows.filter(
+          (row) =>
+            badCall.has(row.lead.caller_class ?? "") ||
+            isWorkLead(row.lead) ||
+            (q.length > 0 && row.lead.caller_class === DATA_ERROR_CLASS),
+        )
+      : queue === "nonleads"
+        ? rows.filter((row) => badCall.has(row.lead.caller_class ?? ""))
+        : rows.filter((row) => isWorkLead(row.lead) || (q.length > 0 && row.lead.caller_class === DATA_ERROR_CLASS));
   const combined = combineByPhone(listed, since);
   const windowRows = combineByPhone(workRows, since).filter((group) => group.row.inWindow);
   const metrics = {
@@ -797,7 +811,7 @@ export default async function LeadListPage({
       closed: !isPracticeTestPhone(row.lead.phone_e164 || row.lead.phone) && (row.cycle === "signed" || row.cycle === "closed"),
       sequence: row.lead.sequence,
       textStatus: row.lead.text_sequence_status,
-      textNextAt: row.lead.text_next_at,
+      textNextAt: row.lead.text_next_at || nextText.get(row.lead.id)?.dueAt || null,
       reminderAt: row.lead.agreement_next_reminder_at,
       agreementStatus: row.lead.agreement_status,
       callStart: dayOneFor(row.lead, {

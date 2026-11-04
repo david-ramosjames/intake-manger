@@ -635,15 +635,12 @@ export async function saveLeadDetails(formData: FormData) {
       actor,
     }).catch(() => ({ ok: false }));
   }
-  // Close as Lost first so CallRail / revalidate failures cannot leave the lead open.
+  // Persist consult/qualified/desired before any close so Lost readiness sees this save.
   const lostDecision = text(formData, "lost_decision");
   const lostReasonValue = text(formData, "lost_reason");
   let closed = false;
   // Staff choosing Lost = No means reopen — do not auto-close again as undesired on this Save.
-  let skipAutoClose = lostDecision === "no";
-  if (lostDecision === "yes" || lostDecision === "no") {
-    closed = await applyLostLeadDecision(supabase, leadId, actor, lostDecision, lostReasonValue);
-  }
+  const skipAutoClose = lostDecision === "no";
   let qualifiedDecision = text(formData, "qualified_decision");
   let desiredDecision = text(formData, "desired_decision");
   let declineTag = text(formData, "decline_tag") ?? "";
@@ -654,7 +651,7 @@ export async function saveLeadDetails(formData: FormData) {
   } else if (qualifiedDecision === "no") {
     desiredDecision = "no";
   }
-  if (!closed && (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd")) {
+  if (qualifiedDecision === "yes" || qualifiedDecision === "no" || desiredDecision === "yes" || desiredDecision === "no" || desiredDecision === "tbd") {
     const qualifiedTag = qualifiedDecision === "yes" ? QUALIFIED_YES : qualifiedDecision === "no" ? QUALIFIED_NO : "";
     const desired = desiredDecision === "yes";
     const tagged = tagsFromSelection({
@@ -688,6 +685,10 @@ export async function saveLeadDetails(formData: FormData) {
         throw new Error(`Saved on the lead. CallRail did not take the tags. ${message}`);
       }
     }
+  }
+  // Lost after milestones so closeGaps("lost") sees consultation / qualified / desired from this Save.
+  if (lostDecision === "yes" || lostDecision === "no") {
+    closed = await applyLostLeadDecision(supabase, leadId, actor, lostDecision, lostReasonValue);
   }
   if (!closed && admin && (signedDecision === "yes" || signedDecision === "no")) {
     const wantSigned = signedDecision === "yes";

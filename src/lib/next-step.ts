@@ -7,7 +7,51 @@ import { phoneTail } from "./phone";
 export type ClientTouch = {
   type: string | null;
   direction: string | null;
+  content?: string | null;
+  transcript?: string | null;
+  /** Seconds, when known from Quo. */
+  durationSeconds?: number | null;
 };
+
+/** Connected human conversation threshold for leaving Initial Contact. */
+export const CONNECTED_CALL_SECONDS = 120;
+
+const VOICEMAIL_TOUCH =
+  /\b(voicemail|voice mail|left (a |your )?(message|voicemail)|after the (tone|beep)|mailbox is full|please leave (a |your )?message|no answer|not answered|didn'?t answer|did not answer|went to voicemail|was not answered|unable to reach|nobody answered|no one answered|forwarded to voicemail|not available)\b/i;
+
+const NO_CONNECT_TOUCH =
+  /\b(no connect|no actionable details|nothing to summarize|no details to summarize|no transcript received)\b/i;
+
+function bareOptOutTouch(text: string): boolean {
+  const cleaned = text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\s+/g, " ");
+  return ["stop", "stopall", "unsubscribe", "cancel", "end", "quit", "no", "no thanks", "no thank you"].includes(cleaned);
+}
+
+/** True when this touch means we actually reached them (not a voicemail / short miss). */
+export function touchReachedClient(touch: ClientTouch): boolean {
+  const type = (touch.type || "").toLowerCase();
+  const direction = (touch.direction || "").toLowerCase();
+  const inbound = direction === "inbound" || direction === "incoming";
+  if (type === "missed_call" || type === "voicemail") return false;
+  if (type === "text" || type === "email") {
+    if (!inbound) return false;
+    const body = (touch.content || "").trim();
+    if (body.length < 2 || bareOptOutTouch(body)) return false;
+    return true;
+  }
+  if (type !== "call" && type !== "sona_call") return false;
+  const text = `${touch.content || ""}\n${touch.transcript || ""}`.slice(0, 4000);
+  if (VOICEMAIL_TOUCH.test(text) || NO_CONNECT_TOUCH.test(text)) return false;
+  const seconds = touch.durationSeconds;
+  if (seconds != null && Number.isFinite(seconds)) return seconds >= CONNECTED_CALL_SECONDS;
+  // No duration on the row: inbound answered calls still count; outbound needs a real summary.
+  if (inbound) return true;
+  return text.trim().length >= 120;
+}
 
 export type LeadCycle = "contact" | "information" | "signing" | "signed" | "closed";
 
@@ -128,9 +172,10 @@ function contractIsOut(lead: CycleLead): boolean {
   return contractOutstanding(lead);
 }
 
-function reachedClient(lead: CycleLead, touches: ClientTouch[]): boolean {
-  if (talkedWithClient(touches)) return true;
-  return lead.arrival === "human_call" || lead.arrival === "qualified_call" || lead.arrival === "sona";
+function reachedClient(_lead: CycleLead, touches: ClientTouch[]): boolean {
+  // Stay on Initial Contact until a real reply or a connected call (2+ minutes).
+  // Arrival channel alone (Sona / missed / form) must not advance the stage.
+  return talkedWithClient(touches);
 }
 
 export function leadCycle(lead: CycleLead & CloseReadyLead, touches: ClientTouch[] = []): LeadCycle {
@@ -291,13 +336,7 @@ export function outreachSequence(lead: {
 }
 
 export function talkedWithClient(touches: ClientTouch[]): boolean {
-  return touches.some((touch) => {
-    const type = (touch.type || "").toLowerCase();
-    const direction = (touch.direction || "").toLowerCase();
-    if (type === "call" || type === "sona_call") return true;
-    if (direction === "inbound" && (type === "text" || type === "email")) return true;
-    return false;
-  });
+  return touches.some((touch) => touchReachedClient(touch));
 }
 
 export function leadNeed(lead: Lead, touches: ClientTouch[]): { title: string; detail: string } | null {
@@ -313,7 +352,7 @@ export function leadNeed(lead: Lead, touches: ClientTouch[]): { title: string; d
   if (cycle === "contact") {
     return {
       title: "Initial Contact",
-      detail: "A call or text that they have not answered still counts as not in contact. Reach them before sending a contract.",
+      detail: "Stay here until they reply by text or you connect on a call of two minutes or more. A voicemail or short miss does not count.",
     };
   }
   return {

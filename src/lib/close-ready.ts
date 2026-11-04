@@ -49,9 +49,12 @@ export function closeGaps(lead: CloseReadyLead, path: ClosePath = "base"): strin
     return gaps;
   }
   if (path === "lost") {
-    // Unresponsive / signed elsewhere / no longer interested — stop outreach without
-    // forcing Desired or the rest of the decline file.
-    return lead.identity_status === "needs_review" ? ["Confirm the client name"] : [];
+    // Lost still needs the file filled (consult / qualified / desired). Save can
+    // leave those blank; closing as lost cannot.
+    const qualified = qualifiedValue(lead);
+    if (qualified !== true && qualified !== false) gaps.push("Qualified");
+    if (desiredValue(lead) == null) gaps.push("Desired");
+    return gaps;
   }
   const qualified = qualifiedValue(lead);
   if (qualified !== true && qualified !== false) gaps.push("Qualified");

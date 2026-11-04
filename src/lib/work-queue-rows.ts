@@ -9,7 +9,7 @@ import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { daysSince, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
-import { leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep } from "@/lib/next-step";
+import { leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep, touchReachedClient } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { automationLine, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong } from "@/lib/queue";
 import { loadPropertyDamageGuides } from "@/lib/property-damage-guides";
@@ -96,6 +96,7 @@ type HistoryTouch = {
   phone: string | null;
   type: string | null;
   direction: string | null;
+  content?: string | null;
   occurred_at: string | null;
   quo_link: string | null;
   slack_permalink: string | null;
@@ -172,6 +173,7 @@ function toQueueRow(
     nextAt: string | null;
     nextCall: { id: string; dueAt: string; tag: string | null; position: number } | undefined;
     nextTextId: string | null;
+    nextTextDue: string | null;
     sentFirm: string | null;
     outside: { quo: string | null; slack: string | null };
     callSteps: (CallStep & { sequence: string })[];
@@ -186,7 +188,12 @@ function toQueueRow(
   const age = daysSince(lead.lead_date ?? lead.created_at);
   const opened = formatQueueStamp(lead.created_at || lead.lead_date);
   const outreach = daysSince(input.outreachAt);
-  const waiting = waitingTooLong(cycle, age, outreach, input.nextAt ?? undefined);
+  const waiting = waitingTooLong(
+    cycle,
+    age,
+    outreach,
+    input.nextAt && new Date(input.nextAt).getTime() > Date.now() ? input.nextAt : undefined,
+  );
   const attention = needsAttention({
     cycle,
     waiting,
@@ -208,7 +215,7 @@ function toQueueRow(
     closed,
     sequence: lead.sequence,
     textStatus: lead.text_sequence_status,
-    textNextAt: lead.text_next_at,
+    textNextAt: lead.text_next_at || input.nextTextDue || null,
     reminderAt: lead.agreement_next_reminder_at,
     agreementStatus: lead.agreement_status,
     callStart: dayOneFor(lead, sequenceInput),
@@ -392,7 +399,7 @@ export async function loadWorkQueueRows(
       supabase.from("lead_jobs").select("id, lead_id, due_at, queue, assigned_name, position").in("lead_id", ids).eq("status", "pending"),
       supabase
         .from("intake_interactions")
-        .select("lead_id, phone, type, direction, occurred_at, quo_link, slack_permalink")
+        .select("lead_id, phone, type, direction, content, occurred_at, quo_link, slack_permalink")
         .in("lead_id", ids)
         .order("occurred_at", { ascending: false })
         .limit(2000),
@@ -443,7 +450,6 @@ export async function loadWorkQueueRows(
   const outsideLinks = new Map<string, { quo: string | null; slack: string | null }>();
   for (const touch of (touchRows ?? []) as HistoryTouch[]) {
     const type = String(touch.type || "").toLowerCase();
-    const direction = String(touch.direction || "").toLowerCase();
     const owners = new Set<string>();
     if (touch.lead_id && idSet.has(touch.lead_id)) owners.add(touch.lead_id);
     for (const id of idsByPhone.get(phoneKey(touch.phone)) ?? []) owners.add(id);
@@ -452,8 +458,7 @@ export async function loadWorkQueueRows(
       if (type === "call" || type === "sona_call" || type === "missed_call") tally.calls += 1;
       if (type === "text") tally.texts += 1;
       contact.set(leadId, tally);
-      const reached = type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"));
-      if (reached) talked.add(leadId);
+      if (touchReachedClient(touch)) talked.add(leadId);
       if (touch.occurred_at && countsAsContact(type)) {
         const current = lastOutreach.get(leadId);
         if (!current || touch.occurred_at > current) lastOutreach.set(leadId, touch.occurred_at);
@@ -493,6 +498,7 @@ export async function loadWorkQueueRows(
       nextAt: nextCall.get(lead.id)?.dueAt ?? null,
       nextCall: nextCall.get(lead.id),
       nextTextId: nextText.get(lead.id)?.id ?? null,
+      nextTextDue: nextText.get(lead.id)?.dueAt ?? null,
       sentFirm: sentFirm.get(lead.id) || null,
       outside: outsideLinks.get(lead.id) ?? { quo: null, slack: null },
       callSteps,

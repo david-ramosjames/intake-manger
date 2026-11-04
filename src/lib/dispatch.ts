@@ -9,6 +9,7 @@ import { sendQuoText } from "./quo";
 import { phoneTail } from "./phone";
 import { withinWorkHours } from "./time";
 import { isPracticeTestPhone } from "./test-phone";
+import { touchReachedClient } from "./next-step";
 
 type Job = {
   id: string;
@@ -341,7 +342,7 @@ async function talkedIds(supabase: SupabaseClient, ids: string[]): Promise<Set<s
     const direction = String(row.direction ?? "");
     const leadId = typeof row.lead_id === "string" ? row.lead_id : "";
     if (!leadId) continue;
-    if (type === "call" || type === "sona_call" || ((type === "text" || type === "email") && direction === "inbound")) {
+    if (touchReachedClient({ type, direction })) {
       talked.add(leadId);
     }
   }

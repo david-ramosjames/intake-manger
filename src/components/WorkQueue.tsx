@@ -31,6 +31,7 @@ import { inArrivedRange, useWorkFilters } from "@/components/WorkFilters";
 import { phoneMatches, phoneTail } from "@/lib/phone";
 import { DEFAULT_TEXT_SEQUENCE, matchesQueue, TEXT_SEQUENCES } from "@/lib/queue";
 import { DEFAULT_REFERRAL_FROM, REFERRAL_FROM_LINES, quoLineLabel } from "@/lib/quo-settings";
+import { matchesPriorityFilter } from "@/lib/work-queue-options";
 
 type DrawerNotice = { tone: "saving" | "saved" | "error"; text: string };
 const DrawerNoticeContext = createContext<(notice: DrawerNotice | null) => void>(() => {});
@@ -178,6 +179,9 @@ const COLUMNS: { id: Exclude<Column, "type" | "stage">; label: string; width: st
 
 function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; layout?: "stack" | "row" }) {
   const shown = lines.filter((line) => line.when !== "None");
+  if (!shown.length) {
+    return <p className="text-slate-400">None scheduled</p>;
+  }
   return (
     <>
       {shown.map((line) => {
@@ -344,7 +348,7 @@ export function WorkQueue({
     .filter((row) => !nextDay || row.nextDayKey === nextDay)
     .filter((row) => matchesSearch(row, filtersNow.q))
     .filter((row) => !filtersNow.grade || gradeLabel(row) === filtersNow.grade)
-    .filter((row) => !filtersNow.priority || priorityLabel(row) === filtersNow.priority)
+    .filter((row) => matchesPriorityFilter(priorityLabel(row), filtersNow.priority))
     .filter((row) => !filtersNow.sourceType || sourceTypeLabel(row) === filtersNow.sourceType)
     .filter((row) => !filtersNow.leadSource || leadSourceLabel(row) === filtersNow.leadSource)
     .filter((row) => !filtersNow.screen || screenByLabel(row) === filtersNow.screen)
@@ -1041,7 +1045,13 @@ function detailGap(input: {
   if (input.desired === "no" && !input.decline) return "Choose a decline reason before saving or closing.";
   if (input.admin && input.signedChoice === "yes" && !input.signedDate) return "Enter the signed date before saving or closing.";
   if (input.signedChoice === "yes" && input.lostChoice === "yes") return "A lead cannot be both signed and lost.";
-  if (input.lostChoice === "yes" && !isLostLeadReason(input.lostReason)) return "Choose why the lead was lost before saving.";
+  if (input.lostChoice === "yes") {
+    if (!input.consulted) return "Choose Consultation (Yes or No) before closing as lost.";
+    if (input.consulted === "yes" && !input.consultDate) return "Enter the consultation date before closing as lost.";
+    if (!input.qualified) return "Choose Qualified (Yes or No) before closing as lost.";
+    if (!input.desired || input.desired === "tbd") return "Choose Desired (Yes or No) before closing as lost.";
+    if (!isLostLeadReason(input.lostReason)) return "Choose why the lead was lost before saving.";
+  }
   return null;
 }
 
@@ -1246,8 +1256,14 @@ function LeadFacts({
     if (dirty.desired && desiredValue === "yes" && !sizeValue) return "Choose a size before saving or closing.";
     if (dirty.desired && desiredValue === "no" && !declineValue) return "Choose a decline reason before saving or closing.";
     if (dirty.signed && admin && signedChoice === "yes" && !signedDate) return "Enter the signed date before saving or closing.";
-    if (dirty.lost && lostValue === "yes" && !isLostLeadReason(lostReason)) return "Choose why the lead was lost before saving or closing.";
-    if (dirty.lost && signedChoice === "yes" && lostValue === "yes") return "A lead cannot be both signed and lost.";
+    if (dirty.lost && lostValue === "yes") {
+      if (!consultedValue) return "Choose Consultation (Yes or No) before closing as lost.";
+      if (consultedValue === "yes" && !consultDateValue) return "Enter the consultation date before closing as lost.";
+      if (!qualifiedValue) return "Choose Qualified (Yes or No) before closing as lost.";
+      if (!desiredValue || desiredValue === "tbd") return "Choose Desired (Yes or No) before closing as lost.";
+      if (!isLostLeadReason(lostReason)) return "Choose why the lead was lost before saving or closing.";
+      if (signedChoice === "yes") return "A lead cannot be both signed and lost.";
+    }
     return null;
   }
 

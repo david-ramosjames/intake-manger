@@ -5,7 +5,7 @@ import { nextActionLines, type CallStep } from "@/lib/next-action";
 import { reviewPrioritySuggestion } from "@/lib/ops-actions";
 import { sequenceDayOne } from "@/lib/followup";
 import { leadSequenceId } from "@/lib/sequences";
-import { leadCycle, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, type PriorityPlace } from "@/lib/next-step";
+import { leadCycle, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, touchReachedClient, type PriorityPlace } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { requireStaff } from "@/lib/session";
 import { formatCallWhen } from "@/lib/time";
@@ -202,9 +202,7 @@ export default async function PriorityPage() {
     const unique = distinctTouches(list);
     calls.set(leadId, unique.filter((touch) => isCallTouch(touch)).length);
     for (const touch of unique) {
-      const type = touchKind(touch);
-      const direction = (touch.direction || "").toLowerCase();
-      if (type === "call" || type === "sona_call" || (direction === "inbound" && (type === "text" || type === "email"))) {
+      if (touchReachedClient(touch)) {
         talked.add(leadId);
       }
       if (touch.occurred_at && countsAsContact(type)) {

@@ -189,10 +189,50 @@ export function WorkStatusPills({
           In Progress
         </button>
       )}
-      <button type="button" onClick={() => navigate({ funnel: "closed", entry: null })} className={pillClass(closed)}>
+      <button
+        type="button"
+        onClick={(event) => {
+          const keepOther = event.metaKey || event.ctrlKey;
+          if (closed && !keepOther) {
+            navigate({ funnel: null, entry: null, queue: openQueue });
+            return;
+          }
+          if (closed && keepOther) {
+            navigate({ funnel: null, entry: null });
+            return;
+          }
+          navigate({
+            funnel: "closed",
+            entry: null,
+            ...(keepOther ? {} : { queue: openQueue }),
+          });
+        }}
+        className={pillClass(closed)}
+        title="Click to toggle. Ctrl/Cmd+click to combine with Non-leads."
+      >
         Closed
       </button>
-      <button type="button" onClick={() => navigate({ queue: "nonleads", entry: null })} className={pillClass(nonLeads)}>
+      <button
+        type="button"
+        onClick={(event) => {
+          const keepOther = event.metaKey || event.ctrlKey;
+          if (nonLeads && !keepOther) {
+            navigate({ queue: null, funnel: null, entry: null });
+            return;
+          }
+          if (nonLeads && keepOther) {
+            navigate({ queue: null, entry: null });
+            return;
+          }
+          navigate({
+            queue: "nonleads",
+            entry: null,
+            ...(keepOther ? {} : { funnel: null }),
+          });
+        }}
+        className={pillClass(nonLeads)}
+        title="Click to toggle. Ctrl/Cmd+click to combine with Closed."
+      >
         Non-leads{nonLeadsCount ? ` (${nonLeadsCount})` : ""}
       </button>
     </>

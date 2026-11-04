@@ -202,6 +202,7 @@ export default async function PriorityPage() {
     const unique = distinctTouches(list);
     calls.set(leadId, unique.filter((touch) => isCallTouch(touch)).length);
     for (const touch of unique) {
+      const type = touchKind(touch);
       if (touchReachedClient(touch)) {
         talked.add(leadId);
       }

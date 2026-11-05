@@ -24,6 +24,7 @@ import { requireStaff } from "@/lib/session";
 import { DASHBOARD_RELEASE_DAY, loadNavTiles, type QueueFocus } from "@/lib/dashboard";
 import { loadPropertyDamageGuides } from "@/lib/property-damage-guides";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
+import { applyLiveTextSequences } from "@/lib/sms-followup";
 import { docketBaseUrl } from "@/lib/supabase/config";
 
 type HistoryTouch = {
@@ -716,12 +717,15 @@ export default async function LeadListPage({
 
 
 
-  const queueLeads = leads.filter((lead) => {
-    const hold = nonPiHoldOpen(lead, sentFirm.has(lead.id));
-    if (funnel === "closed") return !hold;
-    if (parkedIds.has(lead.id)) return hold;
-    return true;
-  });
+  const queueLeads = await applyLiveTextSequences(
+    supabase,
+    leads.filter((lead) => {
+      const hold = nonPiHoldOpen(lead, sentFirm.has(lead.id));
+      if (funnel === "closed") return !hold;
+      if (parkedIds.has(lead.id)) return hold;
+      return true;
+    }),
+  );
   const rows = queueLeads.map((lead) => {
     const cycle = leadCycle(lead, talked.has(lead.id) ? [{ type: "call", direction: "inbound" }] : []);
     const age = daysSince(lead.lead_date ?? lead.created_at);

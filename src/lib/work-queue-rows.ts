@@ -15,6 +15,7 @@ import { automationLine, needsAttention, receivedLabel, stageClass, stageStripe,
 import { loadPropertyDamageGuides } from "@/lib/property-damage-guides";
 import { DEFAULT_REFERRAL_SMS, type ReferralDestination } from "@/lib/referrals";
 import { leadSequenceId } from "@/lib/sequences";
+import { applyLiveTextSequences } from "@/lib/sms-followup";
 import { docketBaseUrl } from "@/lib/supabase/config";
 import { fillTalkedWith, isPlaceholderOwner } from "@/lib/talked-with";
 import { isPracticeTestPhone } from "@/lib/test-phone";
@@ -408,7 +409,7 @@ export async function loadWorkQueueRows(
       loadPropertyDamageGuides(),
     ]);
 
-  const leads = (leadRows ?? []) as ListLead[];
+  const leads = await applyLiveTextSequences(supabase, (leadRows ?? []) as ListLead[]);
   await fillLeadSources(supabase, leads);
   await fillTalkedWith(
     supabase,

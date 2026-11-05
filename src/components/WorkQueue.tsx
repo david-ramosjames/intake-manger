@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useActionState, useContext, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, useTransition, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { createContext, useActionState, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type MouseEvent, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { IdentityMark } from "@/components/IdentityMark";
@@ -29,7 +29,7 @@ import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary, buttonSecondary } from "@/lib/ui";
 import { inArrivedRange, useWorkFilters } from "@/components/WorkFilters";
 import { phoneMatches, phoneTail } from "@/lib/phone";
-import { DEFAULT_TEXT_SEQUENCE, matchesQueue, TEXT_SEQUENCES } from "@/lib/queue";
+import { DEFAULT_TEXT_SEQUENCE, matchesQueue, TEXT_SEQUENCES, textSequenceLabel } from "@/lib/queue";
 import { DEFAULT_REFERRAL_FROM, REFERRAL_FROM_LINES, quoLineLabel } from "@/lib/quo-settings";
 import { matchesPriorityFilter } from "@/lib/work-queue-options";
 
@@ -281,7 +281,7 @@ function sortValue(row: QueueRow, column: SortColumn): string | number {
 }
 
 export function WorkQueue({
-  rows,
+  rows: sourceRows,
   initialId,
   destinations,
   templates,
@@ -297,6 +297,51 @@ export function WorkQueue({
   staff: string[];
   admin?: boolean;
 }) {
+  const [liveText, setLiveText] = useState<{ ok: boolean; active: Record<string, { slug: string; nextAt: string | null }> } | null>(null);
+  useEffect(() => {
+    let cancel = false;
+    async function pull() {
+      const phones = [...new Set(sourceRows.map((row) => row.phone).filter(Boolean))];
+      if (phones.length === 0) return;
+      const response = await fetch("/api/text-sequences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phones }),
+      }).catch(() => null);
+      if (!response?.ok || cancel) return;
+      const data = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        active?: Record<string, { slug: string; nextAt: string | null }>;
+      } | null;
+      if (!data || cancel) return;
+      setLiveText({ ok: Boolean(data.ok), active: data.active ?? {} });
+    }
+    void pull();
+    const timer = window.setInterval(() => void pull(), 20000);
+    return () => {
+      cancel = true;
+      window.clearInterval(timer);
+    };
+  }, [sourceRows]);
+  const rows = useMemo(() => {
+    if (!liveText?.ok) return sourceRows;
+    return sourceRows.map((row) => {
+      const tail = phoneTail(row.phone);
+      if (tail.length < 10) return row;
+      const hit = liveText.active[tail];
+      if (!hit) return row;
+      const label = textSequenceLabel(hit.slug) ?? "Texts";
+      if (row.textsLive && row.automationLabel === label) return row;
+      return {
+        ...row,
+        textsLive: true,
+        canStartText: false,
+        textNext: hit.nextAt ?? row.textNext,
+        automationLabel: label,
+        automationBad: false,
+      };
+    });
+  }, [liveText, sourceRows]);
   const { values } = useWorkFilters();
   const filtersNow = useDeferredValue(values);
   const router = useRouter();

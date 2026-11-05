@@ -358,6 +358,8 @@ export type Lead = {
   slack_permalink: string | null;
   summary: string | null;
   owner_name: string | null;
+  screen_by: string | null;
+  intake_by: string | null;
   kind: LeadKind;
   sequence: string | null;
   arrival: LeadArrival | null;

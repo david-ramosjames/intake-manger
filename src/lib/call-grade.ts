@@ -50,6 +50,13 @@ export type LeadCallJobs = {
   intakeBy: string | null;
 };
 
+/** A staff pick wins. Otherwise use whoever the call record named. */
+export function assignedHandler(override: string | null | undefined, inferred: string | null | undefined): string | null {
+  const chosen = override?.trim();
+  if (chosen) return chosen;
+  return inferred?.trim() || null;
+}
+
 const LINE_LABELS = new Set(
   ["leads", "intake", "rjl main line", "rgv number", "rjl outbound", "rjl transfers", "unknown", "human", "sona"].map((value) =>
     value.toLowerCase(),

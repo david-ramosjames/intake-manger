@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
-import { loadLeadCallJobs } from "@/lib/call-grade";
+import { assignedHandler, loadLeadCallJobs } from "@/lib/call-grade";
 import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
@@ -22,7 +22,7 @@ import { isPracticeTestPhone } from "@/lib/test-phone";
 import { chicagoDay, formatCallDay, formatCallWhen, formatQueueStamp } from "@/lib/time";
 
 const LIST_COLUMNS =
-  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_category, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, preferred_language, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
+  "id, lead_date, created_at, lead_name, phone, phone_e164, email, identity_status, identity_evidence, lead_source, source_type, source_category, source_channel, source_note, case_type, case_detail, grade, arrival, lead_status, close_reason, close_suggestion, caller_class, practice_area, referral_opportunity, preferred_language, priority, priority_reason, priority_suggestion, next_action, callrail_tags, decline_reason, consultation, consultation_date, desired_case, desired_source, qualified, agreement_status, agreement_sent_at, agreement_signing_url, agreement_next_reminder_at, agreement_reminder_count, agreement_via_sms, agreement_via_email, text_sequence_status, text_sequence_slug, text_next_at, summary, owner_name, screen_by, intake_by, kind, sequence, follow_up, needs_verification, signed_case, date_signed, signed_at, case_id, case_number, intake_call_id, callrail_call_id, quo_link, slack_permalink, slack_channel_id, slack_message_ts, slack_thread_ts";
 
 type ListLead = Pick<
   Lead,
@@ -74,6 +74,8 @@ type ListLead = Pick<
   | "text_next_at"
   | "summary"
   | "owner_name"
+  | "screen_by"
+  | "intake_by"
   | "kind"
   | "sequence"
   | "follow_up"
@@ -185,6 +187,8 @@ function toQueueRow(
     staffTouched: boolean;
   },
 ): QueueRow {
+  const screenBy = assignedHandler(lead.screen_by, input.screenBy);
+  const intakeBy = assignedHandler(lead.intake_by, input.intakeBy);
   const cycle = leadCycle(lead, input.talked ? [{ type: "call", direction: "inbound" }] : []);
   const age = daysSince(lead.lead_date ?? lead.created_at);
   const opened = formatQueueStamp(lead.created_at || lead.lead_date);
@@ -297,8 +301,8 @@ function toQueueRow(
     summary: lead.summary,
     owner: lead.owner_name,
     grade: lead.grade,
-    screenBy: input.screenBy,
-    intakeBy: input.intakeBy,
+    screenBy,
+    intakeBy,
     textsLive: (lead.text_sequence_status || "").toLowerCase() === "active",
     textNext: lead.text_next_at,
     sequenceLabel: outreachSequence(lead).label,
@@ -324,8 +328,8 @@ function toQueueRow(
     entry: leadEntry({
       staffTouched: input.staffTouched,
       grade: lead.grade,
-      screenBy: input.screenBy,
-      intakeBy: input.intakeBy,
+      screenBy,
+      intakeBy,
     }),
   };
 }

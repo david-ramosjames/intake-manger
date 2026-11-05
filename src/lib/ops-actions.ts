@@ -43,6 +43,28 @@ function text(formData: FormData, key: string): string | null {
   return value.length ? value : null;
 }
 
+/** Correct who screened the lead or who did the intake. Blank clears the override. */
+export async function setLeadHandler(leadId: string, role: "screen" | "intake", name: string | null) {
+  const { supabase, email } = await requireStaff();
+  if (!leadId) throw new Error("Missing the lead.");
+  if (role !== "screen" && role !== "intake") throw new Error("Choose screening or intake.");
+  const staff = await loadStaff(supabase);
+  const matched = name ? matchStaff(name, staff) : null;
+  if (name && !matched) throw new Error("Choose someone on staff.");
+  const column = role === "screen" ? "screen_by" : "intake_by";
+  const { error } = await supabase.from("leads").update({ [column]: matched?.name ?? null }).eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: role === "screen" ? "screen_by" : "intake_by",
+    actor: email,
+    payload: { name: matched?.name ?? null },
+  });
+  revalidatePath("/work");
+  revalidatePath("/");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function savePriority(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const priority = formData.getAll("priority").includes("yes");

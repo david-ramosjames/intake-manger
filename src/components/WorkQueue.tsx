@@ -14,7 +14,7 @@ import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSource
 import { closeGaps, referralCloseMessage, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLeadHandler, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import {
   isGuideReferral,
   PRACTICE_AREAS,
@@ -2331,6 +2331,63 @@ function DrawerSkeleton({ row, onClose }: { row: QueueRow; onClose: () => void }
   );
 }
 
+function HandlerSelect({
+  leadId,
+  role,
+  value,
+  staff,
+}: {
+  leadId: string;
+  role: "screen" | "intake";
+  value: string | null;
+  staff: string[];
+}) {
+  const notify = useContext(DrawerNoticeContext);
+  const router = useRouter();
+  const [current, setCurrent] = useState(value?.trim() || "");
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    setCurrent(value?.trim() || "");
+  }, [leadId, value]);
+  const selected = current.trim();
+  const names = selected && !staff.includes(selected) ? [selected, ...staff] : staff;
+  return (
+    <label className="inline-flex items-center gap-1">
+      <span className={role === "screen" ? "text-emerald-700" : "text-sky-700"}>{role === "screen" ? "Screening" : "Intake"}</span>
+      <select
+        aria-label={role === "screen" ? "Who screened" : "Who did the intake"}
+        value={selected}
+        disabled={pending}
+        onChange={(event) => {
+          const next = event.target.value;
+          const previous = selected;
+          setCurrent(next);
+          setPending(true);
+          notify({ tone: "saving", text: "Saving…" });
+          void setLeadHandler(leadId, role, next || null)
+            .then(() => {
+              notify({ tone: "saved", text: "Saved" });
+              router.refresh();
+            })
+            .catch((err: unknown) => {
+              setCurrent(previous);
+              notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save" });
+            })
+            .finally(() => setPending(false));
+        }}
+        className="max-w-[12rem] cursor-pointer rounded border border-transparent bg-transparent py-0 pr-6 text-sm text-slate-800 hover:border-slate-300 hover:bg-white disabled:opacity-60"
+      >
+        <option value="">—</option>
+        {names.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function LeadDrawer({
   row,
   destinations,
@@ -2386,6 +2443,7 @@ export function LeadDrawer({
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <DrawerNoticeContext.Provider value={setNotice}>
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">
@@ -2400,19 +2458,11 @@ export function LeadDrawer({
             <span className="text-slate-300" aria-hidden="true">
               ·
             </span>
-            <span>
-              <span className="text-emerald-700">Screening</span>
-              <span className="text-slate-500"> · </span>
-              <span className="text-slate-700">{row.screenBy?.trim() || "—"}</span>
-            </span>
+            <HandlerSelect leadId={row.id} role="screen" value={row.screenBy} staff={staff} />
             <span className="text-slate-300" aria-hidden="true">
               ·
             </span>
-            <span>
-              <span className="text-sky-700">Intake</span>
-              <span className="text-slate-500"> · </span>
-              <span className="text-slate-700">{row.intakeBy?.trim() || "—"}</span>
-            </span>
+            <HandlerSelect leadId={row.id} role="intake" value={row.intakeBy} staff={staff} />
           </p>
         </div>
         <button
@@ -2459,7 +2509,6 @@ export function LeadDrawer({
           {notice.text}
         </p>
       ) : null}
-      <DrawerNoticeContext.Provider value={setNotice}>
       {row.identityStatus === "needs_review" ? (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
           <IdentityShelf row={row} />

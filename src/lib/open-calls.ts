@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { pullForwardStaleCallJobs } from "./followup";
 
 export const AUTO_CLOSED_CALL = "auto_closed";
 const AUTO_CLOSED_DETAIL = "Not complete. A newer open call replaced this one.";
@@ -65,6 +66,9 @@ export async function collapseDuplicateOpenCalls(supabase: SupabaseClient): Prom
       .in("id", drop.slice(index, index + 100))
       .eq("status", "pending");
     if (updateError) throw new Error(updateError.message);
+  }
+  for (const leadId of [...keep.keys()].slice(0, 40)) {
+    await pullForwardStaleCallJobs(supabase, leadId).catch(() => false);
   }
   return drop.length;
 }

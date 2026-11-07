@@ -73,13 +73,10 @@ function closedLead(lead: LeadBits): boolean {
 export function sequenceForLead(lead: LeadBits, manual: "post_consult" | "auto"): CallSequenceId | null {
   if (closedLead(lead)) return null;
   if (contractOutstanding(lead)) return "want_to_sign";
-  if (
-    manual === "post_consult" ||
-    lead.consultation_date ||
-    lead.arrival === "human_call" ||
-    lead.arrival === "qualified_call" ||
-    lead.arrival === "sona"
-  ) {
+  // Post-consult cadence only after a real consult (or staff said so). A human /
+  // Sona / missed arrival without a consult stays on the denser first-contact plan —
+  // putting those on more_info scheduled the next call 9–12 days out.
+  if (manual === "post_consult" || lead.consultation_date) {
     return "more_info";
   }
   return "first_talk";
@@ -119,42 +116,70 @@ export async function enrollFollowUp(
   const priority = Boolean(lead.priority) || sequence === "want_to_sign";
   const contactAt = lead.created_at ? new Date(lead.created_at) : null;
   const dayOne = sequenceDayOne(sequence, lead).getTime();
+  const now = Date.now();
   const usedByDay = new Map<number, number[]>();
-  const rows = (steps ?? []).flatMap((step) => {
-    const position = step.position as number;
+  // Past steps are dropped. If any were dropped, remaining dues are spaced from
+  // now by the cadence gaps — not left on the original day-9 absolute times.
+  type Planned = {
+    step: (typeof steps)[number];
+    delay: number;
+    gapMinutes: number;
+  };
+  const planned: Planned[] = [];
+  let skippedPast = false;
+  let prevDelay: number | null = null;
+  for (const step of steps ?? []) {
     const delay = Number(step.delay_minutes);
-    const from = new Date(dayOne + delay * 60_000);
+    if (dayOne + delay * 60_000 < now - 5 * 60_000) {
+      skippedPast = true;
+      prevDelay = delay;
+      continue;
+    }
+    planned.push({
+      step,
+      delay,
+      gapMinutes: prevDelay == null ? 0 : Math.max(0, delay - prevDelay),
+    });
+    prevDelay = delay;
+  }
+  let cursor = now;
+  const rows = planned.map((item, index) => {
+    const position = item.step.position as number;
+    const absolute = dayOne + item.delay * 60_000;
+    const from = skippedPast
+      ? new Date(cursor + (index === 0 ? 0 : item.gapMinutes * 60_000))
+      : new Date(absolute);
     const caller = proposedCaller(sequence, position, lead.owner_name, Boolean(lead.consultation_date));
     const dueAt = scheduleCallback({
       from,
-      window: typeof step.callback_window === "string" ? step.callback_window : null,
+      window: typeof item.step.callback_window === "string" ? item.step.callback_window : null,
       index: Math.max(0, position - 1),
       contactAt,
       priority,
       varyKey: `${lead.id}:${position}`,
-      avoid: usedByDay.get(delay) ?? [],
+      avoid: usedByDay.get(item.delay) ?? [],
     });
+    cursor = new Date(dueAt).getTime();
     const minute = chicagoMinute(dueAt);
     if (minute != null) {
-      const taken = usedByDay.get(delay) ?? [];
+      const taken = usedByDay.get(item.delay) ?? [];
       taken.push(minute);
-      usedByDay.set(delay, taken);
+      usedByDay.set(item.delay, taken);
     }
-    if (new Date(dueAt).getTime() < Date.now() - 5 * 60_000) return [];
-    return [{
+    return {
       lead_id: lead.id,
-      queue: step.queue as string,
+      queue: item.step.queue as string,
       sequence,
       position,
       due_at: dueAt,
-      body: renderStep(String(step.body), lead),
+      body: renderStep(String(item.step.body), lead),
       assigned_name: caller,
       detail: caller && sequence === "want_to_sign"
         ? `Proposed owner: ${caller}. Change the tag if someone else should call.`
         : caller && sequence === "more_info" && lead.consultation_date
           ? `Tag ${caller}.`
           : null,
-    }];
+    };
   });
   // Keep the soonest pending reminder when switching sequences so a staff-set
   // Slack tag/time is not wiped by enrollMissingFollowUps.
@@ -230,6 +255,55 @@ export async function enrollFollowUp(
   void hoursBySequence;
 }
 
+/** Soonest pending call should not sit a week out after earlier steps were used up. */
+const MAX_NEXT_CALL_WAIT_MS = 36 * 60 * 60_000;
+
+export async function pullForwardStaleCallJobs(
+  supabase: SupabaseClient,
+  leadId: string,
+): Promise<boolean> {
+  const { data: jobs, error } = await supabase
+    .from("lead_jobs")
+    .select("id, due_at, assigned_name, sequence, position")
+    .eq("lead_id", leadId)
+    .eq("queue", "call")
+    .eq("status", "pending")
+    .order("due_at", { ascending: true })
+    .limit(20);
+  if (error) throw new Error(error.message);
+  if (!jobs?.length) return false;
+  const next = jobs[0];
+  const nextDue = new Date(String(next.due_at)).getTime();
+  if (!Number.isFinite(nextDue) || nextDue <= Date.now() + MAX_NEXT_CALL_WAIT_MS) return false;
+
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("id, created_at, priority, agreement_status, agreement_sent_at")
+    .eq("id", leadId)
+    .maybeSingle();
+  const priority = Boolean(lead?.priority) || next.sequence === "want_to_sign";
+  const pulled = scheduleCallback({
+    from: new Date(),
+    window: "morning",
+    index: 0,
+    contactAt: lead?.created_at ? new Date(lead.created_at) : null,
+    priority,
+    varyKey: `${leadId}:pull:${next.id}`,
+  });
+  const delta = new Date(pulled).getTime() - nextDue;
+  if (delta >= 0) return false;
+  for (const job of jobs) {
+    const due = new Date(String(job.due_at)).getTime() + delta;
+    const { error: updateError } = await supabase
+      .from("lead_jobs")
+      .update({ due_at: new Date(due).toISOString() })
+      .eq("id", job.id)
+      .eq("status", "pending");
+    if (updateError) throw new Error(updateError.message);
+  }
+  return true;
+}
+
 const FOLLOW_UP_COLUMNS =
   "id, kind, follow_up, lead_name, case_type, signed_case, case_id, lead_status, caller_class, arrival, owner_name, agreement_status, agreement_sent_at, agreement_reminder_count, agreement_next_reminder_at, priority, created_at, consultation_date, lead_date, phone, phone_e164";
 
@@ -286,7 +360,10 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
   for (const lead of leads) {
     const sequence = sequenceForLead(lead, "auto");
     const pending = pendingSequences.get(lead.id);
-    if (sequence && pending?.size === 1 && pending.has(sequence)) continue;
+    if (sequence && pending?.size === 1 && pending.has(sequence)) {
+      await pullForwardStaleCallJobs(supabase, lead.id);
+      continue;
+    }
     await enrollFollowUp(supabase, lead);
     enrolled += 1;
     if (enrolled >= 40) break;

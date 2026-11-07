@@ -3,6 +3,7 @@ import { isWorkLead } from "./caller-class";
 import { leadSequenceId, loadWorkHours } from "./sequences";
 import { loadSlackSettings } from "./slack-settings";
 import { loadStaff } from "./identity";
+import { pullForwardStaleCallJobs } from "./followup";
 import { channelOutboundMention, LEAD_CHANNEL_ID, mentionForName, postToSlack, slackLeadChannel, slackThreadParent } from "./slack";
 import { isPlaceholderOwner, slackMentionFor } from "./talked-with";
 import { sendQuoText } from "./quo";
@@ -182,9 +183,13 @@ export async function dispatchDue(supabase: SupabaseClient) {
             detail: "Call log shows a call after this reminder opened.",
           })
           .eq("id", job.id);
+        await pullForwardStaleCallJobs(supabase, job.lead_id).catch(() => false);
         continue;
       }
-      if (job.notified_at) continue;
+      // A later due time is a new reminder. Only skip when Slack already went out
+      // for this due (notified at or after it). Rescheduling into the future keeps
+      // the old notified_at and still posts when the new time arrives.
+      if (job.notified_at && new Date(job.notified_at).getTime() >= new Date(job.due_at).getTime()) continue;
       if (!postThisLead) continue;
       const sequence =
         leadSequenceId({
@@ -353,14 +358,29 @@ async function callLoggedAfter(supabase: SupabaseClient, lead: LeadRow, since: s
   const found = async (column: "lead_id" | "phone", value: string) => {
     const { data } = await supabase
       .from("intake_interactions")
-      .select("occurred_at")
+      .select("occurred_at, type, direction, content, transcript")
       .eq(column, value)
       .gte("occurred_at", since)
       .in("type", ["call", "sona_call"])
       .order("occurred_at", { ascending: true })
-      .limit(1);
-    const at = data?.[0]?.occurred_at;
-    return typeof at === "string" ? at : null;
+      .limit(20);
+    for (const row of data ?? []) {
+      const at = typeof row.occurred_at === "string" ? row.occurred_at : null;
+      if (!at) continue;
+      // Voicemail / no-connect must not burn the open reminder, or the next
+      // pending step stays on its original day-9+ due time.
+      if (
+        touchReachedClient({
+          type: String(row.type || ""),
+          direction: String(row.direction || ""),
+          content: typeof row.content === "string" ? row.content : null,
+          transcript: typeof row.transcript === "string" ? row.transcript : null,
+        })
+      ) {
+        return at;
+      }
+    }
+    return null;
   };
   const onLead = await found("lead_id", lead.id);
   if (onLead) return onLead;

@@ -462,17 +462,17 @@ export async function stopParkedFollowUps(supabase: SupabaseClient): Promise<num
   const byId = new Map<string, { phone: string | null }>();
   for (const lead of stillFollowing ?? []) {
     if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
-    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone });
+    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone || null });
   }
   for (const job of pendingJobs ?? []) {
     const lead = job.leads as unknown as LeadBits & { test?: boolean | null };
     if (!lead || isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
     if (!closedLead(lead)) continue;
-    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone });
+    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone || null });
   }
   for (const lead of stillTexting ?? []) {
     if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
-    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone });
+    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone || null });
   }
   if (!byId.size) return 0;
 

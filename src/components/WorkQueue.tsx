@@ -1089,7 +1089,10 @@ function detailGap(input: {
   if (input.consulted === "yes" && !input.consultDate) return "Enter the consultation date before saving or closing.";
   if (input.qualified === "no" && input.desired === "yes") return "A lead that is not qualified is not desired.";
   if (input.desired === "yes" && !input.size) return "Choose a size before saving or closing.";
-  if (input.desired === "no" && !input.decline) return "Choose a decline reason before saving or closing.";
+  // Lost closes (e.g. Unresponsive) need Qualified + Desired, not a firm decline reason.
+  if (input.desired === "no" && !input.decline && input.lostChoice !== "yes") {
+    return "Choose a decline reason before saving or closing.";
+  }
   if (input.admin && input.signedChoice === "yes" && !input.signedDate) return "Enter the signed date before saving or closing.";
   if (input.signedChoice === "yes" && input.lostChoice === "yes") return "A lead cannot be both signed and lost.";
   if (input.lostChoice === "yes") {
@@ -1212,8 +1215,8 @@ function LeadFacts({
     setNotLeadReason(notLeadReasonFor(row));
     setSignedChoice(row.signed || row.confirmSigned ? "yes" : "");
     setSignedDate(row.signedDate);
-    setLostChoice(nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "no" : row.lostReason ? "yes" : "");
-    setLostReason(nextType === "Non-PI Legal Matter" || nextQualified === "no" ? "" : (row.lostReason ?? ""));
+    setLostChoice(nextType === "Non-PI Legal Matter" ? "no" : row.lostReason ? "yes" : "");
+    setLostReason(nextType === "Non-PI Legal Matter" ? "" : (row.lostReason ?? ""));
     setDirty({ consult: false, qualified: false, desired: false, signed: false, lost: false });
   }, [row.id]);
   useEffect(() => {
@@ -1223,15 +1226,18 @@ function LeadFacts({
   const consultedValue = nonPi ? "no" : consulted;
   const qualifiedValue = nonPi ? "no" : qualified;
   const desiredValue = nonPi || qualifiedValue === "no" ? "no" : desired;
-  const lostValue = nonPi || qualifiedValue === "no" ? "no" : lostChoice;
-  const declineValue = nonPi ? "DEC: Non-PI Legal Matter" : desiredValue === "no" ? decline : "";
+  const lostValue = nonPi ? "no" : lostChoice;
+  // Lost close skips firm decline tags; Non-PI still uses the Non-PI decline tag.
+  const declineValue =
+    nonPi ? "DEC: Non-PI Legal Matter" : lostValue === "yes" ? "" : desiredValue === "no" ? decline : "";
   const sizeValue = desiredValue === "yes" ? size : "";
   const consultDateValue = consultedValue === "yes" ? consultDate : "";
   const contractLocked = row.desiredLocked && qualifiedValue !== "no";
   const consultLocked = nonPi;
   const qualifiedLocked = nonPi;
   const desiredLocked = contractLocked || nonPi || qualifiedValue === "no";
-  const lostLocked = row.signed || signedChoice === "yes" || nonPi || qualifiedValue === "no";
+  const lostLocked = row.signed || signedChoice === "yes" || nonPi;
+  const declineLocked = desiredValue !== "no" || nonPi || lostValue === "yes";
   const { pending: confirming, submit: confirmSubmit } = useNotedSubmit();
   const missingKeys = new Set(missingGaps.map(gapFieldKey).filter(Boolean) as string[]);
   const fieldMissing = (key: string) => missingKeys.has(key);
@@ -1301,7 +1307,9 @@ function LeadFacts({
     if (notALead) return null;
     if (dirty.consult && consultedValue === "yes" && !consultDateValue) return "Enter the consultation date before saving or closing.";
     if (dirty.desired && desiredValue === "yes" && !sizeValue) return "Choose a size before saving or closing.";
-    if (dirty.desired && desiredValue === "no" && !declineValue) return "Choose a decline reason before saving or closing.";
+    if (dirty.desired && desiredValue === "no" && !declineValue && lostValue !== "yes") {
+      return "Choose a decline reason before saving or closing.";
+    }
     if (dirty.signed && admin && signedChoice === "yes" && !signedDate) return "Enter the signed date before saving or closing.";
     if (dirty.lost && lostValue === "yes") {
       if (!consultedValue) return "Choose Consultation (Yes or No) before closing as lost.";
@@ -1373,11 +1381,10 @@ function LeadFacts({
     data.set("desired_decision", desiredValue);
     data.set("decline_tag", declineValue);
     data.set("size_tag", sizeValue);
-    const clearLost = (nonPi || qualifiedValue === "no") && Boolean(row.lostReason);
     if (lostValue === "yes" && isLostLeadReason(lostReason)) {
       data.set("lost_decision", "yes");
       data.set("lost_reason", lostReason);
-    } else if (lostValue === "no" && (row.lostReason || clearLost)) {
+    } else if (lostValue === "no" && row.lostReason) {
       data.set("lost_decision", "no");
     }
     try {
@@ -1646,9 +1653,7 @@ function LeadFacts({
                     mark("desired");
                     setDesiredChoice("no");
                     setSize("");
-                    mark("lost");
-                    setLostChoice("no");
-                    setLostReason("");
+                    setDecline("");
                   }
                 }}
               />
@@ -1700,14 +1705,16 @@ function LeadFacts({
             <FieldLabel label="Decline reason">
               <select
                 value={declineValue}
-                disabled={desiredValue !== "no" || nonPi}
+                disabled={declineLocked}
                 onChange={(event) => {
                   mark("desired");
                   setDecline(event.target.value);
                 }}
-                className={fieldClass(desiredValue !== "no" || nonPi)}
+                className={fieldClass(declineLocked)}
               >
-                <option value="">{desiredValue === "no" ? "Choose a reason" : "Locked"}</option>
+                <option value="">
+                  {lostValue === "yes" ? "Not needed for lost" : desiredValue === "no" ? "Choose a reason" : "Locked"}
+                </option>
                 {declineOptions(declineValue).map((tag) => (
                   <option key={tag} value={tag}>
                     {tag.slice("DEC: ".length)}
@@ -1806,10 +1813,13 @@ function LeadFacts({
                     mark("lost");
                     setLostChoice(value);
                     if (value === "no") setLostReason("");
-                    if (value === "yes" && signedChoice === "yes") {
-                      setSignedChoice("no");
-                      setSignedDate("");
-                      mark("signed");
+                    if (value === "yes") {
+                      setDecline("");
+                      if (signedChoice === "yes") {
+                        setSignedChoice("no");
+                        setSignedDate("");
+                        mark("signed");
+                      }
                     }
                   }}
                 />
@@ -1837,9 +1847,7 @@ function LeadFacts({
                   <p className="text-xs normal-case tracking-normal text-slate-500">
                     {row.signed || signedChoice === "yes"
                       ? "Unavailable once the lead is signed."
-                      : row.lostReason
-                        ? "Use Reopen lead above — Lost stays locked while Qualified is No."
-                        : "Unavailable when the lead is not qualified."}
+                      : "Non-PI legal matters move to non-leads instead of lost."}
                   </p>
                 ) : null
               }

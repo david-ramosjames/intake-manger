@@ -2225,8 +2225,9 @@ export async function applyLostLeadDecision(
   if (before.signed_case || before.lead_status === "Signed" || before.case_id) {
     throw new Error("A signed or promoted case cannot be marked lost.");
   }
-  if (decision === "yes" && (before.qualified === false || officialCaseType(before.case_type) === "Non-PI Legal Matter")) {
-    throw new Error("A lead that is not qualified cannot be marked lost.");
+  // Non-PI belongs in non-leads. Qualified No is allowed for Lost (e.g. Unresponsive).
+  if (decision === "yes" && officialCaseType(before.case_type) === "Non-PI Legal Matter") {
+    throw new Error("Move Non-PI matters to non-leads instead of marking them lost.");
   }
 
   if (decision === "yes") {

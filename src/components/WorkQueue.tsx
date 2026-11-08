@@ -326,6 +326,8 @@ export function WorkQueue({
   const rows = useMemo(() => {
     if (!liveText?.ok) return sourceRows;
     return sourceRows.map((row) => {
+      // Closed / signed leads stay off — never re-show Stop SMS from a live poll lag.
+      if (row.cycle === "closed" || row.cycle === "signed" || row.signed || row.lostReason) return row;
       const tail = phoneTail(row.phone);
       if (tail.length < 10) return row;
       const hit = liveText.active[tail];

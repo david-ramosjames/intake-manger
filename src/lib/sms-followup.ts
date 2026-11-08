@@ -2,6 +2,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { phoneTail } from "@/lib/phone";
+import { isPracticeTestPhone } from "@/lib/test-phone";
 
 function config() {
   const base = process.env.SMS_FOLLOWUP_URL?.replace(/\/$/, "");
@@ -116,11 +117,22 @@ type LeadTextFields = {
   text_sequence_status?: string | null;
   text_sequence_slug?: string | null;
   text_next_at?: string | null;
+  lead_status?: string | null;
+  signed_case?: boolean | null;
+  case_id?: string | null;
 };
+
+const CLOSED_FOR_TEXTS = new Set(["Lost", "Referred", "Promoted", "Signed"]);
+
+function closedForTexts(lead: LeadTextFields): boolean {
+  if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) return false;
+  return Boolean(lead.signed_case || lead.case_id || CLOSED_FOR_TEXTS.has(String(lead.lead_status ?? "")));
+}
 
 /**
  * Copy the sender's live series onto these leads. The lead column is a mirror
  * and can lag, which left Start SMS up while texts were already going out.
+ * Closed leads never get re-activated — leftover live series are stopped.
  */
 export async function applyLiveTextSequences<T extends LeadTextFields>(
   supabase: SupabaseClient,
@@ -129,10 +141,21 @@ export async function applyLiveTextSequences<T extends LeadTextFields>(
   if (leads.length === 0) return leads;
   const live = await lookupLiveTextSequences(leads.map((lead) => lead.phone_e164 || lead.phone || ""));
   if (!live) return leads;
+  const heal: { phone: string; id: string }[] = [];
   const next = leads.map((lead) => {
-    const tail = phoneTail(lead.phone_e164 || lead.phone);
+    const phone = lead.phone_e164 || lead.phone || "";
+    const tail = phoneTail(phone);
     const hit = tail.length >= 10 ? live.get(tail) : undefined;
     if (!hit) return lead;
+    if (closedForTexts(lead)) {
+      heal.push({ phone, id: lead.id });
+      if ((lead.text_sequence_status || "").toLowerCase() === "stopped" && !lead.text_next_at) return lead;
+      return {
+        ...lead,
+        text_sequence_status: "stopped",
+        text_next_at: null,
+      };
+    }
     const wasActive = (lead.text_sequence_status || "").toLowerCase() === "active";
     if (wasActive && (lead.text_sequence_slug || "") === hit.slug) return lead;
     return {
@@ -155,6 +178,11 @@ export async function applyLiveTextSequences<T extends LeadTextFields>(
           })
           .eq("id", lead.id),
       ),
+    ).catch(() => undefined);
+  }
+  if (heal.length) {
+    await Promise.all(
+      heal.map(({ phone }) => stopSmsFollowUp(phone, "intake-manager:closed").catch(() => ({ ok: false }))),
     ).catch(() => undefined);
   }
   return next;

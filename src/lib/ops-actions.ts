@@ -1690,10 +1690,14 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
       practice_area: area,
       referral_opportunity: true,
       caller_class: outside ? "non_pi" : null,
+      text_sequence_status: "stopped",
+      text_next_at: null,
     })
     .eq("id", leadId);
   if (updateError) return { error: updateError.message };
   await stopFollowUp(supabase, leadId, "Referred out.");
+  const phone = lead.phone_e164 || toE164(lead.phone);
+  if (phone) await askSmsFollowUpStop(phone, email).catch(() => ({ ok: false }));
   const { error } = await supabase.from("referral_sends").insert({
     lead_id: leadId,
     destination_id: destination?.id ?? null,

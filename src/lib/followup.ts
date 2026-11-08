@@ -6,7 +6,9 @@ import { contractOutstanding } from "./desired";
 import { nameIsUnavailable, type LeadKind } from "./leads";
 import { type CallSequenceId, type WorkHours } from "./sequences";
 import { chicagoLocalToIso, formatChicago } from "./time";
+import { stopSmsFollowUp } from "./sms-followup";
 import { isPracticeTestPhone } from "./test-phone";
+import { toE164 } from "./phone";
 
 type LeadBits = {
   id: string;
@@ -448,25 +450,45 @@ export async function stopParkedFollowUps(supabase: SupabaseClient): Promise<num
     .limit(200);
   if (jobsError) throw new Error(jobsError.message);
 
-  const byId = new Map<string, string>();
+  const { data: stillTexting, error: textError } = await supabase
+    .from("leads")
+    .select("id, phone, phone_e164")
+    .eq("test", false)
+    .eq("text_sequence_status", "active")
+    .or(parkedFilter)
+    .limit(200);
+  if (textError) throw new Error(textError.message);
+
+  const byId = new Map<string, { phone: string | null }>();
   for (const lead of stillFollowing ?? []) {
     if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
-    byId.set(String(lead.id), String(lead.id));
+    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone });
   }
   for (const job of pendingJobs ?? []) {
     const lead = job.leads as unknown as LeadBits & { test?: boolean | null };
     if (!lead || isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
     if (!closedLead(lead)) continue;
-    byId.set(String(lead.id), String(lead.id));
+    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone });
+  }
+  for (const lead of stillTexting ?? []) {
+    if (isPracticeTestPhone(lead.phone_e164 || lead.phone)) continue;
+    byId.set(String(lead.id), { phone: lead.phone_e164 || lead.phone });
   }
   if (!byId.size) return 0;
 
   let stopped = 0;
-  for (const leadId of byId.values()) {
+  for (const [leadId, { phone }] of byId) {
     await stopFollowUp(supabase, leadId, "Closed or not a lead. Call sequence stopped.");
+    const e164 = phone ? toE164(phone) || phone : null;
+    if (e164) await stopSmsFollowUp(e164, "intake-manager:closed").catch(() => ({ ok: false }));
     const { error: updateError } = await supabase
       .from("leads")
-      .update({ follow_up: false, sequence: "stop" })
+      .update({
+        follow_up: false,
+        sequence: "stop",
+        text_sequence_status: "stopped",
+        text_next_at: null,
+      })
       .eq("id", leadId);
     if (updateError) throw new Error(updateError.message);
     stopped += 1;

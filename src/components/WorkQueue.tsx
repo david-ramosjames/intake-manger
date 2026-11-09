@@ -28,7 +28,7 @@ import { chicagoLocalInput, formatChicago } from "@/lib/time";
 import { ButtonLabel } from "@/components/ButtonLabel";
 import { buttonPrimary, buttonSecondary } from "@/lib/ui";
 import { inArrivedRange, useWorkFilters } from "@/components/WorkFilters";
-import { phoneMatches, phoneTail } from "@/lib/phone";
+import { phoneMatches, phoneTail, toE164 } from "@/lib/phone";
 import { DEFAULT_TEXT_SEQUENCE, matchesQueue, TEXT_SEQUENCES, textSequenceLabel } from "@/lib/queue";
 import { DEFAULT_REFERRAL_FROM, REFERRAL_FROM_LINES, quoLineLabel } from "@/lib/quo-settings";
 import { matchesPriorityFilter } from "@/lib/work-queue-options";
@@ -1381,6 +1381,14 @@ function LeadFacts({
     data.set("desired_decision", desiredValue);
     data.set("decline_tag", declineValue);
     data.set("size_tag", sizeValue);
+    // Keep an existing international / odd phone when the field was not edited into
+    // a new invalid value — otherwise Save silently fails and referral close still
+    // sees blank marketing fields on the lead.
+    const typedPhone = String(data.get("phone") ?? "").trim();
+    const storedPhone = (row.phone ?? "").trim();
+    if (typedPhone && typedPhone === storedPhone && !toE164(typedPhone) && storedPhone) {
+      data.set("keep_phone", "1");
+    }
     if (lostValue === "yes" && isLostLeadReason(lostReason)) {
       data.set("lost_decision", "yes");
       data.set("lost_reason", lostReason);

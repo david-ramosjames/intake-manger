@@ -1,8 +1,18 @@
-/** US-leaning E.164. Returns null when the digits are not a US 10- or 11-digit number. */
+/**
+ * Normalize to E.164. US 10-digit numbers become +1…; numbers that already
+ * include a country code (or a leading +) stay international. Returns null
+ * when there are not enough digits to dial.
+ */
 export function toE164(phone: string | null | undefined): string | null {
-  const digits = (phone ?? "").replace(/\D/g, "");
+  const raw = (phone ?? "").trim();
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  // Colombia and other international leads (8–15 digits with a country code).
+  if (digits.length >= 8 && digits.length <= 15 && (raw.startsWith("+") || digits.length >= 11)) {
+    return `+${digits}`;
+  }
   return null;
 }
 

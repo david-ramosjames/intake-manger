@@ -547,7 +547,7 @@ export async function saveLeadDetails(formData: FormData) {
   const leadDate = text(formData, "lead_date");
   const phoneE164 = phone ? toE164(phone) : null;
   const keepPhone = formData.get("keep_phone") === "1";
-  if (!keepPhone && phone && !phoneE164) throw new Error("Enter a 10-digit phone number.");
+  if (!keepPhone && phone && !phoneE164) throw new Error("Enter a full phone number with country code.");
   const consulted = text(formData, "consulted");
   const consultationDate = text(formData, "consultation_date");
   if (consulted === "yes" && !/^\d{4}-\d{2}-\d{2}$/.test(consultationDate ?? "")) {

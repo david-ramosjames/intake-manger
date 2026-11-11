@@ -37,6 +37,10 @@ export function closeGaps(lead: CloseReadyLead, path: ClosePath = "base"): strin
   const gaps = baseCloseGaps(lead);
   if (path === "base" || path === "chase") return gaps;
   if (path === "declined") {
+    // Referrals still need a Qualified Yes/No — same bar as Lost, even when
+    // Desired is already No and a decline reason is set.
+    const qualified = qualifiedValue(lead);
+    if (qualified !== true && qualified !== false) gaps.push("Qualified");
     if (lead.desired_case !== false) gaps.push("Desired");
     if (!selectedDecline(lead.callrail_tags ?? [])) gaps.push("Decline reason");
     return gaps;

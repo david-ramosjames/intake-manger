@@ -35,6 +35,7 @@ export const EXPORT_FIELDS: ExportField[] = [
   { id: "name", label: "Name", group: "Contact", defaultOn: true },
   { id: "phone", label: "Phone", group: "Contact", defaultOn: true },
   { id: "email", label: "Email", group: "Contact", defaultOn: true },
+  { id: "language", label: "Language", group: "Contact", defaultOn: true },
   { id: "arrived", label: "Arrived", group: "Lead", defaultOn: true },
   { id: "status", label: "Status", group: "Lead", defaultOn: true },
   { id: "owner", label: "Owner", group: "Lead", defaultOn: true },
@@ -78,6 +79,7 @@ export type ExportLead = {
   phone?: string | null;
   phone_e164?: string | null;
   email?: string | null;
+  preferred_language?: string | null;
   created_at?: string | null;
   lead_status?: string | null;
   owner_name?: string | null;
@@ -167,6 +169,8 @@ function columnsFor(id: string): string[] {
       return ["phone", "phone_e164"];
     case "email":
       return ["email"];
+    case "language":
+      return ["preferred_language"];
     case "arrived":
       return ["created_at"];
     case "status":
@@ -321,6 +325,8 @@ function exportCell(row: ExportLead, id: string): string {
       return text(row.phone_e164 || row.phone);
     case "email":
       return text(row.email);
+    case "language":
+      return languageLabel(row.preferred_language);
     case "arrived":
       return chicagoStamp(row.created_at);
     case "status":
@@ -424,6 +430,13 @@ function consultationLabel(value: string | null | undefined): string {
   const consultation = text(value).toLowerCase();
   if (consultation === "staff" || consultation === "yes") return "Yes";
   if (consultation === "no") return "No";
+  return text(value);
+}
+
+function languageLabel(value: string | null | undefined): string {
+  const language = text(value).toLowerCase();
+  if (language === "en") return "English";
+  if (language === "es") return "Spanish";
   return text(value);
 }
 

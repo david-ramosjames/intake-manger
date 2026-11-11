@@ -294,6 +294,7 @@ function fallbackRow(job: OpenCallCard): QueueRow {
     nonPi: false,
     practiceArea: null,
     referralSent: false,
+    referralDeclined: false,
     referralFirm: null,
     callerClass: null,
     preferredLanguage: null,

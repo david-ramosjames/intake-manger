@@ -9,7 +9,7 @@ import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
 import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { daysSince, isLeadView, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead, type LeadView } from "@/lib/leads";
-import { CYCLE_LABEL, leadCycle, leadStatusLabel, nonPiHoldOpen, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep, touchReachedClient } from "@/lib/next-step";
+import { CYCLE_LABEL, leadCycle, leadStatusLabel, loadReferralDeclinedIds, nonPiHoldOpen, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep, touchReachedClient } from "@/lib/next-step";
 import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "@/lib/caller-class";
 import { signedFileReady } from "@/lib/close-ready";
 import { isLostLeadReason, visibleCloseSuggestion } from "@/lib/funnel";
@@ -600,7 +600,8 @@ export default async function LeadListPage({
     list.push(lead.id);
     idsByPhone.set(key, list);
   }
-  const [staff, sendResult, activity, calls, callJobs, staffTouched] = await Promise.all([
+  const declinedIds = leads.filter((lead) => lead.close_reason === "declined").map((lead) => lead.id);
+  const [staff, sendResult, activity, calls, callJobs, staffTouched, referralDeclined] = await Promise.all([
     loadStaff(supabase),
     leadIds.length
       ? eachSlice(leadIds, 100, async (slice) => {
@@ -615,6 +616,7 @@ export default async function LeadListPage({
     loadPendingJobs(supabase, idSet),
     loadLeadCallJobs(supabase, leadIds),
     loadStaffTouchedIds(supabase, leadIds),
+    loadReferralDeclinedIds(supabase, declinedIds),
   ]);
   const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string | null; attorney_name: string | null; created_at: string }[];
   sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -756,7 +758,10 @@ export default async function LeadListPage({
       waiting,
       attention,
       inWindow: leadMetricDay(lead) >= since,
-      label: queueStageLabel({ ...lead, referral_recorded: sentFirm.has(lead.id) }, leadStatusLabel(lead, cycle)),
+      label: queueStageLabel(
+        { ...lead, referral_recorded: sentFirm.has(lead.id), referral_declined: referralDeclined.has(lead.id) },
+        leadStatusLabel(lead, cycle),
+      ),
       step: queueStep(lead, cycle, tally.calls),
       actionTitle: openLeadAction(lead, cycle, tally.calls),
       accident: listAccident(lead),
@@ -880,6 +885,7 @@ export default async function LeadListPage({
       nonPi: officialCaseType(row.lead.case_type) === "Non-PI Legal Matter",
       practiceArea: row.lead.practice_area,
       referralSent: sentFirm.has(row.lead.id) || row.lead.lead_status === "Referred" || row.lead.close_reason === "referred",
+      referralDeclined: row.lead.close_reason === "declined" && referralDeclined.has(row.lead.id),
       referralFirm: sentFirm.get(row.lead.id) || null,
       callerClass: row.lead.caller_class,
       preferredLanguage:

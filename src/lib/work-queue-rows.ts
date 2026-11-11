@@ -9,7 +9,7 @@ import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { fillLeadSources } from "@/lib/lead-source-fill";
 import { daysSince, isSourceType, leadTitle, listAccident, listDetail, officialCaseType, slackMessageUrl, suggestedCaseType, type Lead } from "@/lib/leads";
 import { nextActionLines, nextActionMoment, type CallStep } from "@/lib/next-action";
-import { leadCycle, leadStatusLabel, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep, touchReachedClient } from "@/lib/next-step";
+import { leadCycle, leadStatusLabel, loadReferralDeclinedIds, openLeadAction, outreachSequence, PRIORITY_PLACE_LABEL, priorityPlace, queueStageLabel, queueStep, touchReachedClient } from "@/lib/next-step";
 import { phoneTail } from "@/lib/phone";
 import { automationLine, needsAttention, receivedLabel, stageClass, stageStripe, waitingTooLong } from "@/lib/queue";
 import { loadPropertyDamageGuides } from "@/lib/property-damage-guides";
@@ -178,6 +178,7 @@ function toQueueRow(
     nextTextId: string | null;
     nextTextDue: string | null;
     sentFirm: string | null;
+    referralDeclined?: boolean;
     outside: { quo: string | null; slack: string | null };
     callSteps: (CallStep & { sequence: string })[];
     docket: string;
@@ -205,7 +206,10 @@ function toQueueRow(
     identityStatus: lead.identity_status,
     agreementStatus: lead.agreement_status,
   });
-  const label = queueStageLabel({ ...lead, referral_recorded: Boolean(input.sentFirm) }, leadStatusLabel(lead, cycle));
+  const label = queueStageLabel(
+    { ...lead, referral_recorded: Boolean(input.sentFirm), referral_declined: Boolean(input.referralDeclined) },
+    leadStatusLabel(lead, cycle),
+  );
   const priority = priorityPlace(lead);
   const closed = !isPracticeTestPhone(lead.phone_e164 || lead.phone) && (cycle === "signed" || cycle === "closed");
   const sequenceInput = {
@@ -270,6 +274,7 @@ function toQueueRow(
     nonPi: officialCaseType(lead.case_type) === "Non-PI Legal Matter",
     practiceArea: lead.practice_area,
     referralSent: Boolean(input.sentFirm) || lead.lead_status === "Referred" || lead.close_reason === "referred",
+    referralDeclined: lead.close_reason === "declined" && Boolean(input.referralDeclined),
     referralFirm: input.sentFirm,
     callerClass: lead.caller_class,
     preferredLanguage: lead.preferred_language === "es" || lead.preferred_language === "en" ? lead.preferred_language : null,
@@ -389,7 +394,7 @@ export async function loadWorkQueueRows(
     };
   }
 
-  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }, callJobs, staffTouched, propertyDamageGuides] =
+  const [{ data: leadRows }, { data: stepRows }, destinationResult, templateResult, staff, { data: sendRows }, { data: jobRows }, { data: touchRows }, callJobs, staffTouched, propertyDamageGuides, referralDeclined] =
     await Promise.all([
       supabase.from("leads").select(LIST_COLUMNS).in("id", ids),
       supabase.from("sequence_steps").select("sequence, position, delay_minutes, callback_window").eq("queue", "call").order("position"),
@@ -411,6 +416,7 @@ export async function loadWorkQueueRows(
       loadLeadCallJobs(supabase, ids),
       loadStaffTouchedIds(supabase, ids),
       loadPropertyDamageGuides(),
+      loadReferralDeclinedIds(supabase, ids),
     ]);
 
   const leads = await applyLiveTextSequences(supabase, (leadRows ?? []) as ListLead[]);
@@ -505,6 +511,7 @@ export async function loadWorkQueueRows(
       nextTextId: nextText.get(lead.id)?.id ?? null,
       nextTextDue: nextText.get(lead.id)?.dueAt ?? null,
       sentFirm: sentFirm.get(lead.id) || null,
+      referralDeclined: referralDeclined.has(lead.id),
       outside: outsideLinks.get(lead.id) ?? { quo: null, slack: null },
       callSteps,
       docket,

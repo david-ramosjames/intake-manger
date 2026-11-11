@@ -91,6 +91,7 @@ type StageLead = CloseReadyLead & {
   close_reason?: string | null;
   case_id?: string | null;
   referral_recorded?: boolean;
+  referral_declined?: boolean;
 };
 
 function referralChecklist(lead: StageLead): CloseReadyLead {
@@ -102,6 +103,34 @@ function referralChecklist(lead: StageLead): CloseReadyLead {
 }
 
 const REFERRAL_HOLD_TAGS = ["DEC: Outside Service Area", "DEC: Referred", "DEC: Non-PI Legal Matter"];
+const REFERRAL_STATUS_EVENTS = ["referral_declined", "declined", "referred", "lost_lead_reopened"] as const;
+
+/** Leads whose latest close event is Referral Declined, so a later reopen or plain decline does not stick. */
+export async function loadReferralDeclinedIds(
+  supabase: import("@supabase/supabase-js").SupabaseClient,
+  leadIds: string[],
+): Promise<Set<string>> {
+  const declined = new Set<string>();
+  if (!leadIds.length) return declined;
+  const latest = new Map<string, string>();
+  for (let index = 0; index < leadIds.length; index += 100) {
+    const slice = leadIds.slice(index, index + 100);
+    const { data, error } = await supabase
+      .from("lead_events")
+      .select("lead_id, event_type, created_at")
+      .in("lead_id", slice)
+      .in("event_type", [...REFERRAL_STATUS_EVENTS])
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      if (!latest.has(row.lead_id)) latest.set(row.lead_id, row.event_type);
+    }
+  }
+  for (const [id, type] of latest) {
+    if (type === "referral_declined") declined.add(id);
+  }
+  return declined;
+}
 
 function referralMatter(lead: {
   caller_class?: string | null;
@@ -136,7 +165,8 @@ export function referralAwaitingSend(lead: {
 }
 
 export function queueStageLabel(lead: StageLead, fallback: string): string {
-  if (lead.close_reason === "declined" && referralMatter(lead)) return "Referral Declined";
+  // A referral the client turned down is its own stage, including PI cases.
+  if (lead.close_reason === "declined" && (lead.referral_declined || referralMatter(lead))) return "Referral Declined";
   if (referralAwaitingSend(lead) && closeGaps(referralChecklist(lead), "declined").length === 0) return "Send Referral";
   if (lead.caller_class === "non_pi") return fallback;
   return callerClassLabel(lead.caller_class) ?? fallback;

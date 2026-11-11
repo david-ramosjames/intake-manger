@@ -97,6 +97,7 @@ export type QueueRow = {
   nonPi: boolean;
   practiceArea: string | null;
   referralSent: boolean;
+  referralDeclined: boolean;
   referralFirm: string | null;
   callerClass: string | null;
   preferredLanguage: "en" | "es" | null;
@@ -538,22 +539,22 @@ export function WorkQueue({
                   <span className={`inline-flex rounded-full px-2 py-0.5 font-medium leading-tight ${row.stageClassName}`}>
                     {row.label}
                   </span>
-                  {row.nonPi || row.tags.includes("DEC: Referred") ? (
-                    row.referralSent ? (
-                      <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
-                    ) : row.label === "Referral Declined" ? null : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!canLeave.current()) return;
-                          pick(row.id);
-                          setReferralOpenId(row.id);
-                        }}
-                        className="mt-1 cursor-pointer rounded px-1 text-[11px] font-medium text-orange-800 underline transition-colors hover:bg-orange-100"
-                      >
-                        Send referral
-                      </button>
-                    )
+                  {row.referralSent ? (
+                    <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
+                  ) : row.label === "Declined" ? (
+                    <p className="mt-1 text-[11px] font-medium text-slate-500">Not referred</p>
+                  ) : row.nonPi || row.tags.includes("DEC: Referred") ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!canLeave.current()) return;
+                        pick(row.id);
+                        setReferralOpenId(row.id);
+                      }}
+                      className="mt-1 cursor-pointer rounded px-1 text-[11px] font-medium text-orange-800 underline transition-colors hover:bg-orange-100"
+                    >
+                      Send referral
+                    </button>
                   ) : null}
                 </td>
                 <td className="px-2 py-2 text-slate-800">
@@ -1914,7 +1915,7 @@ function QueueReferral({
   const [fromNumber, setFromNumber] = useState(DEFAULT_REFERRAL_FROM);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"send" | "already" | "declined" | null>(null);
-  const [recorded, setRecorded] = useState<"sent" | "declined" | null>(null);
+  const [recorded, setRecorded] = useState<"sent" | "declined" | null>(row.referralDeclined ? "declined" : null);
   const [editingText, setEditingText] = useState(false);
   const [draft, setDraft] = useState("");
   const [attorneyName, setAttorneyName] = useState("");
@@ -2101,11 +2102,14 @@ function QueueReferral({
         </div>
       ) : !mode || !ready ? (
         <div className="mt-2 flex flex-wrap gap-2">
+          {row.cycle === "closed" && !row.referralSent && !row.referralDeclined ? (
+            <p className="w-full text-sm text-slate-600">Not referred.</p>
+          ) : null}
           <button
             type="button"
             disabled={pending !== null || !ready}
             onClick={() => setMode("send")}
-            className={`${lockedButton} bg-navy text-white hover:bg-[#16366e]`}
+            className={`${lockedButton} border border-slate-300 bg-white text-slate-900 hover:border-navy hover:bg-slate-100 hover:text-navy`}
           >
             Referral Requested
           </button>

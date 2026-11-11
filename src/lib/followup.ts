@@ -257,6 +257,62 @@ export async function enrollFollowUp(
   void hoursBySequence;
 }
 
+/**
+ * Move the other pending calls by the same amount as the one that was rescheduled.
+ * That call stays the next tag. A step that would still fall before it is mirrored
+ * to the same distance after the new time, so the sequence stays downstream.
+ */
+export function downstreamDueTimes(oldDueMs: number, newDueMs: number, otherDueMs: number[]): number[] {
+  if (!otherDueMs.length || !Number.isFinite(oldDueMs) || !Number.isFinite(newDueMs) || oldDueMs === newDueMs) {
+    return otherDueMs.slice();
+  }
+  const delta = newDueMs - oldDueMs;
+  return otherDueMs.map((due) => {
+    if (!Number.isFinite(due)) return due;
+    const shifted = due + delta;
+    if (shifted > newDueMs) return shifted;
+    const distance = newDueMs - shifted;
+    return newDueMs + Math.max(distance, 60_000);
+  });
+}
+
+export async function shiftFollowingCalls(
+  supabase: SupabaseClient,
+  leadId: string,
+  anchorId: string,
+  oldDueIso: string,
+  newDueIso: string,
+): Promise<void> {
+  const oldMs = new Date(oldDueIso).getTime();
+  const newMs = new Date(newDueIso).getTime();
+  if (!Number.isFinite(oldMs) || !Number.isFinite(newMs) || oldMs === newMs) return;
+  const { data, error } = await supabase
+    .from("lead_jobs")
+    .select("id, due_at")
+    .eq("lead_id", leadId)
+    .eq("queue", "call")
+    .eq("status", "pending")
+    .neq("id", anchorId);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []).filter((row) => row.id && row.due_at);
+  if (!rows.length) return;
+  const next = downstreamDueTimes(
+    oldMs,
+    newMs,
+    rows.map((row) => new Date(String(row.due_at)).getTime()),
+  );
+  for (let index = 0; index < rows.length; index += 1) {
+    const at = next[index];
+    if (!Number.isFinite(at)) continue;
+    const { error: updateError } = await supabase
+      .from("lead_jobs")
+      .update({ due_at: new Date(at).toISOString() })
+      .eq("id", String(rows[index].id))
+      .eq("status", "pending");
+    if (updateError) throw new Error(updateError.message);
+  }
+}
+
 /** Soonest pending call should not sit a week out after earlier steps were used up. */
 const MAX_NEXT_CALL_WAIT_MS = 36 * 60 * 60_000;
 

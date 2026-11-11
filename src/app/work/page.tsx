@@ -705,16 +705,12 @@ export default async function LeadListPage({
       }
       if (job.queue !== "call") continue;
       callWaiting.add(job.lead_id);
-      // Keep overdue pending jobs too — they still need Call time / Slack tag editors.
+      // Soonest due time is the next tag. A lower step number can be later in the day.
       const position = typeof job.position === "number" ? job.position : Number.MAX_SAFE_INTEGER;
       const current = nextCall.get(job.lead_id);
-      const jobFuture = new Date(job.due_at).getTime() > Date.now();
-      const currentFuture = current ? new Date(current.dueAt).getTime() > Date.now() : false;
-      const better =
-        !current ||
-        (jobFuture && !currentFuture) ||
-        (jobFuture === currentFuture && (position < current.position || (position === current.position && job.due_at < current.dueAt)));
-      if (better) nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name, position });
+      if (!current || job.due_at < current.dueAt || (job.due_at === current.dueAt && position < current.position)) {
+        nextCall.set(job.lead_id, { id: job.id, dueAt: job.due_at, tag: job.assigned_name, position });
+      }
   }
 
 

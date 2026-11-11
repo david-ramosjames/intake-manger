@@ -11,7 +11,7 @@ import { loadStaff, matchStaff } from "./identity";
 import { firmUserId } from "./staff";
 import { canonicalTextSequence, textSequenceLabel } from "./queue";
 import { contractSent } from "./desired";
-import { enrollFollowUp, enrollMissingFollowUps, sequenceForLead, stopFollowUp } from "./followup";
+import { enrollFollowUp, enrollMissingFollowUps, sequenceForLead, shiftFollowingCalls, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
 import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standardLeadEmail, type LeadKind } from "./leads";
@@ -392,7 +392,7 @@ export async function setNextAction(formData: FormData) {
     if (jobId) {
       const { data: job, error } = await supabase
         .from("lead_jobs")
-        .select("id, lead_id, queue, status, sequence, position")
+        .select("id, lead_id, queue, status, sequence, position, due_at")
         .eq("id", jobId)
         .maybeSingle();
       if (error || !job || job.lead_id !== leadId || job.queue !== "call" || job.status !== "pending") {
@@ -420,6 +420,7 @@ export async function setNextAction(formData: FormData) {
       }
       const { error: updateError } = await supabase.from("lead_jobs").update(patch).eq("id", jobId);
       if (updateError) throw new Error(updateError.message);
+      if (typeof job.due_at === "string") await shiftFollowingCalls(supabase, leadId, jobId, job.due_at, due);
     } else {
       await supabase
         .from("lead_jobs")
@@ -1089,27 +1090,39 @@ export async function saveCallbackPlan(formData: FormData) {
   if (!jobId || !due) throw new Error("Choose when the Slack reminder should post.");
   const { data: job, error } = await supabase
     .from("lead_jobs")
-    .select("id, lead_id, status, queue")
+    .select("id, lead_id, status, queue, due_at")
     .eq("id", jobId)
     .maybeSingle();
   if (error || !job) throw new Error(error?.message ?? "That callback is missing.");
   if (job.queue !== "call" || (job.status !== "pending" && job.status !== "failed")) {
     throw new Error("That reminder already went out.");
   }
+  const previousDue = typeof job.due_at === "string" ? job.due_at : "";
+  const { count: earlierCount, error: earlierError } = await supabase
+    .from("lead_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("lead_id", job.lead_id)
+    .eq("queue", "call")
+    .eq("status", "pending")
+    .neq("id", jobId)
+    .lt("due_at", previousDue);
+  if (earlierError) throw new Error(earlierError.message);
   const staff = await loadStaff(supabase);
   const person = assigned ? matchStaff(assigned, staff) : null;
   const { data: lead } = await supabase.from("leads").select("consultation_date").eq("id", job.lead_id).maybeSingle();
   const consulted = Boolean(lead?.consultation_date);
+  const nextDue = chicagoLocalToIso(due);
   const { error: updateError } = await supabase
     .from("lead_jobs")
     .update({
-      due_at: chicagoLocalToIso(due),
+      due_at: nextDue,
       assigned_name: assigned,
       mention: person?.slackUserId || null,
       detail: assigned ? `Tag ${assigned}.` : consulted ? "Choose who handled this." : "Outbound from #lead-calls topic.",
     })
     .eq("id", jobId);
   if (updateError) throw new Error(updateError.message);
+  if (!earlierCount && previousDue) await shiftFollowingCalls(supabase, job.lead_id, jobId, previousDue, nextDue);
   await supabase.from("lead_events").insert({
     lead_id: job.lead_id,
     event_type: "callback_edited",

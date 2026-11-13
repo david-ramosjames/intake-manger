@@ -257,6 +257,12 @@ export async function enrollFollowUp(
   void hoursBySequence;
 }
 
+/** Next call step when the cadence positions are already taken. */
+export function nextFreePosition(used: number[]): number {
+  const max = used.reduce((highest, position) => (Number.isFinite(position) && position > highest ? position : highest), 0);
+  return max + 1;
+}
+
 /**
  * Move the other pending calls by the same amount as the one that was rescheduled.
  * That call stays the next tag. A step that would still fall before it is mirrored

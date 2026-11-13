@@ -11,7 +11,7 @@ import { loadStaff, matchStaff } from "./identity";
 import { firmUserId } from "./staff";
 import { canonicalTextSequence, textSequenceLabel } from "./queue";
 import { contractSent } from "./desired";
-import { enrollFollowUp, enrollMissingFollowUps, sequenceForLead, shiftFollowingCalls, stopFollowUp } from "./followup";
+import { enrollFollowUp, enrollMissingFollowUps, nextFreePosition, sequenceForLead, shiftFollowingCalls, stopFollowUp } from "./followup";
 import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso } from "./time";
 import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standardLeadEmail, type LeadKind } from "./leads";
@@ -389,15 +389,21 @@ export async function setNextAction(formData: FormData) {
         : lead.consultation_date
           ? "Call to reconnect after the consultation."
           : "Call the lead.";
-    if (jobId) {
-      const { data: job, error } = await supabase
-        .from("lead_jobs")
-        .select("id, lead_id, queue, status, sequence, position, due_at")
-        .eq("id", jobId)
-        .maybeSingle();
-      if (error || !job || job.lead_id !== leadId || job.queue !== "call" || job.status !== "pending") {
-        throw new Error(error?.message ?? "That call is no longer on the schedule.");
-      }
+    const { data: openJob, error: openError } = jobId
+      ? await supabase
+          .from("lead_jobs")
+          .select("id, lead_id, queue, status, sequence, position, due_at")
+          .eq("id", jobId)
+          .maybeSingle()
+      : { data: null, error: null };
+    if (openError) throw new Error(openError.message);
+    const canMove = Boolean(
+      openJob && openJob.lead_id === leadId && openJob.queue === "call" && openJob.status === "pending",
+    );
+    if (jobId && openJob && !canMove && (openJob.lead_id !== leadId || openJob.queue !== "call")) {
+      throw new Error("That call is no longer on the schedule.");
+    }
+    if (canMove && openJob) {
       const patch: {
         due_at: string;
         assigned_name: string;
@@ -406,47 +412,47 @@ export async function setNextAction(formData: FormData) {
         sequence?: string;
         body?: string;
       } = { due_at: due, assigned_name: assigned, mention, detail };
-      if (job.sequence !== jobSequence) {
+      if (openJob.sequence !== jobSequence) {
         await supabase
           .from("lead_jobs")
           .delete()
           .eq("lead_id", leadId)
           .eq("queue", "call")
           .eq("sequence", jobSequence)
-          .eq("position", job.position ?? 1)
+          .eq("position", openJob.position ?? 1)
           .eq("status", "skipped");
         patch.sequence = jobSequence;
         patch.body = body;
       }
-      const { error: updateError } = await supabase.from("lead_jobs").update(patch).eq("id", jobId);
+      const { error: updateError } = await supabase.from("lead_jobs").update(patch).eq("id", openJob.id);
       if (updateError) throw new Error(updateError.message);
-      if (typeof job.due_at === "string") await shiftFollowingCalls(supabase, leadId, jobId, job.due_at, due);
+      if (typeof openJob.due_at === "string") await shiftFollowingCalls(supabase, leadId, openJob.id, openJob.due_at, due);
     } else {
-      await supabase
+      // The cadence steps are already finished. Add a new reminder instead of
+      // reopening an old one that Slack already posted.
+      const { data: taken, error: takenError } = await supabase
         .from("lead_jobs")
-        .delete()
+        .select("position")
         .eq("lead_id", leadId)
         .eq("queue", "call")
-        .eq("sequence", jobSequence)
-        .eq("position", 1)
-        .eq("status", "skipped");
-      const { error: upsertError } = await supabase.from("lead_jobs").upsert(
-        {
-          lead_id: leadId,
-          queue: "call",
-          sequence: jobSequence,
-          position: 1,
-          due_at: due,
-          body,
-          status: "pending",
-          assigned_name: assigned,
-          mention,
-          detail,
-          outcome_note: null,
-        },
-        { onConflict: "lead_id,queue,sequence,position" },
-      );
-      if (upsertError) throw new Error(upsertError.message);
+        .eq("sequence", jobSequence);
+      if (takenError) throw new Error(takenError.message);
+      const position = nextFreePosition((taken ?? []).map((row) => Number(row.position)));
+      const { error: insertError } = await supabase.from("lead_jobs").insert({
+        lead_id: leadId,
+        queue: "call",
+        sequence: jobSequence,
+        position,
+        due_at: due,
+        body,
+        status: "pending",
+        assigned_name: assigned,
+        mention,
+        detail,
+        outcome_note: null,
+        notified_at: null,
+      });
+      if (insertError) throw new Error(insertError.message);
       await supabase
         .from("leads")
         .update({ follow_up: true, sequence: lead.sequence === "stop" ? null : lead.sequence })

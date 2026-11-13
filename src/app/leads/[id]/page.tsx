@@ -474,6 +474,7 @@ function labelFor(eventType: string): string {
   if (eventType === "not_a_lead") return "Marked not a lead";
   if (eventType === "callrail_tags") return "Tags saved";
   if (eventType === "slack_touch") return "Another Slack post on this lead";
+  if (eventType === "slack_email") return "Email saved from Slack";
   if (eventType === "priority_set") return "Added to the priority list";
   if (eventType === "priority_cleared") return "Removed from the priority list";
   if (eventType === "enrolled") return "Follow-up steps created";

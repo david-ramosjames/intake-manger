@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { emailSummary } from "./slack-email";
 
 export const LEAD_CHANNEL_ID = process.env.SLACK_LEAD_CHANNEL_ID || "C026G89PPSS";
 
@@ -189,6 +190,28 @@ function slackMessageText(message: SlackHistoryMessage): string {
 
 function channelPermalink(channel: string, ts: string): string {
   return `https://ramosjames.slack.com/archives/${channel}/p${ts.replace(".", "")}`;
+}
+
+export type SlackEmailBody = {
+  subject: string | null;
+  summary: string;
+};
+
+/** Email file body. Requires the bot's files:read scope. */
+export async function readSlackEmail(
+  token: string,
+  fileId: string,
+): Promise<{ ok: true; email: SlackEmailBody } | { ok: false; error: string }> {
+  const info = await slackMethod(token, "files.info", { file: fileId });
+  if (!info.ok) return info;
+  const file = info.payload.file as
+    | { mode?: string; filetype?: string; subject?: string; title?: string; name?: string; plain_text?: string; preview?: string }
+    | undefined;
+  if (!file || (file.mode !== "email" && file.filetype !== "email")) return { ok: false, error: "not_email" };
+  const subject = file.subject?.trim() || file.title?.trim() || file.name?.trim() || null;
+  const summary = emailSummary(subject, file.plain_text || file.preview || "");
+  if (!summary) return { ok: false, error: "empty_email" };
+  return { ok: true, email: { subject, summary } };
 }
 
 async function slackMethod(

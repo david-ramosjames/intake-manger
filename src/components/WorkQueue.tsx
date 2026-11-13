@@ -2657,7 +2657,7 @@ export function LeadDrawer({
         </div>
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Summary</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">{row.summary?.trim() || "No call summary yet."}</p>
         </section>
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next</h3>

@@ -11,7 +11,7 @@ import { SIZE_TAGS, declineOptions, selectedDecline, selectedOne } from "@/lib/t
 import type { LeadEntry } from "@/lib/lead-entry";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, nameIsUnavailable, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
-import { closeGaps, referralCloseMessage, type ClosePath } from "@/lib/close-ready";
+import { closeGaps, gapsFromCloseMessage, lostCloseMessage, referralCloseMessage, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLeadHandler, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
@@ -1243,33 +1243,34 @@ function LeadFacts({
   const missingKeys = new Set(missingGaps.map(gapFieldKey).filter(Boolean) as string[]);
   const fieldMissing = (key: string) => missingKeys.has(key);
 
+  function liveCloseLead() {
+    return {
+      lead_name: contactName,
+      phone: row.phone,
+      email,
+      identity_status: row.identityStatus,
+      owner_name: row.owner,
+      qualified: qualifiedValue === "yes" ? true : qualifiedValue === "no" ? false : null,
+      callrail_tags: [
+        ...row.tags.filter((tag) => !tag.startsWith("DEC:") && !SIZE_TAGS.includes(tag as (typeof SIZE_TAGS)[number])),
+        ...(sizeValue ? [sizeValue] : []),
+        ...(declineValue ? [declineValue] : []),
+      ],
+      desired_case: desiredValue === "yes" ? true : desiredValue === "no" ? false : null,
+      signed_case: row.signed,
+      date_signed: signedDate,
+      caller_class: row.callerClass,
+      case_type: caseType,
+      lead_source: leadSource,
+      source_type: sourceType,
+      source_category: sourceCategory,
+      consultation: consultedValue === "yes" ? "staff" : consultedValue === "no" ? "no" : null,
+      consultation_date: consultDateValue,
+    };
+  }
+
   function liveReferralGaps() {
-    return closeGaps(
-      {
-        lead_name: contactName,
-        phone: row.phone,
-        email,
-        identity_status: row.identityStatus,
-        owner_name: row.owner,
-        qualified: qualifiedValue === "yes" ? true : qualifiedValue === "no" ? false : null,
-        callrail_tags: [
-          ...row.tags.filter((tag) => !tag.startsWith("DEC:") && !SIZE_TAGS.includes(tag as (typeof SIZE_TAGS)[number])),
-          ...(sizeValue ? [sizeValue] : []),
-          ...(declineValue ? [declineValue] : []),
-        ],
-        desired_case: desiredValue === "yes" ? true : desiredValue === "no" ? false : null,
-        signed_case: row.signed,
-        date_signed: signedDate,
-        caller_class: row.callerClass,
-        case_type: caseType,
-        lead_source: leadSource,
-        source_type: sourceType,
-        source_category: sourceCategory,
-        consultation: consultedValue === "yes" ? "staff" : consultedValue === "no" ? "no" : null,
-        consultation_date: consultDateValue,
-      },
-      "declined",
-    );
+    return closeGaps(liveCloseLead(), "declined");
   }
 
   function showMissingGaps(gaps: string[], message?: string) {
@@ -1342,14 +1343,26 @@ function LeadFacts({
       notify({ tone: "error", text: message });
       return;
     }
+    const markLost = lostValue === "yes" && isLostLeadReason(lostReason);
+    if (markLost) {
+      const gaps = closeGaps(liveCloseLead(), "lost");
+      if (gaps.length) {
+        showMissingGaps(gaps, lostCloseMessage(gaps));
+        return;
+      }
+    }
     setPending(true);
     setSaved(false);
     setError(null);
     notify({ tone: "saving", text: "Saving…" });
-    const markLost = lostValue === "yes" && isLostLeadReason(lostReason);
     try {
       const saved = await persistDetails(formData);
       if (markLost && !saved?.closed) {
+        const gaps = closeGaps(liveCloseLead(), "lost");
+        if (gaps.length) {
+          showMissingGaps(gaps, lostCloseMessage(gaps));
+          return;
+        }
         throw new Error("Could not close as lost. Try Save again.");
       }
       setSaved(true);
@@ -1362,7 +1375,17 @@ function LeadFacts({
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : "Could not save";
-      if (text.includes("Server Components render")) {
+      const fromServer = gapsFromCloseMessage(text);
+      if (fromServer) {
+        showMissingGaps(fromServer, markLost ? lostCloseMessage(fromServer) : text);
+      } else if (markLost && text.includes("Could not close as lost")) {
+        const gaps = closeGaps(liveCloseLead(), "lost");
+        if (gaps.length) showMissingGaps(gaps, lostCloseMessage(gaps));
+        else {
+          notify({ tone: "error", text });
+          setError(text);
+        }
+      } else if (text.includes("Server Components render")) {
         setSaved(true);
         setError(null);
         setMissingGaps([]);
@@ -1450,17 +1473,30 @@ function LeadFacts({
           {row.signed ? null : (
             <NonLeadChoice row={row} reason={notLeadReason} onReason={setNotLeadReason} />
           )}
-          <PanelSection title="Contact">
-            <FieldLabel label="Name" className="col-span-2">
-              <input name="lead_name" value={contactName} onChange={(event) => setContactName(event.target.value)} className={fieldClass()} />
+          <PanelSection title="Contact" invalid={fieldMissing("name") || fieldMissing("phone")}>
+            <FieldLabel label="Name" className="col-span-2" fieldKey="name" invalid={fieldMissing("name")}>
+              <input
+                name="lead_name"
+                value={contactName}
+                onChange={(event) => {
+                  setContactName(event.target.value);
+                  setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "name"));
+                }}
+                className={fieldClass(false, fieldMissing("name"))}
+              />
               {nameIsUnavailable(contactName) ? null : (
                 <button type="button" onClick={() => setContactName(EMAIL_NOT_AVAILABLE)} className="mt-1 text-[11px] font-medium text-navy underline">
                   N/A
                 </button>
               )}
             </FieldLabel>
-            <FieldLabel label="Phone">
-              <input name="phone" defaultValue={row.phone ?? ""} className={fieldClass()} />
+            <FieldLabel label="Phone" fieldKey="phone" invalid={fieldMissing("phone")}>
+              <input
+                name="phone"
+                defaultValue={row.phone ?? ""}
+                onChange={() => setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "phone"))}
+                className={fieldClass(false, fieldMissing("phone"))}
+              />
             </FieldLabel>
             <FieldLabel label="Email">
               <input
@@ -1566,7 +1602,7 @@ function LeadFacts({
               </select>
             </FieldLabel>
           </PanelSection>
-          <PanelSection title="Case type" invalid={fieldMissing("case_type")}>
+          <PanelSection title={fieldMissing("case_type") ? "Case type · needed" : "Case type"} invalid={fieldMissing("case_type")}>
             <div className="col-span-2" data-gap-field="case_type">
               <select
                 name="case_type"
@@ -1603,6 +1639,7 @@ function LeadFacts({
                   </option>
                 ) : null}
               </select>
+              {fieldMissing("case_type") ? <p className="mt-1 text-xs text-red-700">Choose a case type.</p> : null}
             </div>
           </PanelSection>
           <PanelSection title="Consultation" invalid={fieldMissing("consultation")}>
@@ -1649,8 +1686,8 @@ function LeadFacts({
               ) : null}
             </div>
           </PanelSection>
-          <PanelSection title="Qualified">
-            <div>
+          <PanelSection title="Qualified" invalid={fieldMissing("qualified")}>
+            <div data-gap-field="qualified" className="col-span-2">
               <ChoiceToggle
                 label="Qualified"
                 value={qualifiedValue}
@@ -1658,6 +1695,7 @@ function LeadFacts({
                 onChange={(value) => {
                   mark("qualified");
                   setQualifiedChoice(value);
+                  setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "qualified"));
                   if (value === "no") {
                     mark("desired");
                     setDesiredChoice("no");
@@ -1669,8 +1707,8 @@ function LeadFacts({
             </div>
             {qualifiedLocked ? <p className="col-span-2 text-xs text-slate-500">Non-PI legal matters are not qualified.</p> : null}
           </PanelSection>
-          <PanelSection title="Desired">
-            <div className="col-span-2 max-w-[18rem]">
+          <PanelSection title="Desired" invalid={fieldMissing("desired")}>
+            <div data-gap-field="desired" className="col-span-2 max-w-[18rem]">
               <ChoiceToggle
                 label="Desired"
                 value={desiredValue}
@@ -1679,6 +1717,7 @@ function LeadFacts({
                 onChange={(value) => {
                   mark("desired");
                   setDesiredChoice(value);
+                  setMissingGaps((gaps) => gaps.filter((gap) => gapFieldKey(gap) !== "desired"));
                   if (value === "yes") setDecline("");
                   if (value === "no") setSize("");
                 }}

@@ -110,6 +110,19 @@ export function closeIncompleteMessage(gaps: string[]): string {
   return `Finish the lead before closing it: ${gaps.join(" · ")}.`;
 }
 
+export function lostCloseMessage(gaps: string[]): string {
+  if (gaps.length === 1) return `Still needed before this can close as lost: ${gaps[0]}.`;
+  return `Still needed before this can close as lost (${gaps.length}): ${gaps.join(" · ")}.`;
+}
+
+/** Pull field names back out of a close error so the form can mark those boxes. */
+export function gapsFromCloseMessage(message: string): string[] | null {
+  const match = /^Finish the lead before closing it: (.+)\.$/.exec(message.trim());
+  if (!match) return null;
+  const gaps = match[1].split(" · ").map((part) => part.trim()).filter(Boolean);
+  return gaps.length ? gaps : null;
+}
+
 export function referralCloseMessage(gaps: string[]): string {
   const parts = gaps.map((gap) => {
     if (gap === "Desired") return "Desired has to be No";

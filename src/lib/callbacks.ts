@@ -1,4 +1,5 @@
-import { chicagoDay, chicagoLocalToIso, chicagoParts } from "./time";
+import { DEFAULT_WORK_HOURS, type WorkHours } from "./sequences";
+import { callDayOpen, chicagoDay, chicagoLocalToIso, chicagoParts } from "./time";
 
 export const CALLBACK_WINDOWS = ["morning", "lunch", "afternoon", "contact"] as const;
 
@@ -78,7 +79,7 @@ function minuteForLastContact(contactAt: Date | null, varyKey: string, avoid: nu
 
 /**
  * Place a callback inside Morning, Lunch, or Afternoon.
- * Match last contact keeps that time during business hours. Priority calls can land on a weekend.
+ * Closed days come from the sequence hours. Priority does not open Saturday or Sunday.
  */
 export function scheduleCallback(input: {
   from: Date;
@@ -88,7 +89,9 @@ export function scheduleCallback(input: {
   priority: boolean;
   varyKey: string;
   avoid?: number[];
+  hours?: WorkHours;
 }): string {
+  const hours = input.hours ?? DEFAULT_WORK_HOURS;
   const chosen = isCallbackWindow(input.window) ? input.window : windowForIndex(input.index ?? 0);
   const avoid = input.avoid ?? [];
   const minute =
@@ -97,9 +100,7 @@ export function scheduleCallback(input: {
       : minuteInWindow(...WINDOW[chosen], `${input.varyKey}:${chosen}`, avoid);
   let day = chicagoDay(input.from);
   for (let hop = 0; hop < 14; hop += 1) {
-    const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
-    const weekend = dow === 0 || dow === 6;
-    if (weekend && !input.priority) {
+    if (!callDayOpen(day, hours)) {
       day = shiftDay(day, 1);
       continue;
     }
@@ -110,10 +111,10 @@ export function scheduleCallback(input: {
   return input.from.toISOString();
 }
 
-export function weekendCallAllowed(date: Date, priority: boolean): boolean {
-  const dow = chicagoParts(date).dow;
-  if (dow !== 0 && dow !== 6) return true;
-  return priority;
+export function weekendCallAllowed(date: Date, hours: WorkHours = DEFAULT_WORK_HOURS): boolean {
+  const parts = chicagoParts(date);
+  const day = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+  return callDayOpen(day, hours);
 }
 
 export function chicagoMinute(iso: string): number | null {

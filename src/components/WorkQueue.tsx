@@ -204,7 +204,12 @@ function ActionLines({ lines, layout = "stack" }: { lines: NextActionLine[]; lay
   );
 }
 
-function typeLabel(row: Pick<QueueRow, "accident" | "caseType">): string {
+function parkedNonLead(row: Pick<QueueRow, "callerClass">): boolean {
+  return EXCLUDED_CALLER_CLASSES.some((item) => item === row.callerClass);
+}
+
+function typeLabel(row: Pick<QueueRow, "accident" | "caseType" | "callerClass">): string {
+  if (parkedNonLead(row)) return "";
   const candidates = [row.caseType, row.accident].map((value) => (value || "").trim()).filter((value) => value && value !== "—");
   for (const text of candidates) {
     const official = officialCaseType(text);
@@ -531,7 +536,7 @@ export function WorkQueue({
                   {row.samePhone.length > 0 ? (
                     <p className="mt-0.5 text-slate-500">{row.samePhone.length + 1} records, same phone</p>
                   ) : null}
-                  {row.closeSuggestion ? (
+                  {row.closeSuggestion && !parkedNonLead(row) ? (
                     <p className="mt-0.5 font-medium text-orange-800">Suggested close: {CLOSE_SUGGESTION_LABEL[row.closeSuggestion]}</p>
                   ) : null}
                 </td>
@@ -543,7 +548,7 @@ export function WorkQueue({
                     <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
                   ) : row.label === "Declined" ? (
                     <p className="mt-1 text-[11px] font-medium text-slate-500">Not referred</p>
-                  ) : row.nonPi || row.tags.includes("DEC: Referred") ? (
+                  ) : !parkedNonLead(row) && (row.nonPi || row.tags.includes("DEC: Referred")) ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -943,6 +948,7 @@ const TYPE_SHADE: Record<string, string> = {
 };
 
 function TypeValue({ value }: { value: string }) {
+  if (!value) return null;
   const shade = TYPE_SHADE[value] ?? "bg-stone-50 text-stone-700";
   if (value === "TBD") {
     return (
@@ -2514,7 +2520,8 @@ export function LeadDrawer({
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-slate-500">
             <span>
               {typeLabel(row)}
-              {row.when ? ` · ${row.when}` : ""}
+              {typeLabel(row) && row.when ? " · " : ""}
+              {row.when || ""}
             </span>
             <span className="text-slate-300" aria-hidden="true">
               ·
@@ -2624,7 +2631,7 @@ export function LeadDrawer({
             </ul>
           </section>
         ) : null}
-        {row.closeSuggestion ? <CloseSuggestion row={row} /> : null}
+        {row.closeSuggestion && !parkedNonLead(row) ? <CloseSuggestion row={row} /> : null}
         <PriorityPanel row={row} />
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadStaff, matchStaff, type StaffPerson } from "./identity";
 import { listQuoUsers } from "./quo-settings";
 
 export type CallJob = "screen" | "intake" | "both";
@@ -50,22 +51,23 @@ export type LeadCallJobs = {
   intakeBy: string | null;
 };
 
-/** A staff pick wins. Otherwise use whoever the call record named. */
-export function assignedHandler(override: string | null | undefined, inferred: string | null | undefined): string | null {
-  const chosen = override?.trim();
-  if (chosen) return chosen;
-  return inferred?.trim() || null;
-}
-
-const LINE_LABELS = new Set(
-  ["leads", "intake", "rjl main line", "rgv number", "rjl outbound", "rjl transfers", "unknown", "human", "sona"].map((value) =>
-    value.toLowerCase(),
-  ),
-);
-
-function isLineOrPlaceholder(name: string | null | undefined): boolean {
-  const key = name?.trim().toLowerCase() || "";
-  return !key || LINE_LABELS.has(key);
+/** A saved name wins. A graded call is next. A person who answered a live call fills screening, and intake when that call was a consultation. */
+export function leadHandlerNames(input: {
+  screenStored?: string | null;
+  intakeStored?: string | null;
+  gradedScreen?: string | null;
+  gradedIntake?: string | null;
+  ownerName?: string | null;
+  arrival?: string | null;
+  consultation?: string | null;
+  staff: StaffPerson[];
+}): { screenBy: string | null; intakeBy: string | null } {
+  const person = (value: string | null | undefined) => matchStaff(value, input.staff)?.name ?? null;
+  const answered = input.arrival === "human_call" || input.arrival === "qualified_call" ? person(input.ownerName) : null;
+  const screenBy = person(input.screenStored) || person(input.gradedScreen) || answered;
+  const consulted = Boolean(input.consultation && input.consultation !== "no");
+  const intakeBy = person(input.intakeStored) || person(input.gradedIntake) || (consulted ? screenBy : null);
+  return { screenBy, intakeBy };
 }
 
 /** Quo user id → display name (staff directory by email when the Quo seat name is generic). */
@@ -111,8 +113,9 @@ export async function loadLeadCallJobs(
   };
   const chunks: string[][] = [];
   for (let index = 0; index < leadIds.length; index += 100) chunks.push(leadIds.slice(index, index + 100));
-  const [nameById, ...pages] = await Promise.all([
+  const [nameById, staff, ...pages] = await Promise.all([
     quoHandlerNames(supabase),
+    loadStaff(supabase),
     ...chunks.map(async (chunk) => {
       const { data, error } = await supabase
         .from("call_grades")
@@ -137,25 +140,49 @@ export async function loadLeadCallJobs(
       if (id && who && !who.startsWith("SY")) answeredBy.set(id, who);
     }
   }
-  const allowedNames = new Set([...nameById.values()].map((name) => name.toLowerCase()));
+  const named = (value: string | null | undefined) => matchStaff(value, staff)?.name ?? null;
 
   for (const row of rows) {
     if (!row.lead_id) continue;
     const current = byLead.get(row.lead_id) ?? { screenBy: null, intakeBy: null };
     const quoId = row.call_id ? answeredBy.get(row.call_id) : null;
-    const fromQuo = quoId ? nameById.get(quoId) || null : null;
+    const fromQuo = quoId ? named(nameById.get(quoId)) : null;
     const jobs = isCallJob(row.jobs) ? row.jobs : "both";
-    const fallback = (value: string | null | undefined) => {
-      const name = value?.trim() || "";
-      if (!name || isLineOrPlaceholder(name)) return null;
-      if (!allowedNames.has(name.toLowerCase())) return null;
-      return name;
-    };
-    const screen = jobs === "screen" || jobs === "both" ? fromQuo || fallback(row.screen_handler_name) || fallback(row.handler_name) : null;
-    const intake = jobs === "intake" || jobs === "both" ? fromQuo || fallback(row.intake_handler_name) || fallback(row.handler_name) : null;
+    const screen = jobs === "screen" || jobs === "both" ? fromQuo || named(row.screen_handler_name) || named(row.handler_name) : null;
+    const intake = jobs === "intake" || jobs === "both" ? fromQuo || named(row.intake_handler_name) || named(row.handler_name) : null;
     if (!current.screenBy && screen) current.screenBy = screen;
     if (!current.intakeBy && intake) current.intakeBy = intake;
     byLead.set(row.lead_id, current);
+  }
+
+  const unresolved = leadIds.filter((id) => !byLead.get(id)?.screenBy);
+  const callByLead = new Map<string, string>();
+  for (let index = 0; index < unresolved.length; index += 100) {
+    const chunk = unresolved.slice(index, index + 100);
+    const { data, error } = await supabase.from("leads").select("id, intake_call_id").in("id", chunk);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      const callId = String(row.intake_call_id || "").trim();
+      if (callId) callByLead.set(String(row.id), callId);
+    }
+  }
+  const extraCallIds = [...new Set(callByLead.values())].filter((id) => !answeredBy.has(id));
+  for (let index = 0; index < extraCallIds.length; index += 100) {
+    const chunk = extraCallIds.slice(index, index + 100);
+    const { data, error } = await supabase.from("quo_inbox_calls").select("call_id, answered_by").in("call_id", chunk);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      const id = String(row.call_id || "");
+      const who = String(row.answered_by || "").trim();
+      if (id && who && !who.startsWith("SY")) answeredBy.set(id, who);
+    }
+  }
+  for (const [leadId, callId] of callByLead) {
+    const name = named(nameById.get(answeredBy.get(callId) || ""));
+    if (!name) continue;
+    const current = byLead.get(leadId) ?? { screenBy: null, intakeBy: null };
+    if (!current.screenBy) current.screenBy = name;
+    byLead.set(leadId, current);
   }
   return byLead;
 }

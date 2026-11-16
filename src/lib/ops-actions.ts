@@ -12,15 +12,14 @@ import { firmUserId } from "./staff";
 import { canonicalTextSequence, textSequenceLabel } from "./queue";
 import { contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, nextFreePosition, sequenceForLead, shiftFollowingCalls, stopFollowUp } from "./followup";
-import { clockToMinutes, delayMinutes, isCallSequence, isCallbackWindow, type CadenceDay, type CallSequenceId } from "./sequences";
-import { chicagoDay, chicagoLocalToIso } from "./time";
+import { clockToMinutes, DEFAULT_WORK_HOURS, delayMinutes, isCallSequence, isCallbackWindow, loadWorkHours, type CadenceDay, type CallSequenceId } from "./sequences";
+import { chicagoDay, chicagoLocalToIso, nextOpenCallInstant } from "./time";
 import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standardLeadEmail, type LeadKind } from "./leads";
 import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, referralCloseMessage, type ClosePath } from "./close-ready";
 import { caseTypeIsLead, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
-import { referralAwaitingSend } from "./next-step";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -325,7 +324,7 @@ export async function setNextAction(formData: FormData) {
   const tag = text(formData, "tag");
 
   if (callAt) {
-    const due = chicagoLocalToIso(callAt);
+    let due = chicagoLocalToIso(callAt);
     const assigned = tag || "Outbound";
     const staff = await loadStaff(supabase);
     const person = assigned && assigned !== "Outbound" ? matchStaff(assigned, staff) : null;
@@ -383,6 +382,8 @@ export async function setNextAction(formData: FormData) {
         },
         "auto",
       ) ?? (lead.consultation_date ? "more_info" : "first_talk");
+    const hours = isCallSequence(jobSequence) ? (await loadWorkHours(supabase))[jobSequence] : DEFAULT_WORK_HOURS;
+    due = nextOpenCallInstant(due, hours);
     const body =
       jobSequence === "want_to_sign"
         ? "Follow up on the signature."
@@ -893,7 +894,33 @@ async function settleNonPiLead(
   return true;
 }
 
-/** A finished lead that is not desired has reached the end of the path, so saving closes it. */
+/** Decline reason is saved, but the lead stays open until a referral is sent or turned down. */
+async function recordedReferralOutcome(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+  lead: { callrail_tags?: string[] | null },
+): Promise<"sent" | "declined" | null> {
+  const { count, error } = await supabase
+    .from("referral_sends")
+    .select("id", { count: "exact", head: true })
+    .eq("lead_id", leadId);
+  if (error) throw new Error(error.message);
+  if ((count ?? 0) > 0 || (lead.callrail_tags ?? []).includes("DEC: Referred")) return "sent";
+  const { data, error: eventError } = await supabase
+    .from("lead_events")
+    .select("event_type")
+    .eq("lead_id", leadId)
+    .in("event_type", ["referral_declined", "referred", "lost_lead_reopened"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (eventError) throw new Error(eventError.message);
+  if (data?.event_type === "referral_declined") return "declined";
+  if (data?.event_type === "referred") return "sent";
+  return null;
+}
+
+/** A finished lead that is not desired stays open until someone records the referral. */
 async function closeUndesiredLead(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
   leadId: string,
@@ -909,15 +936,16 @@ async function closeUndesiredLead(
   if (lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.lead_status === "Lost" || lead.lead_status === "Referred") return false;
   if (lead.desired_case !== false) return false;
   if (closeGaps(lead, "declined").length) return false;
-  if (referralAwaitingSend(lead)) return false;
-  const referred = (lead.callrail_tags ?? []).includes("DEC: Referred");
+  const outcome = await recordedReferralOutcome(supabase, leadId, lead);
+  if (!outcome) return false;
+  const referred = outcome === "sent";
   await closeLead(
     supabase,
     leadId,
     actor,
     referred
       ? { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" }
-      : { lead_status: "Lost", close_reason: "declined", event: "declined", path: "declined" },
+      : { lead_status: "Lost", close_reason: "declined", event: "referral_declined", path: "declined" },
   );
   if (lead.text_sequence_status === "active") {
     await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
@@ -1096,7 +1124,7 @@ export async function saveCallbackPlan(formData: FormData) {
   if (!jobId || !due) throw new Error("Choose when the Slack reminder should post.");
   const { data: job, error } = await supabase
     .from("lead_jobs")
-    .select("id, lead_id, status, queue, due_at")
+    .select("id, lead_id, status, queue, sequence, due_at")
     .eq("id", jobId)
     .maybeSingle();
   if (error || !job) throw new Error(error?.message ?? "That callback is missing.");
@@ -1117,7 +1145,8 @@ export async function saveCallbackPlan(formData: FormData) {
   const person = assigned ? matchStaff(assigned, staff) : null;
   const { data: lead } = await supabase.from("leads").select("consultation_date").eq("id", job.lead_id).maybeSingle();
   const consulted = Boolean(lead?.consultation_date);
-  const nextDue = chicagoLocalToIso(due);
+  const hours = isCallSequence(job.sequence) ? (await loadWorkHours(supabase))[job.sequence] : DEFAULT_WORK_HOURS;
+  const nextDue = nextOpenCallInstant(chicagoLocalToIso(due), hours);
   const { error: updateError } = await supabase
     .from("lead_jobs")
     .update({
@@ -1133,7 +1162,7 @@ export async function saveCallbackPlan(formData: FormData) {
     lead_id: job.lead_id,
     event_type: "callback_edited",
     actor: email,
-    payload: { due, assigned },
+    payload: { due, due_at: nextDue, assigned },
   });
   revalidatePath(`/leads/${job.lead_id}`);
   revalidatePath("/");

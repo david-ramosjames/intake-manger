@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
-import { assignedHandler, loadLeadCallJobs } from "@/lib/call-grade";
+import { leadHandlerNames, loadLeadCallJobs } from "@/lib/call-grade";
 import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
@@ -188,8 +188,18 @@ function toQueueRow(
     staffTouched: boolean;
   },
 ): QueueRow {
-  const screenBy = assignedHandler(lead.screen_by, input.screenBy);
-  const intakeBy = assignedHandler(lead.intake_by, input.intakeBy);
+  const handlers = leadHandlerNames({
+    screenStored: lead.screen_by,
+    intakeStored: lead.intake_by,
+    gradedScreen: input.screenBy,
+    gradedIntake: input.intakeBy,
+    ownerName: lead.owner_name,
+    arrival: lead.arrival,
+    consultation: lead.consultation,
+    staff: input.staff,
+  });
+  const screenBy = handlers.screenBy;
+  const intakeBy = handlers.intakeBy;
   const cycle = leadCycle(lead, input.talked ? [{ type: "call", direction: "inbound" }] : []);
   const age = daysSince(lead.lead_date ?? lead.created_at);
   const opened = formatQueueStamp(lead.created_at || lead.lead_date);

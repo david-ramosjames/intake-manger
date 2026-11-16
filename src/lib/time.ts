@@ -221,6 +221,34 @@ export function withinWorkHours(date: Date, hours: WorkHours = DEFAULT_WORK_HOUR
   return minute >= window.start && minute < window.end;
 }
 
+/** True when this Chicago calendar day has an open call window. */
+export function callDayOpen(day: string, hours: WorkHours = DEFAULT_WORK_HOURS): boolean {
+  const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
+  return windowFor(dow, hours) != null;
+}
+
+/**
+ * Next time a call tag is allowed to post.
+ * A clock time on a closed day (Saturday and Sunday while those are unchecked) moves to the next open day at the same minute.
+ * A time already inside an open window stays put.
+ */
+export function nextOpenCallInstant(iso: string, hours: WorkHours = DEFAULT_WORK_HOURS): string {
+  const instant = new Date(iso);
+  if (Number.isNaN(instant.getTime())) return iso;
+  const parts = chicagoParts(instant);
+  const minute = parts.hour * 60 + parts.minute;
+  for (let add = 0; add < 10; add += 1) {
+    const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + add));
+    const window = windowFor(shifted.getUTCDay(), hours);
+    if (!window) continue;
+    if (add === 0 && minute >= window.end) continue;
+    const use = minute >= window.start && minute < window.end ? minute : window.start;
+    const day = `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+    return chicagoLocalToIso(`${day}T${clock(use)}`);
+  }
+  return instant.toISOString();
+}
+
 /** Move a call to the next open minute for this sequence. Times already inside the window stay put. */
 export function snapToWorkHours(iso: string, hours: WorkHours = DEFAULT_WORK_HOURS): string {
   const instant = new Date(iso);

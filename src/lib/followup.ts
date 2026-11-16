@@ -4,8 +4,8 @@ import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "./caller-
 import { isPlaceholderOwner } from "./talked-with";
 import { contractOutstanding } from "./desired";
 import { nameIsUnavailable, type LeadKind } from "./leads";
-import { type CallSequenceId, type WorkHours } from "./sequences";
-import { chicagoLocalToIso, formatChicago } from "./time";
+import { DEFAULT_WORK_HOURS, isCallSequence, loadWorkHours, type CallSequenceId, type WorkHours } from "./sequences";
+import { chicagoLocalToIso, formatChicago, nextOpenCallInstant } from "./time";
 import { stopSmsFollowUp } from "./sms-followup";
 import { isPracticeTestPhone } from "./test-phone";
 import { toE164 } from "./phone";
@@ -144,6 +144,8 @@ export async function enrollFollowUp(
     });
     prevDelay = delay;
   }
+  const hoursMap = hoursBySequence ?? (await loadWorkHours(supabase));
+  const hours = hoursMap[sequence] ?? DEFAULT_WORK_HOURS;
   let cursor = now;
   const rows = planned.map((item, index) => {
     const position = item.step.position as number;
@@ -160,6 +162,7 @@ export async function enrollFollowUp(
       priority,
       varyKey: `${lead.id}:${position}`,
       avoid: usedByDay.get(item.delay) ?? [],
+      hours,
     });
     cursor = new Date(dueAt).getTime();
     const minute = chicagoMinute(dueAt);
@@ -254,7 +257,6 @@ export async function enrollFollowUp(
     ignoreDuplicates: true,
   });
   if (insertError) throw new Error(insertError.message);
-  void hoursBySequence;
 }
 
 /** Next call step when the cadence positions are already taken. */
@@ -282,6 +284,15 @@ export function downstreamDueTimes(oldDueMs: number, newDueMs: number, otherDueM
   });
 }
 
+/** Keep a shifted step after the anchor, and off a day when call tags are paused. */
+export function openCallAfter(iso: string, anchorMs: number, hours: WorkHours = DEFAULT_WORK_HOURS): string {
+  let at = nextOpenCallInstant(iso, hours);
+  for (let hop = 0; hop < 10 && new Date(at).getTime() <= anchorMs; hop += 1) {
+    at = nextOpenCallInstant(new Date(new Date(at).getTime() + 24 * 60 * 60_000).toISOString(), hours);
+  }
+  return at;
+}
+
 export async function shiftFollowingCalls(
   supabase: SupabaseClient,
   leadId: string,
@@ -294,7 +305,7 @@ export async function shiftFollowingCalls(
   if (!Number.isFinite(oldMs) || !Number.isFinite(newMs) || oldMs === newMs) return;
   const { data, error } = await supabase
     .from("lead_jobs")
-    .select("id, due_at")
+    .select("id, due_at, sequence")
     .eq("lead_id", leadId)
     .eq("queue", "call")
     .eq("status", "pending")
@@ -302,6 +313,7 @@ export async function shiftFollowingCalls(
   if (error) throw new Error(error.message);
   const rows = (data ?? []).filter((row) => row.id && row.due_at);
   if (!rows.length) return;
+  const hoursMap = await loadWorkHours(supabase);
   const next = downstreamDueTimes(
     oldMs,
     newMs,
@@ -310,9 +322,12 @@ export async function shiftFollowingCalls(
   for (let index = 0; index < rows.length; index += 1) {
     const at = next[index];
     if (!Number.isFinite(at)) continue;
+    const sequence = rows[index].sequence;
+    const hours = isCallSequence(sequence) ? hoursMap[sequence] : DEFAULT_WORK_HOURS;
+    const dueAt = openCallAfter(new Date(at).toISOString(), newMs, hours);
     const { error: updateError } = await supabase
       .from("lead_jobs")
-      .update({ due_at: new Date(at).toISOString() })
+      .update({ due_at: dueAt })
       .eq("id", String(rows[index].id))
       .eq("status", "pending");
     if (updateError) throw new Error(updateError.message);
@@ -321,6 +336,40 @@ export async function shiftFollowingCalls(
 
 /** Soonest pending call should not sit a week out after earlier steps were used up. */
 const MAX_NEXT_CALL_WAIT_MS = 36 * 60 * 60_000;
+
+function staffDueMs(payload: { queue?: string; due_at?: string; due?: string } | null, eventType: string): number | null {
+  if (!payload) return null;
+  if (eventType === "next_action" && payload.queue && payload.queue !== "call") return null;
+  const raw = payload.due_at || payload.due;
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw)) {
+    try {
+      const local = new Date(chicagoLocalToIso(raw)).getTime();
+      return Number.isFinite(local) ? local : null;
+    } catch {
+      return null;
+    }
+  }
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** The call time staff last saved. Later cadence steps shift around this, they do not replace it. */
+export async function latestStaffCallDue(supabase: SupabaseClient, leadId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("lead_events")
+    .select("event_type, payload")
+    .eq("lead_id", leadId)
+    .in("event_type", ["next_action", "callback_edited"])
+    .order("created_at", { ascending: false })
+    .limit(8);
+  if (error) throw new Error(error.message);
+  for (const event of data ?? []) {
+    const due = staffDueMs(event.payload as { queue?: string; due_at?: string; due?: string } | null, String(event.event_type));
+    if (due != null) return due;
+  }
+  return null;
+}
 
 export async function pullForwardStaleCallJobs(
   supabase: SupabaseClient,
@@ -338,7 +387,38 @@ export async function pullForwardStaleCallJobs(
   if (!jobs?.length) return false;
   const next = jobs[0];
   const nextDue = new Date(String(next.due_at)).getTime();
-  if (!Number.isFinite(nextDue) || nextDue <= Date.now() + MAX_NEXT_CALL_WAIT_MS) return false;
+  if (!Number.isFinite(nextDue)) return false;
+
+  const staffDue = await latestStaffCallDue(supabase, leadId);
+  if (staffDue != null && staffDue > Date.now() - 60_000) {
+    if (Math.abs(nextDue - staffDue) > 90_000) {
+      const hoursMap = await loadWorkHours(supabase);
+      const anchorHours = isCallSequence(next.sequence) ? hoursMap[next.sequence] : DEFAULT_WORK_HOURS;
+      const anchorDue = nextOpenCallInstant(new Date(staffDue).toISOString(), anchorHours);
+      const anchorMs = new Date(anchorDue).getTime();
+      const { error: anchorError } = await supabase
+        .from("lead_jobs")
+        .update({ due_at: anchorDue })
+        .eq("id", next.id)
+        .eq("status", "pending");
+      if (anchorError) throw new Error(anchorError.message);
+      const delta = anchorMs - nextDue;
+      for (const job of jobs.slice(1)) {
+        const moved = new Date(String(job.due_at)).getTime() + delta;
+        if (!Number.isFinite(moved)) continue;
+        const hours = isCallSequence(job.sequence) ? hoursMap[job.sequence] : DEFAULT_WORK_HOURS;
+        const { error: updateError } = await supabase
+          .from("lead_jobs")
+          .update({ due_at: openCallAfter(new Date(moved).toISOString(), anchorMs, hours) })
+          .eq("id", job.id)
+          .eq("status", "pending");
+        if (updateError) throw new Error(updateError.message);
+      }
+    }
+    return false;
+  }
+
+  if (nextDue <= Date.now() + MAX_NEXT_CALL_WAIT_MS) return false;
 
   const { data: lead } = await supabase
     .from("leads")
@@ -346,6 +426,8 @@ export async function pullForwardStaleCallJobs(
     .eq("id", leadId)
     .maybeSingle();
   const priority = Boolean(lead?.priority) || next.sequence === "want_to_sign";
+  const hoursMap = await loadWorkHours(supabase);
+  const hours = isCallSequence(next.sequence) ? hoursMap[next.sequence] : DEFAULT_WORK_HOURS;
   const pulled = scheduleCallback({
     from: new Date(),
     window: "morning",
@@ -353,14 +435,18 @@ export async function pullForwardStaleCallJobs(
     contactAt: lead?.created_at ? new Date(lead.created_at) : null,
     priority,
     varyKey: `${leadId}:pull:${next.id}`,
+    hours,
   });
   const delta = new Date(pulled).getTime() - nextDue;
   if (delta >= 0) return false;
+  const pulledMs = new Date(pulled).getTime();
   for (const job of jobs) {
     const due = new Date(String(job.due_at)).getTime() + delta;
+    const jobHours = isCallSequence(job.sequence) ? hoursMap[job.sequence] : DEFAULT_WORK_HOURS;
+    const dueAt = job.id === next.id ? pulled : openCallAfter(new Date(due).toISOString(), pulledMs, jobHours);
     const { error: updateError } = await supabase
       .from("lead_jobs")
-      .update({ due_at: new Date(due).toISOString() })
+      .update({ due_at: dueAt })
       .eq("id", job.id)
       .eq("status", "pending");
     if (updateError) throw new Error(updateError.message);
@@ -420,6 +506,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
     pendingSequences.set(String(job.lead_id), sequences);
   }
 
+  const hoursBySequence = await loadWorkHours(supabase);
   let enrolled = 0;
   for (const lead of leads) {
     const sequence = sequenceForLead(lead, "auto");
@@ -428,7 +515,7 @@ export async function enrollMissingFollowUps(supabase: SupabaseClient) {
       await pullForwardStaleCallJobs(supabase, lead.id);
       continue;
     }
-    await enrollFollowUp(supabase, lead);
+    await enrollFollowUp(supabase, lead, hoursBySequence);
     enrolled += 1;
     if (enrolled >= 40) break;
   }

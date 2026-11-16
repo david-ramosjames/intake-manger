@@ -3,7 +3,7 @@ import { QueueHelp } from "@/components/QueueHelp";
 import { WorkArrivedPills, WorkFilterLink, WorkFilterState, WorkMetric, WorkSearch, WorkStatusPills } from "@/components/WorkFilters";
 import { WorkListFilters } from "@/components/WorkListFilters";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
-import { assignedHandler, loadLeadCallJobs } from "@/lib/call-grade";
+import { leadHandlerNames, loadLeadCallJobs } from "@/lib/call-grade";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
@@ -813,6 +813,16 @@ export default async function LeadListPage({
   }
 
   const queueRows: QueueRow[] = shown.map(({ row, others }) => {
+    const handlers = leadHandlerNames({
+      screenStored: row.lead.screen_by,
+      intakeStored: row.lead.intake_by,
+      gradedScreen: callJobs.get(row.lead.id)?.screenBy,
+      gradedIntake: callJobs.get(row.lead.id)?.intakeBy,
+      ownerName: row.lead.owner_name,
+      arrival: row.lead.arrival,
+      consultation: row.lead.consultation,
+      staff,
+    });
     const automation = automationLine(row.lead);
     const nextAction = nextActionLines({
       closed: !isPracticeTestPhone(row.lead.phone_e164 || row.lead.phone) && (row.cycle === "signed" || row.cycle === "closed"),
@@ -918,8 +928,8 @@ export default async function LeadListPage({
       summary: row.lead.summary,
       owner: row.lead.owner_name,
       grade: row.lead.grade,
-      screenBy: assignedHandler(row.lead.screen_by, callJobs.get(row.lead.id)?.screenBy),
-      intakeBy: assignedHandler(row.lead.intake_by, callJobs.get(row.lead.id)?.intakeBy),
+      screenBy: handlers.screenBy,
+      intakeBy: handlers.intakeBy,
       textsLive: (row.lead.text_sequence_status || "").toLowerCase() === "active",
       textNext: row.lead.text_next_at,
       sequenceLabel: outreachSequence(row.lead).label,
@@ -945,8 +955,8 @@ export default async function LeadListPage({
       entry: leadEntry({
         staffTouched: staffTouched.has(row.lead.id),
         grade: row.lead.grade,
-        screenBy: assignedHandler(row.lead.screen_by, callJobs.get(row.lead.id)?.screenBy),
-        intakeBy: assignedHandler(row.lead.intake_by, callJobs.get(row.lead.id)?.intakeBy),
+        screenBy: handlers.screenBy,
+        intakeBy: handlers.intakeBy,
       }),
     };
   });

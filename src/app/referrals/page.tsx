@@ -92,9 +92,13 @@ export default async function ReferralsPage() {
               <ul className="mt-2 space-y-3">
                 {rows.map((destination) => (
                   <li key={destination.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-                    <p className="font-medium">
+                    <p className="flex flex-wrap items-center gap-2 font-medium">
                       {destination.name}
-                      {destination.spanish ? <span className="ml-2 text-slate-500">Spanish</span> : null}
+                      {destination.spanish ? (
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">Spanish</span>
+                      ) : (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-950">No Spanish</span>
+                      )}
                     </p>
                     <p className="text-slate-600">{destination.phone || "No phone"}</p>
                     {destination.address ? <p className="text-slate-600">{destination.address}</p> : null}

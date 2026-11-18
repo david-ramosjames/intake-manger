@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { markReferralOpportunity, sendReferral } from "@/lib/ops-actions";
 import {
   PRACTICE_AREAS,
+  firmsForReferralLanguage,
   isGuideReferral,
   renderPropertyDamageSms,
   renderReferralSms,
@@ -38,8 +39,8 @@ export function ReferralPanel({
   const [pending, setPending] = useState(false);
   const guide = isGuideReferral(area);
   const matches = useMemo(
-    () => destinations.filter((destination) => destination.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name)),
-    [destinations, area],
+    () => firmsForReferralLanguage(destinations, area, language),
+    [destinations, area, language],
   );
   const destination = matches.find((item) => item.id === destinationId) ?? matches[0] ?? null;
   const preview = !area
@@ -111,7 +112,9 @@ export function ReferralPanel({
               required
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
             >
-              <option value="">{area ? "Choose who receives the referral" : "Choose a practice area first"}</option>
+              <option value="">
+                {!area ? "Choose a practice area first" : matches.length === 0 ? "No Spanish-speaking partner" : "Choose who receives the referral"}
+              </option>
               {matches.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
@@ -134,7 +137,11 @@ export function ReferralPanel({
           <select
             name="language"
             value={language}
-            onChange={(event) => setLanguage(event.target.value === "es" ? "es" : "en")}
+            onChange={(event) => {
+              const next = event.target.value === "es" ? "es" : "en";
+              setLanguage(next);
+              if (next === "es" && destination && !destination.spanish) setDestinationId("");
+            }}
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
           >
             <option value="en">English</option>

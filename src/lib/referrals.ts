@@ -59,6 +59,18 @@ export function referralFirms<T extends { active: boolean; practice_areas: strin
   );
 }
 
+/** Spanish texts only offer firms marked as Spanish-speaking. */
+export function firmsForReferralLanguage<T extends { spanish: boolean; practice_areas: string[]; name: string }>(
+  firms: T[],
+  area: string,
+  language: "en" | "es",
+): T[] {
+  return firms
+    .filter((firm) => firm.practice_areas.includes(area))
+    .filter((firm) => language !== "es" || firm.spanish)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function referralFirmArea(destination: { practice_areas: string[] }, leadArea: string | null | undefined): PracticeAreaId | "" {
   if (leadArea && destination.practice_areas.includes(leadArea) && isPracticeArea(leadArea)) return leadArea;
   const match = destination.practice_areas.find((area) => isPracticeArea(area));

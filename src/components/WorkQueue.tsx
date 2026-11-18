@@ -16,6 +16,7 @@ import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLeadHandler, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import {
+  firmsForReferralLanguage,
   isGuideReferral,
   PRACTICE_AREAS,
   referralFirms,
@@ -1970,11 +1971,10 @@ function QueueReferral({
   const [hideRecorded, setHideRecorded] = useState(false);
   const notify = useContext(DrawerNoticeContext);
   const guide = isGuideReferral(area);
-  const partners = area && !guide
-    ? firms.filter((firm) => firm.practice_areas.includes(area)).sort((a, b) => a.name.localeCompare(b.name))
-    : [];
+  const inArea = area && !guide ? firms.filter((firm) => firm.practice_areas.includes(area)) : [];
+  const partners = area && !guide ? firmsForReferralLanguage(firms, area, language) : [];
   const firm = partners.find((item) => item.id === firmId) ?? null;
-  const handwritten = Boolean(area) && !guide && partners.length === 0;
+  const handwritten = Boolean(area) && !guide && inArea.length === 0;
   const preview = !area
     ? ""
     : guide
@@ -2241,11 +2241,13 @@ function QueueReferral({
               Referral partner
               <select
                 value={firm?.id ?? ""}
-                disabled={!area}
+                disabled={!area || partners.length === 0}
                 onChange={(event) => setFirmId(event.target.value)}
                 className={fieldClass}
               >
-                <option value="">{area ? "Choose the partner" : "Choose a type first"}</option>
+                <option value="">
+                  {!area ? "Choose a type first" : partners.length === 0 ? "No Spanish-speaking partner" : "Choose the partner"}
+                </option>
                 {partners.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
@@ -2262,8 +2264,10 @@ function QueueReferral({
                 <select
                   value={language}
                   onChange={(event) => {
-                    setLanguage(event.target.value === "es" ? "es" : "en");
+                    const next = event.target.value === "es" ? "es" : "en";
+                    setLanguage(next);
                     setTextTouched(false);
+                    if (next === "es" && firm && !firm.spanish) setFirmId("");
                   }}
                   className={fieldClass}
                 >

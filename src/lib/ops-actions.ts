@@ -1508,6 +1508,7 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
       .maybeSingle();
     if (loadError || !data) return { error: loadError?.message ?? "That referral destination is missing." };
     if (!(data.practice_areas ?? []).includes(area)) return { error: "That attorney is not listed for this practice area." };
+    if (language === "es" && !data.spanish) return { error: "That firm is not listed for a Spanish referral." };
     destination = data;
   }
 

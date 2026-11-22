@@ -36,6 +36,39 @@ export function callrailCallId(text: string | null | undefined): string | null {
   return text?.match(/event_id=(CAL[0-9a-f]+)/i)?.[1] ?? null;
 }
 
+export type CallrailCallMeta = {
+  id: string;
+  source: string | null;
+  trackingName: string | null;
+  landingPageUrl: string | null;
+};
+
+/** One CallRail call — landing page and tracker name for language / source. */
+export async function fetchCallrailCall(callId: string): Promise<CallrailCallMeta | null> {
+  const id = callId.trim();
+  if (!id || !callrailConfigured()) return null;
+  try {
+    const payload = await callrail(`/calls/${encodeURIComponent(id)}.json`);
+    const row = payload as {
+      id?: string;
+      source?: string | null;
+      tracking_number_name?: string | null;
+      name?: string | null;
+      company_name?: string | null;
+      landing_page_url?: string | null;
+    };
+    return {
+      id: String(row.id || id),
+      source: String(row.source ?? "").trim() || null,
+      trackingName:
+        String(row.tracking_number_name ?? row.name ?? row.company_name ?? "").trim() || null,
+      landingPageUrl: String(row.landing_page_url ?? "").trim() || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchCallrailSources(startDate: string, endDate: string): Promise<Map<string, string>> {
   const sources = new Map<string, string>();
   for (let page = 1; page <= 20; page += 1) {

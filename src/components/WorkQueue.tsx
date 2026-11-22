@@ -537,7 +537,7 @@ export function WorkQueue({
                   {row.samePhone.length > 0 ? (
                     <p className="mt-0.5 text-slate-500">{row.samePhone.length + 1} records, same phone</p>
                   ) : null}
-                  {row.closeSuggestion && !parkedNonLead(row) ? (
+                  {row.closeSuggestion && !parkedNonLead(row) && row.cycle !== "closed" ? (
                     <p className="mt-0.5 font-medium text-orange-800">Suggested close: {CLOSE_SUGGESTION_LABEL[row.closeSuggestion]}</p>
                   ) : null}
                 </td>
@@ -547,9 +547,9 @@ export function WorkQueue({
                   </span>
                   {row.referralSent ? (
                     <p className="mt-1 text-[11px] font-medium text-emerald-800">Referral sent</p>
-                  ) : row.label === "Declined" ? (
+                  ) : row.referralDeclined ? null : row.label === "Declined" ? (
                     <p className="mt-1 text-[11px] font-medium text-slate-500">Not referred</p>
-                  ) : !parkedNonLead(row) && (row.nonPi || row.tags.includes("DEC: Referred")) ? (
+                  ) : !parkedNonLead(row) && row.cycle !== "closed" && (row.nonPi || row.tags.includes("DEC: Referred")) ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -2635,7 +2635,7 @@ export function LeadDrawer({
             </ul>
           </section>
         ) : null}
-        {row.closeSuggestion && !parkedNonLead(row) ? <CloseSuggestion row={row} /> : null}
+        {row.closeSuggestion && !parkedNonLead(row) && row.cycle !== "closed" ? <CloseSuggestion row={row} /> : null}
         <PriorityPanel row={row} />
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automation</h3>

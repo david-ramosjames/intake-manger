@@ -59,7 +59,7 @@ export function referralFirms<T extends { active: boolean; practice_areas: strin
   );
 }
 
-/** Spanish texts only offer firms marked as Spanish-speaking. */
+/** Spanish texts omit firms marked No Spanish (spanish=false). */
 export function firmsForReferralLanguage<T extends { spanish: boolean; practice_areas: string[]; name: string }>(
   firms: T[],
   area: string,

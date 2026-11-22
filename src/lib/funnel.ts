@@ -57,6 +57,7 @@ export function notALeadSuggestionOff(lead: {
 
 export function visibleCloseSuggestion<T extends string | null>(lead: {
   close_suggestion?: T;
+  lead_status?: string | null;
   qualified?: boolean | null;
   callrail_tags?: string[] | null;
   case_type?: string | null;
@@ -64,6 +65,7 @@ export function visibleCloseSuggestion<T extends string | null>(lead: {
   agreement_sent_at?: string | null;
   signed_case?: boolean | null;
 }): T | null {
+  if (lead.lead_status && !isLeadOpen(lead.lead_status)) return null;
   if (lead.close_suggestion === "not_a_lead" && notALeadSuggestionOff(lead)) return null;
   return lead.close_suggestion ?? null;
 }

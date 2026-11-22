@@ -19,7 +19,7 @@ import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, referralCloseMessage, type ClosePath } from "./close-ready";
-import { caseTypeIsLead, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
+import { caseTypeIsLead, isLeadOpen, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -610,7 +610,8 @@ export async function saveLeadDetails(formData: FormData) {
     EXCLUDED_CALLER_CLASSES.includes(before.caller_class as ExcludedCallerClass);
   if (officialType === "Non-PI Legal Matter") {
     patch.caller_class = "non_pi";
-    patch.close_suggestion = "decline";
+    // Do not revive a decline suggestion after staff already closed or referred the lead.
+    if (isLeadOpen(before.lead_status)) patch.close_suggestion = "decline";
   } else if (isPiCaseType(caseType) && before.caller_class === "non_pi") {
     patch.caller_class = null;
     patch.practice_area = "personal_injury";

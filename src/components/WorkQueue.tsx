@@ -14,7 +14,7 @@ import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSource
 import { closeGaps, gapsFromCloseMessage, lostCloseMessage, referralCloseMessage, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
-import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLeadHandler, setNextAction, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
+import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLeadHandler, setNextAction, setPreferredLanguage, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
 import {
   firmsForReferralLanguage,
   isGuideReferral,
@@ -525,14 +525,17 @@ export function WorkQueue({
               >
                 <td className="px-2 py-2 whitespace-pre-line leading-tight text-slate-700">{row.openedLabel}</td>
                 <td className="px-2 py-2">
-                  <button
-                    type="button"
-                    onClick={() => pick(row.id)}
-                    className="inline-flex items-center gap-1 text-left text-sm font-medium text-navy hover:underline"
-                  >
-                    {row.title}
-                    <IdentityMark status={row.identityStatus} />
-                  </button>
+                  <div className="flex items-start gap-1.5">
+                    <LanguageFlag leadId={row.id} value={row.preferredLanguage} />
+                    <button
+                      type="button"
+                      onClick={() => pick(row.id)}
+                      className="inline-flex min-w-0 items-center gap-1 text-left text-sm font-medium text-navy hover:underline"
+                    >
+                      {row.title}
+                      <IdentityMark status={row.identityStatus} />
+                    </button>
+                  </div>
                   <p className="mt-0.5 text-slate-500">{phoneLabel(row.phone)}</p>
                   {row.samePhone.length > 0 ? (
                     <p className="mt-0.5 text-slate-500">{row.samePhone.length + 1} records, same phone</p>
@@ -1522,18 +1525,26 @@ function LeadFacts({
             </FieldLabel>
             <FieldLabel label="Language" className="col-span-2">
               <input type="hidden" name="preferred_language" value={preferredLanguage} />
-              <select
-                value={preferredLanguage}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setPreferredLanguage(next === "en" || next === "es" ? next : "");
-                }}
-                className={fieldClass()}
-              >
-                <option value="">Not set</option>
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-              </select>
+              <div className="mt-1 flex items-center gap-2">
+                <LanguageFlag
+                  leadId={row.id}
+                  value={preferredLanguage === "en" || preferredLanguage === "es" ? preferredLanguage : null}
+                  onChanged={(next) => setPreferredLanguage(next ?? "")}
+                />
+                <select
+                  value={preferredLanguage}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    const language = next === "en" || next === "es" ? next : "";
+                    setPreferredLanguage(language);
+                  }}
+                  className={fieldClass()}
+                >
+                  <option value="">Not set</option>
+                  <option value="en">🇺🇸 English</option>
+                  <option value="es">🇲🇽 Spanish</option>
+                </select>
+              </div>
             </FieldLabel>
           </PanelSection>
           <input type="hidden" name="consulted" value={consultedValue} />
@@ -2402,6 +2413,72 @@ function DrawerSkeleton({ row, onClose }: { row: QueueRow; onClose: () => void }
   );
 }
 
+function nextPreferredLanguage(value: "en" | "es" | null): "en" | "es" | null {
+  if (value === "en") return "es";
+  if (value === "es") return null;
+  return "en";
+}
+
+function languageFlagLabel(value: "en" | "es" | null): string {
+  if (value === "en") return "English";
+  if (value === "es") return "Spanish";
+  return "Language not set";
+}
+
+/** Click cycles not set → English → Spanish → not set, and saves right away. */
+function LanguageFlag({
+  leadId,
+  value,
+  size = "sm",
+  onChanged,
+}: {
+  leadId: string;
+  value: "en" | "es" | null;
+  size?: "sm" | "lg";
+  onChanged?: (next: "en" | "es" | null) => void;
+}) {
+  const notify = useContext(DrawerNoticeContext);
+  const router = useRouter();
+  const [current, setCurrent] = useState<"en" | "es" | null>(value);
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    setCurrent(value);
+  }, [leadId, value]);
+  const flag = current === "en" ? "🇺🇸" : current === "es" ? "🇲🇽" : "🏳️";
+  return (
+    <button
+      type="button"
+      title={`${languageFlagLabel(current)}. Click to change.`}
+      aria-label={`Preferred language: ${languageFlagLabel(current)}. Click to change.`}
+      disabled={pending}
+      onClick={(event) => {
+        event.stopPropagation();
+        const next = nextPreferredLanguage(current);
+        const previous = current;
+        setCurrent(next);
+        setPending(true);
+        notify({ tone: "saving", text: "Saving…" });
+        void setPreferredLanguage(leadId, next)
+          .then(() => {
+            onChanged?.(next);
+            notify({ tone: "saved", text: next === "es" ? "Spanish" : next === "en" ? "English" : "Language cleared" });
+            router.refresh();
+          })
+          .catch((err: unknown) => {
+            setCurrent(previous);
+            notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save" });
+          })
+          .finally(() => setPending(false));
+      }}
+      className={`inline-flex shrink-0 items-center justify-center rounded border border-transparent leading-none transition-colors hover:border-slate-300 hover:bg-white disabled:opacity-60 ${
+        size === "lg" ? "h-8 w-8 text-lg" : "h-6 w-6 text-sm"
+      } ${current ? "" : "opacity-45 hover:opacity-100"}`}
+    >
+      <span aria-hidden="true">{flag}</span>
+    </button>
+  );
+}
+
 function HandlerSelect({
   leadId,
   role,
@@ -2518,6 +2595,7 @@ export function LeadDrawer({
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">
+            <LanguageFlag leadId={row.id} value={row.preferredLanguage} size="lg" />
             {row.title}
             <IdentityMark status={row.identityStatus} />
           </h2>

@@ -64,6 +64,24 @@ export async function setLeadHandler(leadId: string, role: "screen" | "intake", 
   revalidatePath(`/leads/${leadId}`);
 }
 
+/** Set English / Spanish on the lead. Blank clears it. */
+export async function setPreferredLanguage(leadId: string, language: "en" | "es" | null) {
+  const { supabase, email } = await requireStaff();
+  if (!leadId) throw new Error("Missing the lead.");
+  if (language !== null && language !== "en" && language !== "es") throw new Error("Choose English or Spanish.");
+  const { error } = await supabase.from("leads").update({ preferred_language: language }).eq("id", leadId);
+  if (error) throw new Error(error.message);
+  await supabase.from("lead_events").insert({
+    lead_id: leadId,
+    event_type: "preferred_language",
+    actor: email,
+    payload: { language },
+  });
+  revalidatePath("/work");
+  revalidatePath("/");
+  revalidatePath(`/leads/${leadId}`);
+}
+
 export async function savePriority(leadId: string, formData: FormData) {
   const { supabase, email } = await requireStaff();
   const priority = formData.getAll("priority").includes("yes");
@@ -130,7 +148,7 @@ export async function startTextSequence(
     if (!canonicalTextSequence(sequence)) return { error: "Choose a text sequence." };
     const { data: lead, error } = await supabase
       .from("leads")
-      .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, text_sequence_slug, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email")
+      .select("id, phone, phone_e164, lead_name, case_type, signed_case, case_id, lead_status, sequence, text_sequence_status, text_sequence_slug, owner_name, slack_channel_id, slack_thread_ts, slack_message_ts, email, preferred_language")
       .eq("id", leadId)
       .maybeSingle();
     if (error || !lead) return { error: error?.message ?? "Lead not found" };
@@ -145,9 +163,11 @@ export async function startTextSequence(
     const owner = matchStaff(lead.owner_name, staff);
     const usableName = nameIsUnavailable(lead.lead_name) ? "" : (lead.lead_name || "").trim();
     const [first, ...rest] = usableName.split(/\s+/).filter(Boolean);
+    const language = lead.preferred_language === "es" ? "es" : "en";
     const result = await askSmsFollowUp({
       phone,
       sequence_slug: sequence,
+      language,
       first_name: first || null,
       last_name: rest.join(" ") || null,
       case_type: lead.case_type,
@@ -200,7 +220,7 @@ export async function startTextSequence(
       lead_id: leadId,
       event_type: "text_sequence_started",
       actor: email,
-      payload: { sequence: slug, label: textSequenceLabel(slug) },
+      payload: { sequence: slug, label: textSequenceLabel(slug), language },
     });
     revalidatePath("/");
     revalidatePath("/priority");

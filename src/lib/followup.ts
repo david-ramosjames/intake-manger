@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chicagoMinute, scheduleCallback } from "./callbacks";
+import { chicagoMinute, sameCallWindow, scheduleCallback } from "./callbacks";
 import { DATA_ERROR_CLASS, EXCLUDED_CALLER_CLASSES, isWorkLead } from "./caller-class";
 import { isPlaceholderOwner } from "./talked-with";
 import { contractOutstanding } from "./desired";
@@ -267,8 +267,8 @@ export function nextFreePosition(used: number[]): number {
 
 /**
  * Move the other pending calls by the same amount as the one that was rescheduled.
- * That call stays the next tag. A step that would still fall before it is mirrored
- * to the same distance after the new time, so the sequence stays downstream.
+ * That call stays the next tag. A step that would still fall before it is left on
+ * the anchor time — callers must place it into the next callback window after.
  */
 export function downstreamDueTimes(oldDueMs: number, newDueMs: number, otherDueMs: number[]): number[] {
   if (!otherDueMs.length || !Number.isFinite(oldDueMs) || !Number.isFinite(newDueMs) || oldDueMs === newDueMs) {
@@ -278,19 +278,52 @@ export function downstreamDueTimes(oldDueMs: number, newDueMs: number, otherDueM
   return otherDueMs.map((due) => {
     if (!Number.isFinite(due)) return due;
     const shifted = due + delta;
-    if (shifted > newDueMs) return shifted;
-    const distance = newDueMs - shifted;
-    return newDueMs + Math.max(distance, 60_000);
+    return shifted > newDueMs ? shifted : newDueMs;
   });
 }
 
-/** Keep a shifted step after the anchor, and off a day when call tags are paused. */
-export function openCallAfter(iso: string, anchorMs: number, hours: WorkHours = DEFAULT_WORK_HOURS): string {
-  let at = nextOpenCallInstant(iso, hours);
-  for (let hop = 0; hop < 10 && new Date(at).getTime() <= anchorMs; hop += 1) {
-    at = nextOpenCallInstant(new Date(new Date(at).getTime() + 24 * 60 * 60_000).toISOString(), hours);
+/** True when a shifted due is at/before the anchor or still in the same morning/lunch/afternoon slot. */
+export function needsNextCallWindow(anchorMs: number, shiftedMs: number): boolean {
+  if (!Number.isFinite(anchorMs) || !Number.isFinite(shiftedMs)) return true;
+  if (shiftedMs <= anchorMs) return true;
+  return sameCallWindow(anchorMs, shiftedMs);
+}
+
+/**
+ * Keep a shifted step after the anchor. When it would land in the same window
+ * (or earlier), place it in that step's next morning/lunch/afternoon/contact slot
+ * instead of bumping by a minute.
+ */
+export function openCallAfter(
+  iso: string,
+  anchorMs: number,
+  hours: WorkHours = DEFAULT_WORK_HOURS,
+  opts?: {
+    window?: string | null;
+    varyKey?: string;
+    contactAt?: Date | null;
+    priority?: boolean;
+    avoid?: number[];
+  },
+): string {
+  const shiftedMs = new Date(iso).getTime();
+  if (!Number.isFinite(shiftedMs)) return iso;
+  if (!needsNextCallWindow(anchorMs, shiftedMs)) {
+    let at = nextOpenCallInstant(iso, hours);
+    for (let hop = 0; hop < 10 && new Date(at).getTime() <= anchorMs; hop += 1) {
+      at = nextOpenCallInstant(new Date(new Date(at).getTime() + 24 * 60 * 60_000).toISOString(), hours);
+    }
+    return at;
   }
-  return at;
+  return scheduleCallback({
+    from: new Date(anchorMs + 60_000),
+    window: opts?.window ?? "morning",
+    contactAt: opts?.contactAt ?? null,
+    priority: Boolean(opts?.priority),
+    varyKey: opts?.varyKey ?? "open-after",
+    avoid: opts?.avoid,
+    hours,
+  });
 }
 
 export async function shiftFollowingCalls(
@@ -305,30 +338,74 @@ export async function shiftFollowingCalls(
   if (!Number.isFinite(oldMs) || !Number.isFinite(newMs) || oldMs === newMs) return;
   const { data, error } = await supabase
     .from("lead_jobs")
-    .select("id, due_at, sequence")
+    .select("id, due_at, sequence, position")
     .eq("lead_id", leadId)
     .eq("queue", "call")
     .eq("status", "pending")
     .neq("id", anchorId);
   if (error) throw new Error(error.message);
-  const rows = (data ?? []).filter((row) => row.id && row.due_at);
+  const rows = (data ?? [])
+    .filter((row) => row.id && row.due_at)
+    .sort((a, b) => new Date(String(a.due_at)).getTime() - new Date(String(b.due_at)).getTime());
   if (!rows.length) return;
+
+  const sequences = [...new Set(rows.map((row) => String(row.sequence || "")).filter(Boolean))];
+  const { data: steps } = sequences.length
+    ? await supabase
+        .from("sequence_steps")
+        .select("sequence, position, callback_window")
+        .eq("queue", "call")
+        .in("sequence", sequences)
+    : { data: [] as { sequence: string; position: number; callback_window: string | null }[] };
+  const windowByStep = new Map<string, string | null>();
+  for (const step of steps ?? []) {
+    windowByStep.set(`${step.sequence}:${step.position}`, typeof step.callback_window === "string" ? step.callback_window : null);
+  }
+
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("created_at, priority")
+    .eq("id", leadId)
+    .maybeSingle();
+  const contactAt = lead?.created_at ? new Date(lead.created_at) : null;
   const hoursMap = await loadWorkHours(supabase);
-  const next = downstreamDueTimes(
+  const usedByDay = new Map<number, number[]>();
+  let previousMs = newMs;
+
+  const shiftedTimes = downstreamDueTimes(
     oldMs,
     newMs,
     rows.map((row) => new Date(String(row.due_at)).getTime()),
   );
   for (let index = 0; index < rows.length; index += 1) {
-    const at = next[index];
+    const at = shiftedTimes[index];
     if (!Number.isFinite(at)) continue;
-    const sequence = rows[index].sequence;
-    const hours = isCallSequence(sequence) ? hoursMap[sequence] : DEFAULT_WORK_HOURS;
-    const dueAt = openCallAfter(new Date(at).toISOString(), newMs, hours);
+    const row = rows[index];
+    const sequence = String(row.sequence || "");
+    const position = Number(row.position);
+    const hours = isCallSequence(sequence) ? hoursMap[sequence as CallSequenceId] : DEFAULT_WORK_HOURS;
+    const window = windowByStep.get(`${sequence}:${position}`) ?? "morning";
+    const priority = Boolean(lead?.priority) || sequence === "want_to_sign";
+    const delayKey = Math.round(at / 60_000);
+    const dueAt = openCallAfter(new Date(at).toISOString(), previousMs, hours, {
+      window,
+      contactAt,
+      priority,
+      varyKey: `${leadId}:${row.id}`,
+      avoid: usedByDay.get(delayKey) ?? [],
+    });
+    const dueMs = new Date(dueAt).getTime();
+    const minute = chicagoMinute(dueAt);
+    if (minute != null) {
+      const taken = usedByDay.get(delayKey) ?? [];
+      taken.push(minute);
+      usedByDay.set(delayKey, taken);
+    }
+    previousMs = Number.isFinite(dueMs) ? dueMs : previousMs;
     const { error: updateError } = await supabase
       .from("lead_jobs")
       .update({ due_at: dueAt })
-      .eq("id", String(rows[index].id))
+      .eq("id", String(row.id))
       .eq("status", "pending");
     if (updateError) throw new Error(updateError.message);
   }
@@ -389,6 +466,19 @@ export async function pullForwardStaleCallJobs(
   const nextDue = new Date(String(next.due_at)).getTime();
   if (!Number.isFinite(nextDue)) return false;
 
+  const sequences = [...new Set(jobs.map((job) => String(job.sequence || "")).filter(Boolean))];
+  const { data: stepRows } = sequences.length
+    ? await supabase
+        .from("sequence_steps")
+        .select("sequence, position, callback_window")
+        .eq("queue", "call")
+        .in("sequence", sequences)
+    : { data: [] as { sequence: string; position: number; callback_window: string | null }[] };
+  const windowByStep = new Map<string, string | null>();
+  for (const step of stepRows ?? []) {
+    windowByStep.set(`${step.sequence}:${step.position}`, typeof step.callback_window === "string" ? step.callback_window : null);
+  }
+
   const staffDue = await latestStaffCallDue(supabase, leadId);
   if (staffDue != null && staffDue > Date.now() - 60_000) {
     if (Math.abs(nextDue - staffDue) > 90_000) {
@@ -402,14 +492,28 @@ export async function pullForwardStaleCallJobs(
         .eq("id", next.id)
         .eq("status", "pending");
       if (anchorError) throw new Error(anchorError.message);
+      const { data: leadMeta } = await supabase
+        .from("leads")
+        .select("created_at, priority")
+        .eq("id", leadId)
+        .maybeSingle();
+      const contactAt = leadMeta?.created_at ? new Date(leadMeta.created_at) : null;
       const delta = anchorMs - nextDue;
+      let previousMs = anchorMs;
       for (const job of jobs.slice(1)) {
         const moved = new Date(String(job.due_at)).getTime() + delta;
         if (!Number.isFinite(moved)) continue;
         const hours = isCallSequence(job.sequence) ? hoursMap[job.sequence] : DEFAULT_WORK_HOURS;
+        const dueAt = openCallAfter(new Date(moved).toISOString(), previousMs, hours, {
+          window: windowByStep.get(`${job.sequence}:${job.position}`) ?? "morning",
+          contactAt,
+          priority: Boolean(leadMeta?.priority) || job.sequence === "want_to_sign",
+          varyKey: `${leadId}:staff:${job.id}`,
+        });
+        previousMs = new Date(dueAt).getTime();
         const { error: updateError } = await supabase
           .from("lead_jobs")
-          .update({ due_at: openCallAfter(new Date(moved).toISOString(), anchorMs, hours) })
+          .update({ due_at: dueAt })
           .eq("id", job.id)
           .eq("status", "pending");
         if (updateError) throw new Error(updateError.message);
@@ -440,10 +544,21 @@ export async function pullForwardStaleCallJobs(
   const delta = new Date(pulled).getTime() - nextDue;
   if (delta >= 0) return false;
   const pulledMs = new Date(pulled).getTime();
+  let previousMs = pulledMs;
+  const contactAt = lead?.created_at ? new Date(lead.created_at) : null;
   for (const job of jobs) {
     const due = new Date(String(job.due_at)).getTime() + delta;
     const jobHours = isCallSequence(job.sequence) ? hoursMap[job.sequence] : DEFAULT_WORK_HOURS;
-    const dueAt = job.id === next.id ? pulled : openCallAfter(new Date(due).toISOString(), pulledMs, jobHours);
+    const dueAt =
+      job.id === next.id
+        ? pulled
+        : openCallAfter(new Date(due).toISOString(), previousMs, jobHours, {
+            window: windowByStep.get(`${job.sequence}:${job.position}`) ?? "morning",
+            contactAt,
+            priority: Boolean(lead?.priority) || job.sequence === "want_to_sign",
+            varyKey: `${leadId}:pull:${job.id}`,
+          });
+    if (job.id !== next.id) previousMs = new Date(dueAt).getTime();
     const { error: updateError } = await supabase
       .from("lead_jobs")
       .update({ due_at: dueAt })

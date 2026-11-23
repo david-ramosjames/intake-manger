@@ -123,3 +123,23 @@ export function chicagoMinute(iso: string): number | null {
   const parts = chicagoParts(date);
   return parts.hour * 60 + parts.minute;
 }
+
+/** Morning / lunch / afternoon bucket for a Chicago clock minute. */
+export function dayPartForMinute(minute: number | null): "morning" | "lunch" | "afternoon" | null {
+  if (minute == null || !Number.isFinite(minute)) return null;
+  if (minute >= WINDOW.morning[0] && minute < WINDOW.morning[1]) return "morning";
+  if (minute >= WINDOW.lunch[0] && minute < WINDOW.lunch[1]) return "lunch";
+  if (minute >= WINDOW.afternoon[0] && minute < WINDOW.afternoon[1]) return "afternoon";
+  return null;
+}
+
+/** True when both times sit in the same morning/lunch/afternoon slot on the same Chicago day. */
+export function sameCallWindow(aMs: number, bMs: number): boolean {
+  if (!Number.isFinite(aMs) || !Number.isFinite(bMs)) return false;
+  const a = new Date(aMs);
+  const b = new Date(bMs);
+  if (chicagoDay(a) !== chicagoDay(b)) return false;
+  const part = dayPartForMinute(chicagoMinute(a.toISOString()));
+  if (!part) return false;
+  return part === dayPartForMinute(chicagoMinute(b.toISOString()));
+}

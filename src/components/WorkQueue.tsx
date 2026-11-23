@@ -1541,8 +1541,8 @@ function LeadFacts({
                   className={fieldClass()}
                 >
                   <option value="">Not set</option>
-                  <option value="en">🇺🇸 English</option>
-                  <option value="es">🇲🇽 Spanish</option>
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
                 </select>
               </div>
             </FieldLabel>
@@ -2425,6 +2425,41 @@ function languageFlagLabel(value: "en" | "es" | null): string {
   return "Language not set";
 }
 
+function LanguageFlagIcon({ value, size = "sm" }: { value: "en" | "es" | null; size?: "sm" | "lg" }) {
+  const box = size === "lg" ? "h-5 w-7" : "h-3.5 w-5";
+  if (value === "en") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 19 10" className={`${box} rounded-[2px] shadow-sm ring-1 ring-black/10`}>
+        <rect width="19" height="10" fill="#fff" />
+        <rect y="0" width="19" height="0.77" fill="#B22234" />
+        <rect y="1.54" width="19" height="0.77" fill="#B22234" />
+        <rect y="3.08" width="19" height="0.77" fill="#B22234" />
+        <rect y="4.62" width="19" height="0.77" fill="#B22234" />
+        <rect y="6.15" width="19" height="0.77" fill="#B22234" />
+        <rect y="7.69" width="19" height="0.77" fill="#B22234" />
+        <rect y="9.23" width="19" height="0.77" fill="#B22234" />
+        <rect width="7.6" height="5.38" fill="#3C3B6E" />
+      </svg>
+    );
+  }
+  if (value === "es") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 18 10" className={`${box} rounded-[2px] shadow-sm ring-1 ring-black/10`}>
+        <rect width="6" height="10" fill="#006847" />
+        <rect x="6" width="6" height="10" fill="#fff" />
+        <rect x="12" width="6" height="10" fill="#CE1126" />
+        <circle cx="9" cy="5" r="1.35" fill="#C4A35A" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" viewBox="0 0 18 10" className={`${box} rounded-[2px] ring-1 ring-slate-300`}>
+      <rect width="18" height="10" fill="#f8fafc" />
+      <path d="M3 5h12" stroke="#94a3b8" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Click cycles not set → English → Spanish → not set, and saves right away. */
 function LanguageFlag({
   leadId,
@@ -2444,7 +2479,6 @@ function LanguageFlag({
   useEffect(() => {
     setCurrent(value);
   }, [leadId, value]);
-  const flag = current === "en" ? "🇺🇸" : current === "es" ? "🇲🇽" : "🏳️";
   return (
     <button
       type="button"
@@ -2470,11 +2504,11 @@ function LanguageFlag({
           })
           .finally(() => setPending(false));
       }}
-      className={`inline-flex shrink-0 items-center justify-center rounded border border-transparent leading-none transition-colors hover:border-slate-300 hover:bg-white disabled:opacity-60 ${
-        size === "lg" ? "h-8 w-8 text-lg" : "h-6 w-6 text-sm"
-      } ${current ? "" : "opacity-45 hover:opacity-100"}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded border border-transparent transition-colors hover:border-slate-300 hover:bg-white disabled:opacity-60 ${
+        size === "lg" ? "h-8 w-9" : "h-6 w-7"
+      } ${current ? "" : "opacity-55 hover:opacity-100"}`}
     >
-      <span aria-hidden="true">{flag}</span>
+      <LanguageFlagIcon value={current} size={size} />
     </button>
   );
 }

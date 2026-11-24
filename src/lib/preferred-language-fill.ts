@@ -2,8 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { callrailCallId, callrailConfigured, fetchCallrailCall } from "@/lib/callrail";
 import {
   inferPreferredLanguage,
-  languageFromCallrailTracker,
-  languageFromLandingUrl,
+  languageFromCallrailCall,
   type PreferredLanguage,
 } from "@/lib/preferred-language";
 
@@ -57,10 +56,7 @@ export async function fillPreferredLanguages(supabase: SupabaseClient, leads: La
     if (!callId) continue;
     const meta = await fetchCallrailCall(callId);
     if (!meta) continue;
-    const language =
-      languageFromLandingUrl(meta.landingPageUrl) ||
-      languageFromCallrailTracker(meta.trackingName) ||
-      null;
+    const language = languageFromCallrailCall(meta);
     if (!language) continue;
     if (await saveLanguage(supabase, lead, language)) filled += 1;
   }

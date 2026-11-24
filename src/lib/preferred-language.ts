@@ -67,11 +67,124 @@ export function callrailTrackerName(text: string | null | undefined): string | n
   return name;
 }
 
+/** Campaign labels such as "RGV - PI ES", "ATX - PI EN", "ATX-PI-ES", "Form Leads - ES 4". */
+export function languageFromCampaignLabel(value: string | null | undefined): PreferredLanguage | null {
+  const label = String(value || "").replace(/\s+/g, " ").trim();
+  if (!label) return null;
+  if (/\bESPA[NÑ]OL\b/i.test(label) && !/\bENGLISH\b/i.test(label)) return "es";
+  if (/\bENGLISH\b/i.test(label) && !/\bESPA[NÑ]OL\b/i.test(label)) return "en";
+  const spanish = /(?:^|[\s\-_/(])es(?:$|[\s\-_/)])/i.test(label);
+  const english = /(?:^|[\s\-_/(])en(?:$|[\s\-_/)])/i.test(label);
+  if (spanish && !english) return "es";
+  if (english && !spanish) return "en";
+  return null;
+}
+
+function languageFromQuery(query: string): PreferredLanguage | null {
+  const params = new URLSearchParams(query.replace(/&amp;/gi, "&"));
+  for (const key of ["lang", "hl", "locale", "language"]) {
+    const value = (params.get(key) || "").trim().toLowerCase();
+    if (value.startsWith("es")) return "es";
+    if (value.startsWith("en")) return "en";
+  }
+  return languageFromCampaignLabel(params.get("utm_campaign") || params.get("campaign"));
+}
+
+function languageFromOneUrl(href: string): PreferredLanguage | null {
+  const trimmed = href.trim();
+  if (!trimmed) return null;
+  const query = trimmed.split("?")[1]?.split("#")[0] ?? "";
+  if (query) {
+    const fromQuery = languageFromQuery(query);
+    if (fromQuery) return fromQuery;
+  }
+  if (/\/es(?:\/|$|\?|#)/i.test(trimmed)) return "es";
+  if (/\/en(?:\/|$|\?|#)/i.test(trimmed)) return "en";
+  return null;
+}
+
+function cleanTrackedUrl(candidate: string): string {
+  return candidate.replace(/&amp;/gi, "&").replace(/\|.*$/, "").replace(/[)>,.]+$/g, "");
+}
+
 export function languageFromLandingUrl(url: string | null | undefined): PreferredLanguage | null {
   const href = String(url || "").trim();
   if (!href) return null;
-  if (/[?&#](?:lang|hl|locale)=es(?:-|$|&|#)/i.test(href) || /\/es(?:\/|$|\?|#)/i.test(href)) return "es";
-  if (/[?&#](?:lang|hl|locale)=en(?:-|$|&|#)/i.test(href) || /\/en(?:\/|$|\?|#)/i.test(href)) return "en";
+  const found = href.match(/https?:\/\/[^\s<>"']+/gi) ?? [];
+  for (const candidate of found) {
+    const language = languageFromOneUrl(cleanTrackedUrl(candidate));
+    if (language) return language;
+  }
+  return languageFromOneUrl(href.replace(/&amp;/gi, "&"));
+}
+
+function languageFromParamBag(params: unknown): PreferredLanguage | null {
+  if (!params || typeof params !== "object" || Array.isArray(params)) return null;
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+    if (typeof value === "string" || typeof value === "number") query.append(key, String(value));
+  }
+  const text = query.toString();
+  if (!text) return null;
+  return languageFromQuery(text);
+}
+
+type CallrailTouch = {
+  landing?: string | null;
+  campaign?: string | null;
+  landing_page_url_params?: Record<string, unknown> | null;
+  url_utm_params?: Record<string, unknown> | null;
+};
+
+function languageFromTouch(touch: CallrailTouch | null | undefined): PreferredLanguage | null {
+  if (!touch) return null;
+  return (
+    languageFromLandingUrl(touch.landing) ||
+    languageFromParamBag(touch.landing_page_url_params) ||
+    languageFromParamBag(touch.url_utm_params) ||
+    languageFromCampaignLabel(touch.campaign)
+  );
+}
+
+/**
+ * Website Pool calls (Bing, ChatGPT, and other session trackers) do not put EN/ES
+ * on the tracker name. Language is on the landing page, its query params, or the campaign.
+ */
+export function languageFromCallrailCall(input: {
+  trackingName?: string | null;
+  landingPageUrl?: string | null;
+  lastRequestedUrl?: string | null;
+  campaign?: string | null;
+  utmCampaign?: string | null;
+  milestones?: unknown;
+}): PreferredLanguage | null {
+  const milestones =
+    input.milestones && typeof input.milestones === "object"
+      ? (input.milestones as Record<string, unknown>)
+      : {};
+  for (const key of ["first_touch", "lead_created"]) {
+    const touch = milestones[key];
+    const language = touch && typeof touch === "object" ? languageFromTouch(touch as CallrailTouch) : null;
+    if (language) return language;
+  }
+  const fromLanding = languageFromLandingUrl(input.landingPageUrl) || languageFromLandingUrl(input.lastRequestedUrl);
+  if (fromLanding) return fromLanding;
+  const fromCampaign = languageFromCampaignLabel(input.utmCampaign) || languageFromCampaignLabel(input.campaign);
+  if (fromCampaign) return fromCampaign;
+  for (const key of ["last_touch", "qualified"]) {
+    const touch = milestones[key];
+    const language = touch && typeof touch === "object" ? languageFromTouch(touch as CallrailTouch) : null;
+    if (language) return language;
+  }
+  return languageFromCallrailTracker(input.trackingName);
+}
+
+export function languageFromCampaignLine(text: string | null | undefined): PreferredLanguage | null {
+  if (!text) return null;
+  for (const match of text.matchAll(/\bcampaign\s*:?\s*([^\n*]{1,80})/gi)) {
+    const language = languageFromCampaignLabel(match[1]);
+    if (language) return language;
+  }
   return null;
 }
 
@@ -93,7 +206,7 @@ export function languageFromQuoCall(input: {
  * 1) Quo call ≥60s
  * 2) Form / webchat / website form language
  * 3) CallRail Call Ad tracker EN/ES
- * 4) CallRail Website Pool landing page URL
+ * 4) Landing page lang= / campaign ES|EN (Bing, ChatGPT, other Website Pool ads)
  */
 export function inferPreferredLanguage(input: {
   text?: string | null;
@@ -120,6 +233,9 @@ export function inferPreferredLanguage(input: {
 
   const fromLanding = languageFromLandingUrl(input.landingPageUrl) || languageFromLandingUrl(blob);
   if (fromLanding) return fromLanding;
+
+  const fromCampaign = languageFromCampaignLine(blob);
+  if (fromCampaign) return fromCampaign;
 
   // Website Pool with no landing URL yet — do not guess from short CallRail alerts.
   return null;

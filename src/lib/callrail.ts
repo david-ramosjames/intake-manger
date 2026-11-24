@@ -41,28 +41,53 @@ export type CallrailCallMeta = {
   source: string | null;
   trackingName: string | null;
   landingPageUrl: string | null;
+  lastRequestedUrl: string | null;
+  campaign: string | null;
+  utmCampaign: string | null;
+  milestones: unknown;
 };
+
+const CALL_LANGUAGE_FIELDS = [
+  "source",
+  "source_name",
+  "landing_page_url",
+  "last_requested_url",
+  "milestones",
+  "campaign",
+  "utm_campaign",
+].join(",");
 
 /** One CallRail call — landing page and tracker name for language / source. */
 export async function fetchCallrailCall(callId: string): Promise<CallrailCallMeta | null> {
   const id = callId.trim();
   if (!id || !callrailConfigured()) return null;
   try {
-    const payload = await callrail(`/calls/${encodeURIComponent(id)}.json`);
+    // landing_page_url and milestones are omitted unless requested. Website Pool
+    // (Bing, ChatGPT, and other session calls) keeps lang= on those fields.
+    const payload = await callrail(
+      `/calls/${encodeURIComponent(id)}.json?fields=${CALL_LANGUAGE_FIELDS}`,
+    );
     const row = payload as {
       id?: string;
       source?: string | null;
+      source_name?: string | null;
       tracking_number_name?: string | null;
       name?: string | null;
-      company_name?: string | null;
       landing_page_url?: string | null;
+      last_requested_url?: string | null;
+      campaign?: string | null;
+      utm_campaign?: string | null;
+      milestones?: unknown;
     };
     return {
       id: String(row.id || id),
       source: String(row.source ?? "").trim() || null,
-      trackingName:
-        String(row.tracking_number_name ?? row.name ?? row.company_name ?? "").trim() || null,
+      trackingName: String(row.source_name ?? row.tracking_number_name ?? row.name ?? "").trim() || null,
       landingPageUrl: String(row.landing_page_url ?? "").trim() || null,
+      lastRequestedUrl: String(row.last_requested_url ?? "").trim() || null,
+      campaign: String(row.campaign ?? "").trim() || null,
+      utmCampaign: String(row.utm_campaign ?? "").trim() || null,
+      milestones: row.milestones ?? null,
     };
   } catch {
     return null;

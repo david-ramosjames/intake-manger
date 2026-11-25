@@ -821,6 +821,8 @@ export default async function LeadListPage({
       ownerName: row.lead.owner_name,
       arrival: row.lead.arrival,
       consultation: row.lead.consultation,
+      consultationDate: row.lead.consultation_date,
+      qualified: row.lead.qualified,
       staff,
     });
     const automation = automationLine(row.lead);

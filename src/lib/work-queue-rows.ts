@@ -196,6 +196,8 @@ function toQueueRow(
     ownerName: lead.owner_name,
     arrival: lead.arrival,
     consultation: lead.consultation,
+    consultationDate: lead.consultation_date,
+    qualified: lead.qualified,
     staff: input.staff,
   });
   const screenBy = handlers.screenBy;

@@ -20,6 +20,7 @@ import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, referralCloseMessage, type ClosePath } from "./close-ready";
 import { caseTypeIsLead, isLeadOpen, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
+import { stampLeadHandlers } from "./call-grade";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";
@@ -850,6 +851,7 @@ async function closeSignedLead(
   if (error || !lead) throw new Error(error?.message ?? "Lead not found");
   if (lead.lead_status === "Signed" || lead.lead_status === "Promoted") return false;
   if (lead.signed_case !== true) return false;
+  await stampLeadHandlers(supabase, { id: leadId, ...lead, qualified: true });
   if (closeGaps(lead, "signed").length) return false;
   await closeLead(supabase, leadId, actor, { lead_status: "Signed", close_reason: "signed", event: "signed", path: "signed" });
   if (lead.text_sequence_status === "active") {
@@ -2131,7 +2133,8 @@ async function closeLead(
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
-  assertCloseReady(lead, change.path);
+  await stampLeadHandlers(supabase, { id: leadId, ...lead });
+  assertCloseReady({ ...lead, closing_as: change.close_reason }, change.path);
   const textsWereActive = (lead.text_sequence_status || "").toLowerCase() === "active";
   const { error } = await supabase
     .from("leads")
@@ -2382,6 +2385,7 @@ export async function confirmSigned(formData: FormData) {
     .eq("id", leadId)
     .maybeSingle();
   if (error || !before) throw new Error(error?.message ?? "Lead not found");
+  await stampLeadHandlers(supabase, { ...before, id: leadId, qualified: true });
   const tags = Array.from(new Set([...((before.callrail_tags ?? []) as string[]).filter((tag) => tag !== QUALIFIED_NO && !tag.startsWith("DEC:")), QUALIFIED_YES, "CVR DESIRED", "CVR SIGNED"]));
   const now = new Date().toISOString();
   const dateSigned = before.date_signed ?? chicagoDay(new Date());

@@ -1019,6 +1019,8 @@ function gapFieldKey(gap: string): string | null {
   if (gap === "Decline reason" || gap.startsWith("Decline reason")) return "decline";
   if (gap === "Size") return "size";
   if (gap === "Signed date") return "signed_date";
+  if (gap === "Screening") return "screen";
+  if (gap === "Intake") return "intake";
   return null;
 }
 
@@ -1170,6 +1172,8 @@ function LeadFacts({
   templates,
   propertyDamageGuides = { en: "", es: "" },
   startReferral = false,
+  screenBy,
+  intakeBy,
 }: {
   row: QueueRow;
   admin: boolean;
@@ -1178,6 +1182,8 @@ function LeadFacts({
   templates: { en: string; es: string };
   propertyDamageGuides?: { en: string; es: string };
   startReferral?: boolean;
+  screenBy?: string | null;
+  intakeBy?: string | null;
 }) {
   const notify = useContext(DrawerNoticeContext);
   const formScrollRef = useRef<HTMLDivElement>(null);
@@ -1253,7 +1259,7 @@ function LeadFacts({
   const missingKeys = new Set(missingGaps.map(gapFieldKey).filter(Boolean) as string[]);
   const fieldMissing = (key: string) => missingKeys.has(key);
 
-  function liveCloseLead() {
+  function liveCloseLead(closingAs?: string | null) {
     return {
       lead_name: contactName,
       phone: row.phone,
@@ -1276,6 +1282,10 @@ function LeadFacts({
       source_category: sourceCategory,
       consultation: consultedValue === "yes" ? "staff" : consultedValue === "no" ? "no" : null,
       consultation_date: consultDateValue,
+      screen_by: screenBy ?? row.screenBy,
+      intake_by: intakeBy ?? row.intakeBy,
+      age_days: row.age,
+      closing_as: closingAs ?? null,
     };
   }
 
@@ -1292,7 +1302,8 @@ function LeadFacts({
       const root = formScrollRef.current;
       if (!root) return;
       const key = gaps.map(gapFieldKey).find(Boolean);
-      const target = key ? root.querySelector(`[data-gap-field="${key}"]`) : null;
+      const scope = root.closest("aside") ?? root;
+      const target = key ? scope.querySelector(`[data-gap-field="${key}"]`) : null;
       (target as HTMLElement | null)?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
   }
@@ -1355,7 +1366,7 @@ function LeadFacts({
     }
     const markLost = lostValue === "yes" && isLostLeadReason(lostReason);
     if (markLost) {
-      const gaps = closeGaps(liveCloseLead(), "lost");
+      const gaps = closeGaps(liveCloseLead(lostReason), "lost");
       if (gaps.length) {
         showMissingGaps(gaps, lostCloseMessage(gaps));
         return;
@@ -1368,7 +1379,7 @@ function LeadFacts({
     try {
       const saved = await persistDetails(formData);
       if (markLost && !saved?.closed) {
-        const gaps = closeGaps(liveCloseLead(), "lost");
+        const gaps = closeGaps(liveCloseLead(lostReason), "lost");
         if (gaps.length) {
           showMissingGaps(gaps, lostCloseMessage(gaps));
           return;
@@ -1389,7 +1400,7 @@ function LeadFacts({
       if (fromServer) {
         showMissingGaps(fromServer, markLost ? lostCloseMessage(fromServer) : text);
       } else if (markLost && text.includes("Could not close as lost")) {
-        const gaps = closeGaps(liveCloseLead(), "lost");
+        const gaps = closeGaps(liveCloseLead(lostReason), "lost");
         if (gaps.length) showMissingGaps(gaps, lostCloseMessage(gaps));
         else {
           notify({ tone: "error", text });
@@ -2518,11 +2529,13 @@ function HandlerSelect({
   role,
   value,
   staff,
+  onPicked,
 }: {
   leadId: string;
   role: "screen" | "intake";
   value: string | null;
   staff: string[];
+  onPicked?: (name: string | null) => void;
 }) {
   const notify = useContext(DrawerNoticeContext);
   const router = useRouter();
@@ -2534,7 +2547,7 @@ function HandlerSelect({
   const selected = current.trim();
   const names = selected && !staff.includes(selected) ? [selected, ...staff] : staff;
   return (
-    <label className="inline-flex items-center gap-1">
+    <label className="inline-flex items-center gap-1" data-gap-field={role}>
       <span className={role === "screen" ? "text-emerald-700" : "text-sky-700"}>{role === "screen" ? "Screening" : "Intake"}</span>
       <select
         aria-label={role === "screen" ? "Who screened" : "Who did the intake"}
@@ -2544,6 +2557,7 @@ function HandlerSelect({
           const next = event.target.value;
           const previous = selected;
           setCurrent(next);
+          onPicked?.(next || null);
           setPending(true);
           notify({ tone: "saving", text: "Saving…" });
           void setLeadHandler(leadId, role, next || null)
@@ -2553,6 +2567,7 @@ function HandlerSelect({
             })
             .catch((err: unknown) => {
               setCurrent(previous);
+              onPicked?.(previous || null);
               notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save" });
             })
             .finally(() => setPending(false));
@@ -2592,6 +2607,10 @@ export function LeadDrawer({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"overview" | "details" | "activity">("details");
+  const [pickedHandlers, setPickedHandlers] = useState<{ leadId: string; screen: string | null; intake: string | null } | null>(null);
+  const handlers = pickedHandlers?.leadId === row.id ? pickedHandlers : null;
+  const screenBy = handlers ? handlers.screen : row.screenBy;
+  const intakeBy = handlers ? handlers.intake : row.intakeBy;
   useEffect(() => {
     setTab("details");
   }, [row.id, startReferral]);
@@ -2642,11 +2661,23 @@ export function LeadDrawer({
             <span className="text-slate-300" aria-hidden="true">
               ·
             </span>
-            <HandlerSelect leadId={row.id} role="screen" value={row.screenBy} staff={staff} />
+            <HandlerSelect
+              leadId={row.id}
+              role="screen"
+              value={screenBy}
+              staff={staff}
+              onPicked={(name) => setPickedHandlers({ leadId: row.id, screen: name, intake: intakeBy })}
+            />
             <span className="text-slate-300" aria-hidden="true">
               ·
             </span>
-            <HandlerSelect leadId={row.id} role="intake" value={row.intakeBy} staff={staff} />
+            <HandlerSelect
+              leadId={row.id}
+              role="intake"
+              value={intakeBy}
+              staff={staff}
+              onPicked={(name) => setPickedHandlers({ leadId: row.id, screen: screenBy, intake: name })}
+            />
           </p>
         </div>
         <button
@@ -2707,6 +2738,8 @@ export function LeadDrawer({
           templates={templates}
           propertyDamageGuides={propertyDamageGuides}
           startReferral={startReferral}
+          screenBy={screenBy}
+          intakeBy={intakeBy}
         />
       </div>
       {tab === "activity" ? <ActivityThread touches={touches} row={row} staff={staff} /> : null}
@@ -3030,6 +3063,9 @@ function rowCloseGaps(row: QueueRow, path: ClosePath = "base") {
       source_category: row.sourceCategory,
       consultation: row.consulted === "yes" ? "staff" : row.consulted === "no" ? "no" : null,
       consultation_date: row.consultKey,
+      screen_by: row.screenBy,
+      intake_by: row.intakeBy,
+      age_days: row.age,
     },
     path,
   );

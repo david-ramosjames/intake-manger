@@ -1,5 +1,6 @@
 import { syncContractsFromTexts } from "@/lib/contract-sync";
 import { fillOutstandingLeadSources } from "@/lib/lead-source-fill";
+import { fillOutstandingCallHandlers } from "@/lib/call-grade";
 import { fillOutstandingPreferredLanguages } from "@/lib/preferred-language-fill";
 import { fillOutstandingTalkedWith } from "@/lib/talked-with";
 import { dispatchDue } from "@/lib/dispatch";
@@ -51,13 +52,14 @@ export async function POST(request: Request) {
     const contracts = await step("contracts", () => syncContractsFromTexts(supabase));
     const sources = await step("sources", () => fillOutstandingLeadSources(supabase));
     const languages = await step("languages", () => fillOutstandingPreferredLanguages(supabase));
+    const handlers = await step("handlers", () => fillOutstandingCallHandlers(supabase));
     const talkedWith = await step("talkedWith", () => fillOutstandingTalkedWith(supabase));
     const parked = await step("parked", () => stopParkedFollowUps(supabase));
     const enrolled = await step("enrolled", () => enrollMissingFollowUps(supabase));
     const autoClosedCalls = await step("autoClosedCalls", () => collapseDuplicateOpenCalls(supabase));
     const closed = await step("closed", () => closeFinishedLeads(supabase));
     const dispatch = await step("dispatch", () => dispatchDue(supabase));
-    const failed = [inboxSync, callLedger, callAi, contracts, sources, languages, talkedWith, parked, enrolled, autoClosedCalls, closed, dispatch].filter(
+    const failed = [inboxSync, callLedger, callAi, contracts, sources, languages, handlers, talkedWith, parked, enrolled, autoClosedCalls, closed, dispatch].filter(
       (item) => !item.ok,
     );
     return Response.json({
@@ -67,6 +69,7 @@ export async function POST(request: Request) {
       contracts,
       sources,
       languages,
+      handlers,
       talkedWith,
       parked,
       enrolled,

@@ -4,7 +4,7 @@ import { isSourceCategory } from "@/lib/source-options";
 import { QUALIFIED_NO, QUALIFIED_YES, SIZE_TAGS, qualifiedChoice, selectedDecline, selectedOne } from "@/lib/tags";
 
 export const CLOSE_READY_COLUMNS =
-  "lead_name, phone, phone_e164, email, identity_status, owner_name, qualified, callrail_tags, desired_case, signed_case, date_signed, caller_class, case_type, lead_source, source_type, source_category, consultation, consultation_date";
+  "lead_name, phone, phone_e164, email, identity_status, owner_name, arrival, qualified, callrail_tags, desired_case, signed_case, date_signed, caller_class, case_type, lead_source, source_type, source_category, consultation, consultation_date, screen_by, intake_by, lead_date, created_at";
 
 export type CloseReadyLead = {
   lead_name?: string | null;
@@ -13,6 +13,7 @@ export type CloseReadyLead = {
   email?: string | null;
   identity_status?: string | null;
   owner_name?: string | null;
+  arrival?: string | null;
   qualified?: boolean | null;
   callrail_tags?: string[] | null;
   desired_case?: boolean | null;
@@ -25,6 +26,14 @@ export type CloseReadyLead = {
   source_category?: string | null;
   consultation?: string | null;
   consultation_date?: string | null;
+  screen_by?: string | null;
+  intake_by?: string | null;
+  lead_date?: string | null;
+  created_at?: string | null;
+  /** Days since the lead arrived. Used when the close check does not have the dates. */
+  age_days?: number | null;
+  /** Reason this close is using, such as no_response. */
+  closing_as?: string | null;
 };
 
 /** What has to be finished before this kind of close. */
@@ -35,6 +44,7 @@ export function closeGaps(lead: CloseReadyLead, path: ClosePath = "base"): strin
     return lead.identity_status === "needs_review" ? ["Confirm the client name"] : [];
   }
   const gaps = baseCloseGaps(lead);
+  addHandlerGaps(lead, gaps, path);
   if (path === "base" || path === "chase") return gaps;
   if (path === "declined") {
     // Referrals still need a Qualified Yes/No — same bar as Lost, even when
@@ -64,6 +74,34 @@ export function closeGaps(lead: CloseReadyLead, path: ClosePath = "base"): strin
   if (qualified !== true && qualified !== false) gaps.push("Qualified");
   if (desiredValue(lead) == null) gaps.push("Desired");
   return gaps;
+}
+
+function daysSinceArrival(lead: CloseReadyLead): number | null {
+  const raw = (lead.lead_date || lead.created_at || "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const start = Date.parse(`${raw}T00:00:00Z`);
+    if (Number.isFinite(start)) return Math.floor((Date.now() - start) / 86400000);
+  }
+  return lead.age_days ?? null;
+}
+
+function consultedYes(lead: CloseReadyLead): boolean {
+  if ((lead.consultation ?? "").trim().toLowerCase() === "no") return false;
+  if ((lead.consultation ?? "").trim()) return true;
+  return /^\d{4}-\d{2}-\d{2}/.test((lead.consultation_date ?? "").slice(0, 10));
+}
+
+/** Not a lead, and unresponsive after the 14-day chase, can close with screening blank. */
+function screeningOptional(lead: CloseReadyLead, path: ClosePath): boolean {
+  if (path === "nonlead" || path === "chase") return true;
+  if (lead.closing_as === "no_response" && (daysSinceArrival(lead) ?? 0) >= 14) return true;
+  return false;
+}
+
+function addHandlerGaps(lead: CloseReadyLead, gaps: string[], path: ClosePath) {
+  if (!screeningOptional(lead, path) && !lead.screen_by?.trim()) gaps.push("Screening");
+  const needsIntake = consultedYes(lead) || qualifiedValue(lead) === true;
+  if (needsIntake && !lead.intake_by?.trim()) gaps.push("Intake");
 }
 
 function baseCloseGaps(lead: CloseReadyLead): string[] {

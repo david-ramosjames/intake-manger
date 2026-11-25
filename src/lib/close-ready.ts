@@ -96,12 +96,21 @@ function consultedYes(lead: CloseReadyLead): boolean {
   return /^\d{4}-\d{2}-\d{2}/.test((lead.consultation_date ?? "").slice(0, 10));
 }
 
-/** Not a lead, and unresponsive after the 14-day chase, can close with screening blank. A signed file that already has the intake person is finished too. */
+/** Not a lead, and unresponsive after the 14-day chase, can close with screening blank. */
 function screeningOptional(lead: CloseReadyLead, path: ClosePath): boolean {
   if (path === "nonlead" || path === "chase") return true;
   if (lead.closing_as === "no_response" && (daysSinceArrival(lead) ?? 0) >= 14) return true;
-  if (path === "signed" && lead.signed_case === true && Boolean(lead.intake_by?.trim())) return true;
   return false;
+}
+
+/** Consultation Yes needs an intake person. Consultation No cannot keep one. */
+export function consultationIntakeError(
+  consulted: "yes" | "no" | "" | null | undefined,
+  intake: string | null | undefined,
+): string | null {
+  if (consulted === "yes" && !intake?.trim()) return "Enter the intake person.";
+  if (consulted === "no" && intake?.trim()) return "Change consultation to Yes, or remove the intake person.";
+  return null;
 }
 
 function addHandlerGaps(lead: CloseReadyLead, gaps: string[], path: ClosePath) {

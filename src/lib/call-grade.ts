@@ -83,3 +83,29 @@ export function leadHandlerNames(input: {
   const intakeBy = person(input.intakeStored) || person(input.gradedIntake) || (needsIntake && !gradedScreen ? screenBy : null);
   return { screenBy, intakeBy };
 }
+
+/** Close checks use the screener the file already shows when the column is still blank. */
+export function leadForClose<T extends {
+  screen_by?: string | null;
+  intake_by?: string | null;
+  owner_name?: string | null;
+  arrival?: string | null;
+  consultation?: string | null;
+  consultation_date?: string | null;
+  qualified?: boolean | null;
+}>(lead: T, gradedScreen: string | null | undefined, staff: StaffPerson[]): T {
+  if (lead.screen_by?.trim()) return lead;
+  const screenBy = leadHandlerNames({
+    screenStored: lead.screen_by,
+    intakeStored: lead.intake_by,
+    gradedScreen,
+    ownerName: lead.owner_name,
+    arrival: lead.arrival,
+    consultation: lead.consultation,
+    consultationDate: lead.consultation_date,
+    qualified: lead.qualified,
+    staff,
+  }).screenBy;
+  if (!screenBy) return lead;
+  return { ...lead, screen_by: screenBy };
+}

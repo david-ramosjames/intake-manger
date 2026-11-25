@@ -10,7 +10,7 @@ import { callOutcomeLabel, isCallOutcome } from "./calls";
 import { loadStaff, matchStaff } from "./identity";
 import { firmUserId } from "./staff";
 import { canonicalTextSequence, textSequenceLabel } from "./queue";
-import { contractSent } from "./desired";
+import { consultedChoice, contractSent } from "./desired";
 import { enrollFollowUp, enrollMissingFollowUps, nextFreePosition, sequenceForLead, shiftFollowingCalls, stopFollowUp } from "./followup";
 import { clockToMinutes, DEFAULT_WORK_HOURS, delayMinutes, isCallSequence, isCallbackWindow, loadWorkHours, type CadenceDay, type CallSequenceId } from "./sequences";
 import { chicagoDay, chicagoLocalToIso, nextOpenCallInstant } from "./time";
@@ -18,7 +18,7 @@ import { isPiCaseType, isSourceType, nameIsUnavailable, officialCaseType, standa
 import { isSourceCategory, leadSourceChoice } from "./source-options";
 import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
-import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, referralCloseMessage, type ClosePath } from "./close-ready";
+import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, consultationIntakeError, referralCloseMessage, type ClosePath } from "./close-ready";
 import { caseTypeIsLead, isLeadOpen, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
 import { stampLeadHandlers } from "./call-handler-lookup";
 import { isPlaceholderOwner } from "./talked-with";
@@ -51,6 +51,16 @@ export async function setLeadHandler(leadId: string, role: "screen" | "intake", 
   const staff = await loadStaff(supabase);
   const matched = name ? matchStaff(name, staff) : null;
   if (name && !matched) throw new Error("Choose someone on staff.");
+  if (role === "intake") {
+    const { data: current, error: loadError } = await supabase
+      .from("leads")
+      .select("consultation, consultation_date")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (loadError || !current) throw new Error(loadError?.message ?? "Lead not found");
+    const pairError = consultationIntakeError(consultedChoice(current), matched?.name ?? null);
+    if (pairError) throw new Error(pairError);
+  }
   const column = role === "screen" ? "screen_by" : "intake_by";
   const { error } = await supabase.from("leads").update({ [column]: matched?.name ?? null }).eq("id", leadId);
   if (error) throw new Error(error.message);
@@ -589,7 +599,7 @@ export async function saveLeadDetails(formData: FormData) {
   }
   const { data: before, error: loadError } = await supabase
     .from("leads")
-    .select("caller_class, close_suggestion, close_reason, lead_status, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case, phone, phone_e164, lead_name, agreement_status")
+    .select("caller_class, close_suggestion, close_reason, lead_status, signed_case, date_signed, callrail_tags, callrail_call_id, qualified, desired_case, phone, phone_e164, lead_name, agreement_status, intake_by, consultation, consultation_date")
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !before) throw new Error(loadError?.message ?? "Lead not found");
@@ -623,6 +633,22 @@ export async function saveLeadDetails(formData: FormData) {
   } else if (consulted === "no") {
     patch.consultation = "no";
     patch.consultation_date = null;
+  }
+  const submittedIntake = formData.has("intake_by");
+  const nextIntake = submittedIntake ? (text(formData, "intake_by") ?? "") : (before.intake_by ?? "").trim();
+  const nextConsulted = consulted === "yes" || consulted === "no" ? consulted : consultedChoice(before);
+  const pairError = consultationIntakeError(nextConsulted, nextIntake);
+  if (pairError) throw new Error(pairError);
+  let intakeWrite: string | null | undefined;
+  if (submittedIntake && nextIntake !== (before.intake_by ?? "").trim()) {
+    if (!nextIntake) {
+      intakeWrite = null;
+    } else {
+      const matchedIntake = matchStaff(nextIntake, await loadStaff(supabase));
+      if (!matchedIntake) throw new Error("Choose someone on staff.");
+      intakeWrite = matchedIntake.name;
+    }
+    patch.intake_by = intakeWrite;
   }
   const officialType = officialCaseType(caseType);
   patch.case_type = officialType && officialType !== "Unknown / No Response" ? officialType : caseType ? "TBD" : null;
@@ -674,6 +700,14 @@ export async function saveLeadDetails(formData: FormData) {
     actor,
     payload: { case_type: caseType, lead_source: leadSource, source_type: sourceType, lead_name: leadName },
   });
+  if (intakeWrite !== undefined) {
+    await supabase.from("lead_events").insert({
+      lead_id: leadId,
+      event_type: "intake_by",
+      actor,
+      payload: { name: intakeWrite },
+    });
+  }
   const syncPhone = (!keepPhone && (phoneE164 || phone)) || before.phone_e164 || before.phone;
   const previousName = (before.lead_name || "").trim();
   const nextName = (leadName || "").trim();

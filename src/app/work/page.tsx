@@ -3,7 +3,7 @@ import { QueueHelp } from "@/components/QueueHelp";
 import { WorkArrivedPills, WorkFilterLink, WorkFilterState, WorkMetric, WorkSearch, WorkStatusPills } from "@/components/WorkFilters";
 import { WorkListFilters } from "@/components/WorkListFilters";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
-import { leadHandlerNames } from "@/lib/call-grade";
+import { leadForClose, leadHandlerNames } from "@/lib/call-grade";
 import { loadLeadCallJobs } from "@/lib/call-handler-lookup";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { loadStaff, suggestClientName } from "@/lib/identity";
@@ -525,7 +525,6 @@ export default async function LeadListPage({
     loadPropertyDamageGuides(),
   ]);
   let workLeads = focusIds ? focusedLeads : ((data ?? []) as ListLead[]);
-  if (funnel === "closed") workLeads = workLeads.filter((lead) => !signedFileStillOpen(lead));
   const reviewLeads = (reviewResult.data ?? []) as ListLead[];
   const needsPractice = funnel !== "closed" && !workLeads.some((lead) => isPracticeTestPhone(lead.phone_e164 || lead.phone));
   const [practiceRows, searched, selectedRows] = await Promise.all([
@@ -720,11 +719,13 @@ export default async function LeadListPage({
 
   const queueLeads = await applyLiveTextSequences(
     supabase,
-    leads.filter((lead) => {
+    leads.flatMap((lead) => {
+      const filed = leadForClose(lead, callJobs.get(lead.id)?.screenBy, staff);
       const hold = nonPiHoldOpen(lead, sentFirm.has(lead.id));
-      if (funnel === "closed") return !hold;
-      if (parkedIds.has(lead.id)) return hold;
-      return true;
+      if (funnel === "closed") return hold || signedFileStillOpen(filed) ? [] : [filed];
+      if (parkedIds.has(lead.id)) return hold ? [filed] : [];
+      if (signedFileStillOpen(lead) && !signedFileStillOpen(filed)) return [];
+      return [filed];
     }),
   );
   const rows = queueLeads.map((lead) => {

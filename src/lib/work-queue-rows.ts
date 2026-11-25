@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
-import { leadHandlerNames } from "@/lib/call-grade";
+import { leadForClose, leadHandlerNames } from "@/lib/call-grade";
 import { loadLeadCallJobs } from "@/lib/call-handler-lookup";
 import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
@@ -203,7 +203,8 @@ function toQueueRow(
   });
   const screenBy = handlers.screenBy;
   const intakeBy = handlers.intakeBy;
-  const cycle = leadCycle(lead, input.talked ? [{ type: "call", direction: "inbound" }] : []);
+  const filed = leadForClose(lead, input.screenBy, input.staff);
+  const cycle = leadCycle(filed, input.talked ? [{ type: "call", direction: "inbound" }] : []);
   const age = daysSince(lead.lead_date ?? lead.created_at);
   const opened = formatQueueStamp(lead.created_at || lead.lead_date);
   const outreach = daysSince(input.outreachAt);
@@ -266,7 +267,7 @@ function toQueueRow(
     signedDate: (lead.date_signed || lead.signed_at || "").slice(0, 10),
     priority: priority ? PRIORITY_PLACE_LABEL[priority] : null,
     prioritySuggestion: lead.priority_suggestion,
-    actionTitle: openLeadAction(lead, cycle, input.tally.calls),
+    actionTitle: openLeadAction(filed, cycle, input.tally.calls),
     label,
     caseType: suggestedCaseType(lead),
     leadSource: lead.lead_source?.trim() || (listDetail(lead) === "—" ? "" : listDetail(lead)),
@@ -274,7 +275,7 @@ function toQueueRow(
     sourceCategory: lead.source_category?.trim() || "",
     stageClassName: stageClass(label),
     stageStripe: stageStripe(label),
-    step: queueStep(lead, cycle, input.tally.calls),
+    step: queueStep(filed, cycle, input.tally.calls),
     tags: lead.callrail_tags ?? [],
     callrail: Boolean(lead.callrail_call_id),
     declineReason: lead.decline_reason,

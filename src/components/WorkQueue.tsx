@@ -11,7 +11,7 @@ import { SIZE_TAGS, declineOptions, selectedDecline, selectedOne } from "@/lib/t
 import type { LeadEntry } from "@/lib/lead-entry";
 import { canonicalLeadSource, caseTypeChoices, emailIsUnavailable, EMAIL_NOT_AVAILABLE, isSourceType, leadSourceFromText, nameIsUnavailable, officialCaseType, PI_CASE_TYPES, SOURCE_TYPE_OPTIONS, standardLeadEmail } from "@/lib/leads";
 import { findSourceOption, getCategoriesForType, getSourcesForCategory, isSourceCategory, type SourceCategory, type SourceType } from "@/lib/source-options";
-import { closeGaps, gapsFromCloseMessage, lostCloseMessage, referralCloseMessage, type ClosePath } from "@/lib/close-ready";
+import { closeGaps, consultationIntakeError, gapsFromCloseMessage, lostCloseMessage, referralCloseMessage, type ClosePath } from "@/lib/close-ready";
 import { callJobHeaderClass, callJobLabel } from "@/lib/call-grade";
 import { LOST_LEAD_REASONS, isLostLeadReason, type LostLeadReason } from "@/lib/funnel";
 import { classifyNonLead, confirmCloseSuggestion, confirmSigned, markPriority, markReferralAlreadySent, markReferralDeclined, reopenClosedLead, reviewPrioritySuggestion, resolveIdentity, saveLeadDetails, sendReferral, setLeadHandler, setNextAction, setPreferredLanguage, startTextSequence, stopTextSequence } from "@/lib/ops-actions";
@@ -36,6 +36,8 @@ import { matchesPriorityFilter } from "@/lib/work-queue-options";
 
 type DrawerNotice = { tone: "saving" | "saved" | "error"; text: string };
 const DrawerNoticeContext = createContext<(notice: DrawerNotice | null) => void>(() => {});
+const ConsultChoiceContext = createContext<"yes" | "no" | "">("");
+const SetConsultChoiceContext = createContext<(value: "yes" | "no" | "") => void>(() => {});
 
 function useNotedSubmit() {
   const notify = useContext(DrawerNoticeContext);
@@ -1092,6 +1094,7 @@ function detailGap(input: {
   desired: "yes" | "no" | "tbd" | "";
   size: string;
   decline: string;
+  intake: string | null;
   signedChoice: "yes" | "no" | "";
   signedDate: string;
   lostChoice: "yes" | "no" | "";
@@ -1100,6 +1103,8 @@ function detailGap(input: {
 }): string | null {
   if (input.notALead) return null;
   if (input.consulted === "yes" && !input.consultDate) return "Enter the consultation date before saving or closing.";
+  const intakeMessage = consultationIntakeError(input.consulted, input.intake);
+  if (intakeMessage) return intakeMessage;
   if (input.qualified === "no" && input.desired === "yes") return "A lead that is not qualified is not desired.";
   if (input.desired === "yes" && !input.size) return "Choose a size before saving or closing.";
   // Lost closes (e.g. Unresponsive) need Qualified + Desired, not a firm decline reason.
@@ -1190,6 +1195,7 @@ function LeadFacts({
   onPreferredLanguage: (next: "en" | "es" | null) => void;
 }) {
   const notify = useContext(DrawerNoticeContext);
+  const setConsultChoice = useContext(SetConsultChoiceContext);
   const formScrollRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -1243,6 +1249,9 @@ function LeadFacts({
   }, [row.id, row.leadName, row.title]);
   const nonPi = caseType === "Non-PI Legal Matter";
   const consultedValue = nonPi ? "no" : consulted;
+  useEffect(() => {
+    setConsultChoice(consultedValue);
+  }, [consultedValue, setConsultChoice]);
   const qualifiedValue = nonPi ? "no" : qualified;
   const desiredValue = nonPi || qualifiedValue === "no" ? "no" : desired;
   const lostValue = nonPi ? "no" : lostChoice;
@@ -1320,6 +1329,7 @@ function LeadFacts({
       desired: desiredValue,
       size: sizeValue,
       decline: declineValue,
+      intake: intakeBy ?? null,
       signedChoice,
       signedDate,
       lostChoice: lostValue,
@@ -1331,6 +1341,11 @@ function LeadFacts({
   function exitGap() {
     if (notALead) return null;
     if (dirty.consult && consultedValue === "yes" && !consultDateValue) return "Enter the consultation date before saving or closing.";
+    const pairChanged = consultedValue !== row.consulted || (intakeBy ?? "") !== (row.intakeBy ?? "");
+    if (pairChanged) {
+      const intakeMessage = consultationIntakeError(consultedValue, intakeBy);
+      if (intakeMessage) return intakeMessage;
+    }
     if (dirty.desired && desiredValue === "yes" && !sizeValue) return "Choose a size before saving or closing.";
     if (dirty.desired && desiredValue === "no" && !declineValue && lostValue !== "yes") {
       return "Choose a decline reason before saving or closing.";
@@ -1565,6 +1580,7 @@ function LeadFacts({
             </FieldLabel>
           </PanelSection>
           <input type="hidden" name="consulted" value={consultedValue} />
+          <input type="hidden" name="intake_by" value={intakeBy ?? ""} />
           {admin ? <input type="hidden" name="signed_decision" value={signedChoice} /> : null}
           <PanelSection title="Marketing" invalid={fieldMissing("source_type") || fieldMissing("source_category") || fieldMissing("lead_source")}>
             <FieldLabel label="Source type" fieldKey="source_type" invalid={fieldMissing("source_type")}>
@@ -2537,12 +2553,14 @@ function HandlerSelect({
   value,
   staff,
   onPicked,
+  onGate,
 }: {
   leadId: string;
   role: "screen" | "intake";
   value: string | null;
   staff: string[];
   onPicked?: (name: string | null) => void;
+  onGate?: (next: string | null) => "save" | "hold" | "stop";
 }) {
   const notify = useContext(DrawerNoticeContext);
   const router = useRouter();
@@ -2562,9 +2580,12 @@ function HandlerSelect({
         disabled={pending}
         onChange={(event) => {
           const next = event.target.value;
+          const gate = onGate?.(next || null) ?? "save";
+          if (gate === "stop") return;
           const previous = selected;
           setCurrent(next);
           onPicked?.(next || null);
+          if (gate === "hold") return;
           setPending(true);
           notify({ tone: "saving", text: "Saving…" });
           void setLeadHandler(leadId, role, next || null)
@@ -2615,6 +2636,7 @@ export function LeadDrawer({
 }) {
   const [tab, setTab] = useState<"overview" | "details" | "activity">("details");
   const [pickedHandlers, setPickedHandlers] = useState<{ leadId: string; screen: string | null; intake: string | null } | null>(null);
+  const [consultChoice, setConsultChoice] = useState<"yes" | "no" | "">(row.consulted);
   const [language, setLanguage] = useState<"en" | "es" | null>(row.preferredLanguage);
   useEffect(() => {
     setLanguage(row.preferredLanguage);
@@ -2626,8 +2648,9 @@ export function LeadDrawer({
   const screenBy = handlers ? handlers.screen : row.screenBy;
   const intakeBy = handlers ? handlers.intake : row.intakeBy;
   useEffect(() => {
+    setConsultChoice(row.consulted);
     setTab("details");
-  }, [row.id, startReferral]);
+  }, [row.id, row.consulted, startReferral]);
   const [notice, setNotice] = useState<DrawerNotice | null>(null);
   const [touches, setTouches] = useState<Touch[] | null>(null);
   useEffect(() => {
@@ -2659,6 +2682,8 @@ export function LeadDrawer({
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <DrawerNoticeContext.Provider value={setNotice}>
+      <ConsultChoiceContext.Provider value={consultChoice}>
+      <SetConsultChoiceContext.Provider value={setConsultChoice}>
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">
@@ -2691,6 +2716,21 @@ export function LeadDrawer({
               value={intakeBy}
               staff={staff}
               onPicked={(name) => setPickedHandlers({ leadId: row.id, screen: screenBy, intake: name })}
+              onGate={(next) => {
+                const message = consultationIntakeError(consultChoice, next);
+                if (message) {
+                  setNotice({ tone: "error", text: message });
+                  return "stop";
+                }
+                if (consultationIntakeError(row.consulted, next)) {
+                  setNotice({
+                    tone: "saving",
+                    text: next ? "Save the file to keep the intake person." : "Save the file to remove the intake person.",
+                  });
+                  return "hold";
+                }
+                return "save";
+              }}
             />
           </p>
         </div>
@@ -2850,6 +2890,8 @@ export function LeadDrawer({
         </section>
       </div>
       ) : null}
+      </SetConsultChoiceContext.Provider>
+      </ConsultChoiceContext.Provider>
       </DrawerNoticeContext.Provider>
     </aside>
   );

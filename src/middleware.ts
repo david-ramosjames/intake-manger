@@ -2,7 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabasePublishableKey } from "@/lib/supabase/keys";
 
-const PUBLIC = ["/login", "/auth/callback", "/api/slack/events", "/api/cron/queues"];
+const PUBLIC = ["/login", "/auth/callback", "/api/slack/events", "/api/cron/queues", "/api/callrail/language"];
 
 function isPublicPath(pathname: string) {
   return PUBLIC.some((item) => pathname === item || pathname.startsWith(`${item}/`));

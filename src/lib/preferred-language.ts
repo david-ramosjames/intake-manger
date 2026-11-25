@@ -72,7 +72,8 @@ export function languageFromCampaignLabel(value: string | null | undefined): Pre
   const label = String(value || "").replace(/\s+/g, " ").trim();
   if (!label) return null;
   if (/\bESPA[NÑ]OL\b/i.test(label) && !/\bENGLISH\b/i.test(label)) return "es";
-  if (/\bENGLISH\b/i.test(label) && !/\bESPA[NÑ]OL\b/i.test(label)) return "en";
+  if (/\bSPANISH\b/i.test(label) && !/\bENGLISH\b/i.test(label)) return "es";
+  if (/\bENGLISH\b/i.test(label) && !/\b(?:ESPA[NÑ]OL|SPANISH)\b/i.test(label)) return "en";
   const spanish = /(?:^|[\s\-_/(])es(?:$|[\s\-_/)])/i.test(label);
   const english = /(?:^|[\s\-_/(])en(?:$|[\s\-_/)])/i.test(label);
   if (spanish && !english) return "es";
@@ -90,7 +91,17 @@ function languageFromQuery(query: string): PreferredLanguage | null {
   return languageFromCampaignLabel(params.get("utm_campaign") || params.get("campaign"));
 }
 
-function languageFromOneUrl(href: string): PreferredLanguage | null {
+function decodeTrackedUrl(href: string): string {
+  const cleaned = href.replace(/&amp;/gi, "&").trim();
+  if (!/%[0-9a-f]{2}/i.test(cleaned)) return cleaned;
+  try {
+    return decodeURIComponent(cleaned);
+  } catch {
+    return cleaned;
+  }
+}
+
+function languageFromDecodedUrl(href: string): PreferredLanguage | null {
   const trimmed = href.trim();
   if (!trimmed) return null;
   const query = trimmed.split("?")[1]?.split("#")[0] ?? "";
@@ -101,6 +112,11 @@ function languageFromOneUrl(href: string): PreferredLanguage | null {
   if (/\/es(?:\/|$|\?|#)/i.test(trimmed)) return "es";
   if (/\/en(?:\/|$|\?|#)/i.test(trimmed)) return "en";
   return null;
+}
+
+function languageFromOneUrl(href: string): PreferredLanguage | null {
+  const cleaned = decodeTrackedUrl(href).replace(/\|.*$/, "").replace(/[)>,.]+$/g, "");
+  return languageFromDecodedUrl(cleaned);
 }
 
 function cleanTrackedUrl(candidate: string): string {
@@ -177,6 +193,20 @@ export function languageFromCallrailCall(input: {
     if (language) return language;
   }
   return languageFromCallrailTracker(input.trackingName);
+}
+
+/** Page views are newest-first. The oldest page is the landing page shown in CallRail. */
+export function languageFromPageViews(views: unknown): PreferredLanguage | null {
+  if (!Array.isArray(views)) return null;
+  for (const view of [...views].reverse()) {
+    if (!view || typeof view !== "object") continue;
+    const row = view as { page_url?: unknown; referrer_url?: unknown };
+    const language =
+      languageFromLandingUrl(typeof row.page_url === "string" ? row.page_url : null) ||
+      languageFromLandingUrl(typeof row.referrer_url === "string" ? row.referrer_url : null);
+    if (language) return language;
+  }
+  return null;
 }
 
 export function languageFromCampaignLine(text: string | null | undefined): PreferredLanguage | null {

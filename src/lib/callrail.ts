@@ -1,4 +1,5 @@
 import { canonicalLeadSource } from "@/lib/leads";
+import { languageFromCallrailCall, languageFromPageViews, type PreferredLanguage } from "@/lib/preferred-language";
 
 export function callrailConfigured(): boolean {
   return Boolean(process.env.CALLRAIL_API_KEY && process.env.CALLRAIL_ACCOUNT_ID);
@@ -92,6 +93,35 @@ export async function fetchCallrailCall(callId: string): Promise<CallrailCallMet
   } catch {
     return null;
   }
+}
+
+type CallrailPageView = { page_url?: string | null; referrer_url?: string | null };
+
+/** Newest page view first. Later pages hold the earlier landing page. */
+export async function fetchCallrailPageViews(callId: string): Promise<CallrailPageView[]> {
+  const id = callId.trim();
+  if (!id || !callrailConfigured()) return [];
+  try {
+    const first = await callrail(`/calls/${encodeURIComponent(id)}/page_views.json?per_page=100&page=1`);
+    const newest = Array.isArray(first.page_views) ? (first.page_views as CallrailPageView[]) : [];
+    const pages = Number(first.total_pages ?? 1);
+    if (!Number.isFinite(pages) || pages <= 1) return newest;
+    const last = await callrail(`/calls/${encodeURIComponent(id)}/page_views.json?per_page=100&page=${pages}`);
+    const oldest = Array.isArray(last.page_views) ? (last.page_views as CallrailPageView[]) : [];
+    return [...newest, ...oldest];
+  } catch {
+    return [];
+  }
+}
+
+/** Landing page, campaign, then the session page the caller opened before dialing. */
+export async function languageForCallrailId(callId: string): Promise<PreferredLanguage | null> {
+  const id = callId.trim();
+  if (!id) return null;
+  const meta = await fetchCallrailCall(id);
+  const fromCall = meta ? languageFromCallrailCall(meta) : null;
+  if (fromCall) return fromCall;
+  return languageFromPageViews(await fetchCallrailPageViews(id));
 }
 
 export async function fetchCallrailSources(startDate: string, endDate: string): Promise<Map<string, string>> {

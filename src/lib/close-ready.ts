@@ -34,6 +34,11 @@ export type CloseReadyLead = {
   age_days?: number | null;
   /** Reason this close is using, such as no_response. */
   closing_as?: string | null;
+  /**
+   * The file was already closed before screening was required.
+   * A missing screener or intake person does not block that close.
+   */
+  grandfather_handlers?: boolean | null;
 };
 
 /** What has to be finished before this kind of close. */
@@ -99,6 +104,7 @@ function screeningOptional(lead: CloseReadyLead, path: ClosePath): boolean {
 }
 
 function addHandlerGaps(lead: CloseReadyLead, gaps: string[], path: ClosePath) {
+  if (lead.grandfather_handlers) return;
   if (!screeningOptional(lead, path) && !lead.screen_by?.trim()) gaps.push("Screening");
   const needsIntake = consultedYes(lead) || qualifiedValue(lead) === true;
   if (needsIntake && !lead.intake_by?.trim()) gaps.push("Intake");

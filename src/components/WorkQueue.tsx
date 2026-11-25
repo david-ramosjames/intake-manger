@@ -1174,6 +1174,8 @@ function LeadFacts({
   startReferral = false,
   screenBy,
   intakeBy,
+  preferredLanguage,
+  onPreferredLanguage,
 }: {
   row: QueueRow;
   admin: boolean;
@@ -1184,6 +1186,8 @@ function LeadFacts({
   startReferral?: boolean;
   screenBy?: string | null;
   intakeBy?: string | null;
+  preferredLanguage: "en" | "es" | null;
+  onPreferredLanguage: (next: "en" | "es" | null) => void;
 }) {
   const notify = useContext(DrawerNoticeContext);
   const formScrollRef = useRef<HTMLDivElement>(null);
@@ -1204,7 +1208,6 @@ function LeadFacts({
   const [caseType, setCaseType] = useState(() => shownCaseType(row.caseType));
   const [email, setEmail] = useState(() => standardLeadEmail(row.email) ?? "");
   const [contactName, setContactName] = useState(() => contactNameFromRow(row));
-  const [preferredLanguage, setPreferredLanguage] = useState<"en" | "es" | "">(row.preferredLanguage ?? "");
   const [decline, setDecline] = useState(selectedDecline(row.tags));
   const [signedChoice, setSignedChoice] = useState<"yes" | "no" | "">(() => (row.signed || row.confirmSigned ? "yes" : ""));
   const [signedDate, setSignedDate] = useState(row.signedDate);
@@ -1228,7 +1231,6 @@ function LeadFacts({
     setDecline(nextType === "Non-PI Legal Matter" ? "DEC: Non-PI Legal Matter" : selectedDecline(row.tags));
     setEmail(standardLeadEmail(row.email) ?? "");
     setContactName(contactNameFromRow(row));
-    setPreferredLanguage(row.preferredLanguage ?? "");
     setNotLeadReason(notLeadReasonFor(row));
     setSignedChoice(row.signed || row.confirmSigned ? "yes" : "");
     setSignedDate(row.signedDate);
@@ -1535,19 +1537,23 @@ function LeadFacts({
               )}
             </FieldLabel>
             <FieldLabel label="Language" className="col-span-2">
-              <input type="hidden" name="preferred_language" value={preferredLanguage} />
+              <input type="hidden" name="preferred_language" value={preferredLanguage ?? ""} />
               <div className="mt-1 flex items-center gap-2">
                 <LanguageFlag
                   leadId={row.id}
-                  value={preferredLanguage === "en" || preferredLanguage === "es" ? preferredLanguage : null}
-                  onChanged={(next) => setPreferredLanguage(next ?? "")}
+                  value={preferredLanguage}
+                  onChanged={onPreferredLanguage}
                 />
                 <select
-                  value={preferredLanguage}
+                  value={preferredLanguage ?? ""}
                   onChange={(event) => {
                     const next = event.target.value;
-                    const language = next === "en" || next === "es" ? next : "";
-                    setPreferredLanguage(language);
+                    const language = next === "en" || next === "es" ? next : null;
+                    onPreferredLanguage(language);
+                    notify({ tone: "saving", text: "Saving…" });
+                    void setPreferredLanguage(row.id, language)
+                      .then(() => notify({ tone: "saved", text: language === "es" ? "Spanish" : language === "en" ? "English" : "Language cleared" }))
+                      .catch((err: unknown) => notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save" }));
                   }}
                   className={fieldClass()}
                 >
@@ -2501,16 +2507,17 @@ function LanguageFlag({
         const next = nextPreferredLanguage(current);
         const previous = current;
         setCurrent(next);
+        onChanged?.(next);
         setPending(true);
         notify({ tone: "saving", text: "Saving…" });
         void setPreferredLanguage(leadId, next)
           .then(() => {
-            onChanged?.(next);
             notify({ tone: "saved", text: next === "es" ? "Spanish" : next === "en" ? "English" : "Language cleared" });
             router.refresh();
           })
           .catch((err: unknown) => {
             setCurrent(previous);
+            onChanged?.(previous);
             notify({ tone: "error", text: err instanceof Error ? err.message : "Could not save" });
           })
           .finally(() => setPending(false));
@@ -2608,6 +2615,13 @@ export function LeadDrawer({
 }) {
   const [tab, setTab] = useState<"overview" | "details" | "activity">("details");
   const [pickedHandlers, setPickedHandlers] = useState<{ leadId: string; screen: string | null; intake: string | null } | null>(null);
+  const [language, setLanguage] = useState<"en" | "es" | null>(row.preferredLanguage);
+  useEffect(() => {
+    setLanguage(row.preferredLanguage);
+    // The flag saves on its own. A refresh of the same lead must not put the old
+    // language back over the one just chosen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.id]);
   const handlers = pickedHandlers?.leadId === row.id ? pickedHandlers : null;
   const screenBy = handlers ? handlers.screen : row.screenBy;
   const intakeBy = handlers ? handlers.intake : row.intakeBy;
@@ -2648,7 +2662,7 @@ export function LeadDrawer({
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-navy">
-            <LanguageFlag leadId={row.id} value={row.preferredLanguage} size="lg" />
+            <LanguageFlag leadId={row.id} value={language} size="lg" onChanged={setLanguage} />
             {row.title}
             <IdentityMark status={row.identityStatus} />
           </h2>
@@ -2740,6 +2754,8 @@ export function LeadDrawer({
           startReferral={startReferral}
           screenBy={screenBy}
           intakeBy={intakeBy}
+          preferredLanguage={language}
+          onPreferredLanguage={setLanguage}
         />
       </div>
       {tab === "activity" ? <ActivityThread touches={touches} row={row} staff={staff} /> : null}

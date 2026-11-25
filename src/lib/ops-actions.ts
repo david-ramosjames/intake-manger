@@ -860,6 +860,38 @@ async function closeSignedLead(
   return true;
 }
 
+function handlerGapsOnly(gaps: string[]): boolean {
+  return gaps.length > 0 && gaps.every((gap) => gap === "Screening" || gap === "Intake");
+}
+
+/**
+ * The referral this file already recorded, unless staff has since pressed Reopen.
+ * An automatic reopen (the screening rule) does not erase that referral.
+ */
+async function priorNonPiClose(
+  supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
+  leadId: string,
+): Promise<"referred" | "declined" | null> {
+  const { data, error } = await supabase
+    .from("lead_events")
+    .select("event_type, payload")
+    .eq("lead_id", leadId)
+    .in("event_type", ["referred", "referral_declined", "declined", "lost_lead_reopened"])
+    .order("created_at", { ascending: false })
+    .limit(30);
+  if (error) throw new Error(error.message);
+  for (const event of data ?? []) {
+    const payload = (event.payload ?? {}) as { path?: string };
+    if (event.event_type === "lost_lead_reopened") {
+      if (payload.path === "reopen_closed_lead") return null;
+      continue;
+    }
+    if (event.event_type === "referred") return "referred";
+    if (event.event_type === "referral_declined" || event.event_type === "declined") return "declined";
+  }
+  return null;
+}
+
 /** Non-PI stays open until the file is complete and a referral has been recorded. */
 async function settleNonPiLead(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
@@ -877,11 +909,22 @@ async function settleNonPiLead(
     .select("id", { count: "exact", head: true })
     .eq("lead_id", leadId);
   if (sendError) throw new Error(sendError.message);
-  const recorded = (count ?? 0) > 0 || lead.lead_status === "Referred" || lead.close_reason === "referred" || lead.close_reason === "declined";
+  await stampLeadHandlers(supabase, { id: leadId, ...lead });
+  const prior = await priorNonPiClose(supabase, leadId);
+  const recorded =
+    (count ?? 0) > 0 ||
+    lead.lead_status === "Referred" ||
+    lead.close_reason === "referred" ||
+    lead.close_reason === "declined" ||
+    prior != null;
   const gaps = closeGaps(lead, "declined");
-  const finished = lead.close_reason === "declined" ? gaps.length === 0 : recorded && gaps.length === 0;
+  const alreadyClosed = lead.lead_status === "Lost" || lead.lead_status === "Referred" || Boolean(lead.close_reason);
+  // Screening was added after these files closed. That alone must not pull them back open.
+  const grandfather = handlerGapsOnly(gaps) && (alreadyClosed || prior != null);
+  const ready = gaps.length === 0 || grandfather;
+  const finished = lead.close_reason === "declined" ? ready : recorded && ready;
   if (!finished) {
-    if (lead.lead_status === "Lost" || lead.lead_status === "Referred" || lead.close_reason) {
+    if (alreadyClosed && !grandfather) {
       const { error: reopenError } = await supabase
         .from("leads")
         .update({
@@ -901,16 +944,31 @@ async function settleNonPiLead(
     }
     return false;
   }
-  if (lead.lead_status === "Referred" || lead.close_reason === "referred") {
-    if (lead.lead_status !== "Referred" || lead.close_reason !== "referred") {
-      await closeLead(supabase, leadId, actor, { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" });
-    } else {
+  const closeAs = prior === "declined" && (count ?? 0) === 0 ? "declined" : "referred";
+  if (closeAs === "declined") {
+    if (lead.lead_status === "Lost" && lead.close_reason === "declined") {
       await supabase.from("leads").update({ close_suggestion: null }).eq("id", leadId);
+      return true;
     }
+    await closeLead(supabase, leadId, actor, {
+      lead_status: "Lost",
+      close_reason: "declined",
+      event: "referral_declined",
+      path: "declined",
+      grandfatherHandlers: grandfather,
+    });
+  } else if (lead.lead_status === "Referred" && lead.close_reason === "referred") {
+    await supabase.from("leads").update({ close_suggestion: null }).eq("id", leadId);
     return true;
+  } else {
+    await closeLead(supabase, leadId, actor, {
+      lead_status: "Referred",
+      close_reason: "referred",
+      event: "referred",
+      path: "declined",
+      grandfatherHandlers: grandfather,
+    });
   }
-  if (lead.close_reason === "declined") return true;
-  await closeLead(supabase, leadId, actor, { lead_status: "Referred", close_reason: "referred", event: "referred", path: "declined" });
   if (lead.text_sequence_status === "active") {
     await supabase.from("leads").update({ text_sequence_status: "stopped" }).eq("id", leadId);
   }
@@ -2125,7 +2183,7 @@ async function closeLead(
   supabase: Awaited<ReturnType<typeof requireStaff>>["supabase"],
   leadId: string,
   email: string,
-  change: { lead_status: string; close_reason: string; event: string; path: ClosePath },
+  change: { lead_status: string; close_reason: string; event: string; path: ClosePath; grandfatherHandlers?: boolean },
 ) {
   const { data: lead, error: loadError } = await supabase
     .from("leads")
@@ -2134,7 +2192,7 @@ async function closeLead(
     .maybeSingle();
   if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
   await stampLeadHandlers(supabase, { id: leadId, ...lead });
-  assertCloseReady({ ...lead, closing_as: change.close_reason }, change.path);
+  assertCloseReady({ ...lead, closing_as: change.close_reason, grandfather_handlers: change.grandfatherHandlers }, change.path);
   const textsWereActive = (lead.text_sequence_status || "").toLowerCase() === "active";
   const { error } = await supabase
     .from("leads")

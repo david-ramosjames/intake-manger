@@ -4,7 +4,7 @@ import { WorkArrivedPills, WorkFilterLink, WorkFilterState, WorkMetric, WorkSear
 import { WorkListFilters } from "@/components/WorkListFilters";
 import { WorkQueue, type QueueRow } from "@/components/WorkQueue";
 import { leadForClose, leadHandlerNames } from "@/lib/call-grade";
-import { loadLeadCallJobs } from "@/lib/call-handler-lookup";
+import { loadLeadCallJobs, saveCallScreeners } from "@/lib/call-handler-lookup";
 import { leadEntry, loadStaffTouchedIds } from "@/lib/lead-entry";
 import { loadStaff, suggestClientName } from "@/lib/identity";
 import { isPlaceholderOwner } from "@/lib/talked-with";
@@ -618,6 +618,7 @@ export default async function LeadListPage({
     loadStaffTouchedIds(supabase, leadIds),
     loadReferralDeclinedIds(supabase, declinedIds),
   ]);
+  await saveCallScreeners(supabase, leads, callJobs, staff);
   const sendRows = (sendResult.data ?? []) as { lead_id: string; destination_id: string | null; attorney_name: string | null; created_at: string }[];
   sendRows.sort((a, b) => a.created_at.localeCompare(b.created_at));
   for (const send of sendRows) sentFirm.set(send.lead_id, (send.destination_id ? firmName.get(send.destination_id) : "") || send.attorney_name || "");

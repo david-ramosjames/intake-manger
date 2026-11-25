@@ -943,7 +943,8 @@ async function settleNonPiLead(
     .select("id", { count: "exact", head: true })
     .eq("lead_id", leadId);
   if (sendError) throw new Error(sendError.message);
-  await stampLeadHandlers(supabase, { id: leadId, ...lead });
+  const filed = { id: leadId, ...lead };
+  await stampLeadHandlers(supabase, filed);
   const prior = await priorNonPiClose(supabase, leadId);
   const recorded =
     (count ?? 0) > 0 ||
@@ -951,7 +952,7 @@ async function settleNonPiLead(
     lead.close_reason === "referred" ||
     lead.close_reason === "declined" ||
     prior != null;
-  const gaps = closeGaps(lead, "declined");
+  const gaps = closeGaps(filed, "declined");
   const alreadyClosed = lead.lead_status === "Lost" || lead.lead_status === "Referred" || Boolean(lead.close_reason);
   // Screening was added after these files closed. That alone must not pull them back open.
   const grandfather = handlerGapsOnly(gaps) && (alreadyClosed || prior != null);
@@ -1050,7 +1051,9 @@ async function closeUndesiredLead(
   if (lead.signed_case || lead.case_id) return false;
   if (lead.lead_status === "Signed" || lead.lead_status === "Promoted" || lead.lead_status === "Lost" || lead.lead_status === "Referred") return false;
   if (lead.desired_case !== false) return false;
-  if (closeGaps(lead, "declined").length) return false;
+  const filed = { id: leadId, ...lead };
+  await stampLeadHandlers(supabase, filed);
+  if (closeGaps(filed, "declined").length) return false;
   const outcome = await recordedReferralOutcome(supabase, leadId, lead);
   if (!outcome) return false;
   const referred = outcome === "sent";
@@ -1639,12 +1642,14 @@ export async function sendReferral(leadId: string, formData: FormData): Promise<
     declineTag,
   });
   if (stampError) return { error: stampError };
+  const filed = { id: leadId, ...lead };
+  await stampLeadHandlers(supabase, filed);
   const stamped = {
-    ...lead,
+    ...filed,
     desired_case: false as boolean,
     callrail_tags: declineTag
-      ? Array.from(new Set([...(lead.callrail_tags ?? []).filter((tag: string) => !tag.startsWith("DEC:")), declineTag]))
-      : lead.callrail_tags,
+      ? Array.from(new Set([...(filed.callrail_tags ?? []).filter((tag: string) => !tag.startsWith("DEC:")), declineTag]))
+      : filed.callrail_tags,
   };
   const gaps = closeGaps(stamped, "declined");
   if (gaps.length) return { error: referralBlockMessage(gaps), gaps };
@@ -1833,12 +1838,14 @@ export async function markReferralAlreadySent(leadId: string, formData: FormData
     declineTag,
   });
   if (stampError) return { error: stampError };
+  const filed = { id: leadId, ...lead };
+  await stampLeadHandlers(supabase, filed);
   const stamped = {
-    ...lead,
+    ...filed,
     desired_case: false as boolean,
     callrail_tags: declineTag
-      ? Array.from(new Set([...(lead.callrail_tags ?? []).filter((tag: string) => !tag.startsWith("DEC:")), declineTag]))
-      : lead.callrail_tags,
+      ? Array.from(new Set([...(filed.callrail_tags ?? []).filter((tag: string) => !tag.startsWith("DEC:")), declineTag]))
+      : filed.callrail_tags,
   };
   const gaps = closeGaps(stamped, "declined");
   if (gaps.length) return { error: referralBlockMessage(gaps), gaps };
@@ -2225,8 +2232,9 @@ async function closeLead(
     .eq("id", leadId)
     .maybeSingle();
   if (loadError || !lead) throw new Error(loadError?.message ?? "Lead not found");
-  await stampLeadHandlers(supabase, { id: leadId, ...lead });
-  assertCloseReady({ ...lead, closing_as: change.close_reason, grandfather_handlers: change.grandfatherHandlers }, change.path);
+  const filed = { id: leadId, ...lead };
+  await stampLeadHandlers(supabase, filed);
+  assertCloseReady({ ...filed, closing_as: change.close_reason, grandfather_handlers: change.grandfatherHandlers }, change.path);
   const textsWereActive = (lead.text_sequence_status || "").toLowerCase() === "active";
   const { error } = await supabase
     .from("leads")

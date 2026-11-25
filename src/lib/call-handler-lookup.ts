@@ -260,7 +260,7 @@ async function applyPhoneCallHandlers(
   }
 }
 
-/** Save screener and intake when the calls identify them and the lead is still blank. */
+/** Save the screener and intake person when the calls identify them and the lead is still blank. */
 export async function fillOutstandingCallHandlers(supabase: SupabaseClient): Promise<number> {
   const { data, error } = await supabase
     .from("leads")
@@ -337,4 +337,44 @@ export async function stampLeadHandlers(
     const { error } = await supabase.from("leads").update({ intake_by: named.intakeBy }).eq("id", lead.id).is("intake_by", null);
     if (!error) lead.intake_by = named.intakeBy;
   }
+}
+
+/** Write the call's screener onto leads that are still blank, so the form shows that name. */
+export async function saveCallScreeners(
+  supabase: SupabaseClient,
+  leads: {
+    id: string;
+    screen_by?: string | null;
+    intake_by?: string | null;
+    owner_name?: string | null;
+    arrival?: string | null;
+    consultation?: string | null;
+    consultation_date?: string | null;
+    qualified?: boolean | null;
+  }[],
+  jobs: Map<string, LeadCallJobs>,
+  staff: Awaited<ReturnType<typeof loadStaff>>,
+): Promise<void> {
+  const pending = leads.flatMap((lead) => {
+    if (lead.screen_by?.trim()) return [];
+    const name = leadHandlerNames({
+      screenStored: lead.screen_by,
+      intakeStored: lead.intake_by,
+      gradedScreen: jobs.get(lead.id)?.screenBy,
+      gradedIntake: jobs.get(lead.id)?.intakeBy,
+      ownerName: lead.owner_name,
+      arrival: lead.arrival,
+      consultation: lead.consultation,
+      consultationDate: lead.consultation_date,
+      qualified: lead.qualified,
+      staff,
+    }).screenBy;
+    return name ? [{ lead, name }] : [];
+  });
+  await Promise.all(
+    pending.map(async ({ lead, name }) => {
+      const { error } = await supabase.from("leads").update({ screen_by: name }).eq("id", lead.id).is("screen_by", null);
+      if (!error) lead.screen_by = name;
+    }),
+  );
 }

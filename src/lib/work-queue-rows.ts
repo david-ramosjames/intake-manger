@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
 import { leadForClose, leadHandlerNames } from "@/lib/call-grade";
-import { loadLeadCallJobs } from "@/lib/call-handler-lookup";
+import { loadLeadCallJobs, saveCallScreeners } from "@/lib/call-handler-lookup";
 import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";
@@ -440,6 +440,7 @@ export async function loadWorkQueueRows(
     leads.filter((lead) => lead.consultation_date),
     staff,
   );
+  await saveCallScreeners(supabase, leads, callJobs, staff);
 
   const destinations = ((destinationResult.data ?? []) as ReferralDestination[]).map((destination) => ({
     ...destination,

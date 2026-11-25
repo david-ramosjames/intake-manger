@@ -96,10 +96,11 @@ function consultedYes(lead: CloseReadyLead): boolean {
   return /^\d{4}-\d{2}-\d{2}/.test((lead.consultation_date ?? "").slice(0, 10));
 }
 
-/** Not a lead, and unresponsive after the 14-day chase, can close with screening blank. */
+/** Not a lead, and unresponsive after the 14-day chase, can close with screening blank. A signed file that already has the intake person is finished too. */
 function screeningOptional(lead: CloseReadyLead, path: ClosePath): boolean {
   if (path === "nonlead" || path === "chase") return true;
   if (lead.closing_as === "no_response" && (daysSinceArrival(lead) ?? 0) >= 14) return true;
+  if (path === "signed" && lead.signed_case === true && Boolean(lead.intake_by?.trim())) return true;
   return false;
 }
 

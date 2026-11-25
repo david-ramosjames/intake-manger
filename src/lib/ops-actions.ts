@@ -20,7 +20,7 @@ import { toE164 } from "./phone";
 import { isPracticeTestPhone } from "./test-phone";
 import { CLOSE_READY_COLUMNS, assertCloseReady, closeGaps, closeIncompleteMessage, referralCloseMessage, type ClosePath } from "./close-ready";
 import { caseTypeIsLead, isLeadOpen, isLostLeadReason, LOST_LEAD_REASONS } from "./funnel";
-import { stampLeadHandlers } from "./call-grade";
+import { stampLeadHandlers } from "./call-handler-lookup";
 import { isPlaceholderOwner } from "./talked-with";
 import { requireAdmin, requireStaff } from "./session";
 import { createSupabaseServiceClient } from "./supabase/service";

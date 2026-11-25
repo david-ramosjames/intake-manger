@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueRow } from "@/components/WorkQueue";
-import { leadHandlerNames, loadLeadCallJobs } from "@/lib/call-grade";
+import { leadHandlerNames } from "@/lib/call-grade";
+import { loadLeadCallJobs } from "@/lib/call-handler-lookup";
 import { consultationLabel, consultedChoice, contractOutstanding, contractSent, desiredWord, milestoneDesired, milestoneQualified, milestoneSigned, signatureNeedsConfirm } from "@/lib/desired";
 import { sequenceDayOne } from "@/lib/followup";
 import { loadStaff, suggestClientName, type StaffPerson } from "@/lib/identity";

@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enrollFollowUp } from "./followup";
 import { leadSourceFromText, looksLikePersonName, slackMessageUrl } from "./leads";
-import { inferPreferredLanguage } from "./preferred-language";
+import { callrailCallId, languageForCallrailId } from "./callrail";
+import { inferPreferredLanguage, type PreferredLanguage } from "./preferred-language";
 import { isPlaceholderOwner } from "./talked-with";
 import { parseSlackLead, leadIsClosed, slackPostDisposition } from "./slack-lead";
 import { LEAD_CHANNEL_ID, readSlackEmail } from "./slack";
@@ -28,6 +29,17 @@ type SlackEvent = {
   blocks?: unknown[];
   files?: SlackEmailFile[];
 };
+
+/** Slack cards name the tracker, not the landing page. Website Pool language is on the CallRail call. */
+async function languageForSlackLead(
+  text: string,
+  summary: string | null,
+): Promise<{ language: PreferredLanguage | null; callId: string | null }> {
+  const callId = callrailCallId(text)?.toUpperCase() ?? null;
+  const inferred = inferPreferredLanguage({ text, summary });
+  if (inferred || !callId) return { language: inferred, callId };
+  return { language: await languageForCallrailId(callId), callId };
+}
 
 function piece(value: unknown): string {
   if (typeof value === "string") return value;
@@ -124,7 +136,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
   if (parsed.phoneE164) {
     const { data: openLeads } = await supabase
       .from("leads")
-      .select("id, signed_case, case_id, lead_status, lead_name, phone, email, summary, owner_name, quo_link, callrail_tags, lead_source, preferred_language, test")
+      .select("id, signed_case, case_id, lead_status, lead_name, phone, email, summary, owner_name, quo_link, callrail_tags, callrail_call_id, lead_source, preferred_language, test")
       .eq("phone_e164", parsed.phoneE164)
       .order("created_at", { ascending: false })
       .limit(5);
@@ -154,10 +166,11 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
         const current = Array.isArray(open.callrail_tags) ? (open.callrail_tags as string[]) : [];
         patch.callrail_tags = [...new Set([...current, ...parsed.tags])];
       }
-      if (open.preferred_language !== "en" && open.preferred_language !== "es") {
-        const language = inferPreferredLanguage({ text, summary: parsed.summary });
-        if (language) patch.preferred_language = language;
+      const spoken = await languageForSlackLead(text, parsed.summary);
+      if (open.preferred_language !== "en" && open.preferred_language !== "es" && spoken.language) {
+        patch.preferred_language = spoken.language;
       }
+      if (!open.callrail_call_id && spoken.callId) patch.callrail_call_id = spoken.callId;
       if (Object.keys(patch).length) {
         await supabase.from("leads").update(patch).eq("id", open.id);
       }
@@ -173,7 +186,7 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
 
   const found = leadSourceFromText(text);
   const website = /website lead to contact|new case is submitted/i.test(text);
-  const preferredLanguage = inferPreferredLanguage({ text, summary: parsed.summary });
+  const spoken = await languageForSlackLead(text, parsed.summary);
   const { data: created, error } = await supabase
     .from("leads")
     .insert({
@@ -192,7 +205,8 @@ export async function captureSlackMessage(supabase: SupabaseClient, event: Slack
       case_type: parsed.caseType,
       summary: parsed.summary,
       case_detail: text.slice(0, 15000) || null,
-      preferred_language: preferredLanguage,
+      preferred_language: spoken.language,
+      callrail_call_id: spoken.callId,
       owner_name: isPlaceholderOwner(parsed.handledBy) ? null : parsed.handledBy,
       quo_link: parsed.quoLink,
       callrail_tags: parsed.tags,

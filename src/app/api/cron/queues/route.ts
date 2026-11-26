@@ -33,7 +33,9 @@ export async function POST(request: Request) {
   }
   try {
     const supabase = createSupabaseServiceClient();
-    // Call stats first so a later lead-merge failure cannot leave the dashboard behind the email.
+    // Website Pool language is a CallRail read. The call sync below can use the whole time limit, so this runs first.
+    const languages = await step("languages", () => fillOutstandingPreferredLanguages(supabase));
+    // Call stats run before the lead merge so a later failure cannot leave the dashboard behind the email.
     const inboxSync = await step("inboxSync", () => syncInboxCalls(supabase));
     const callLedger = await step("callLedger", async () => {
       let stored = 0;
@@ -51,7 +53,6 @@ export async function POST(request: Request) {
     const callAi = await step("callAi", () => backfillCallAiFlags(supabase, { limit: 40 }));
     const contracts = await step("contracts", () => syncContractsFromTexts(supabase));
     const sources = await step("sources", () => fillOutstandingLeadSources(supabase));
-    const languages = await step("languages", () => fillOutstandingPreferredLanguages(supabase));
     const handlers = await step("handlers", () => fillOutstandingCallHandlers(supabase));
     const talkedWith = await step("talkedWith", () => fillOutstandingTalkedWith(supabase));
     const parked = await step("parked", () => stopParkedFollowUps(supabase));

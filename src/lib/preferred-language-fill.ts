@@ -53,6 +53,10 @@ export async function fillPreferredLanguages(supabase: SupabaseClient, leads: La
     if (lead.preferred_language === "en" || lead.preferred_language === "es") continue;
     const callId = (lead.callrail_call_id?.trim() || callrailCallId(lead.case_detail) || "").toUpperCase();
     if (!callId) continue;
+    if (!lead.callrail_call_id) {
+      const { error } = await supabase.from("leads").update({ callrail_call_id: callId }).eq("id", lead.id).is("callrail_call_id", null);
+      if (!error) lead.callrail_call_id = callId;
+    }
     const language = await languageForCallrailId(callId);
     if (!language) continue;
     if (await saveLanguage(supabase, lead, language)) filled += 1;

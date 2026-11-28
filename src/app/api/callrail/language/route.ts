@@ -1,4 +1,4 @@
-import { languageForCallrailId } from "@/lib/callrail";
+import { languageForCallerPhone, languageForCallrailId } from "@/lib/callrail";
 
 export const runtime = "nodejs";
 
@@ -9,11 +9,16 @@ export async function POST(request: Request) {
   if (!token || header !== `Bearer ${token}`) {
     return new Response("unauthorized", { status: 401 });
   }
-  const body = (await request.json().catch(() => null)) as { call_id?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { call_id?: unknown; phone?: unknown } | null;
   const callId = typeof body?.call_id === "string" ? body.call_id.trim() : "";
-  if (!/^CAL[0-9a-f]+$/i.test(callId)) {
-    return Response.json({ language: null });
+  if (/^CAL[0-9a-f]+$/i.test(callId)) {
+    const language = await languageForCallrailId(callId);
+    return Response.json({ language, call_id: callId.toUpperCase() });
   }
-  const language = await languageForCallrailId(callId);
-  return Response.json({ language });
+  const phone = typeof body?.phone === "string" ? body.phone : "";
+  if (phone.replace(/\D/g, "").length < 10) {
+    return Response.json({ language: null, call_id: null });
+  }
+  const found = await languageForCallerPhone(phone);
+  return Response.json({ language: found.language, call_id: found.callId });
 }

@@ -124,6 +124,61 @@ export async function languageForCallrailId(callId: string): Promise<PreferredLa
   return languageFromPageViews(await fetchCallrailPageViews(id));
 }
 
+function isoDate(offsetDays: number): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
+}
+
+function metaFromCall(row: Record<string, unknown>, fallbackId: string): CallrailCallMeta {
+  return {
+    id: String(row.id || fallbackId),
+    source: String(row.source ?? "").trim() || null,
+    trackingName: String(row.source_name ?? row.tracking_number_name ?? row.name ?? "").trim() || null,
+    landingPageUrl: String(row.landing_page_url ?? "").trim() || null,
+    lastRequestedUrl: String(row.last_requested_url ?? "").trim() || null,
+    campaign: String(row.campaign ?? "").trim() || null,
+    utmCampaign: String(row.utm_campaign ?? "").trim() || null,
+    milestones: row.milestones ?? null,
+  };
+}
+
+/**
+ * The missed-call text has the caller's number and no CallRail id.
+ * The newest call for that number already has the landing page.
+ */
+export async function languageForCallerPhone(
+  phone: string,
+): Promise<{ language: PreferredLanguage | null; callId: string | null }> {
+  const digits = phone.replace(/\D/g, "").slice(-10);
+  if (digits.length < 10 || !callrailConfigured()) return { language: null, callId: null };
+  try {
+    const params = new URLSearchParams({
+      search: digits,
+      start_date: isoDate(-1),
+      end_date: isoDate(1),
+      per_page: "5",
+    });
+    const payload = await callrail(`/calls.json?${params.toString()}&fields=${CALL_LANGUAGE_FIELDS}`);
+    const calls = (Array.isArray(payload.calls) ? payload.calls : [])
+      .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
+      .sort((a, b) => {
+        const left = Date.parse(String(a.start_time ?? ""));
+        const right = Date.parse(String(b.start_time ?? ""));
+        return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
+      });
+    const newest = calls[0];
+    if (!newest) return { language: null, callId: null };
+    const callId = String(newest.id ?? "").trim().toUpperCase() || null;
+    const fromCall = languageFromCallrailCall(metaFromCall(newest, callId ?? ""));
+    if (fromCall) return { language: fromCall, callId };
+    if (!callId) return { language: null, callId: null };
+    return { language: languageFromPageViews(await fetchCallrailPageViews(callId)), callId };
+  } catch {
+    return { language: null, callId: null };
+  }
+}
+
 export async function fetchCallrailSources(startDate: string, endDate: string): Promise<Map<string, string>> {
   const sources = new Map<string, string>();
   for (let page = 1; page <= 20; page += 1) {
